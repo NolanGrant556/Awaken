@@ -58,13 +58,13 @@ type ToolRuntime struct {
 	toolSessionState  *tool.ToolSessionState
 	modelContentStore tool.ModelContentStore
 	modelProfileID    string
-	// runPlanService is the run-scoped root RunPlanService. It is assigned by
-	// the root Runner after the final run identity exists; child runtimes
-	// never receive one (root-only contract).
+	// runPlanService belongs to this Agent. The Runner binds it after its
+	// execution identity is known; children use separate mutable services.
 	runPlanService tool.RunPlanService
-	// archivedHistoryService is a root-Agent-only, read-only bridge to Runtime's
-	// protected thread store. The model receives thread identities, never paths.
+	// archivedHistoryService is a read-only bridge within current authority.
+	// The model receives thread identities, never protected store paths.
 	archivedHistoryService tool.ArchivedHistoryService
+	historyAncestors       []tool.HistoryRange
 }
 
 type ToolRuntimeConfig struct {
@@ -92,6 +92,7 @@ type ToolRuntimeConfig struct {
 	ToolSessionState       *tool.ToolSessionState
 	ModelContentStore      tool.ModelContentStore
 	ArchivedHistoryService tool.ArchivedHistoryService
+	HistoryAncestors       []tool.HistoryRange
 	// ComputerExecutor, when set, is wired into the Router so that
 	// computer_lane tools are dispatched to the run-bound Computer runtime.
 	// If nil, computer_lane calls fail closed with a needs-runtime outcome.
@@ -99,13 +100,17 @@ type ToolRuntimeConfig struct {
 }
 
 type ToolExecutionResult struct {
-	ToolCallID string
-	Name       string
-	Content    string
-	IsError    bool
-	Truncated  bool
-	Status     ToolExecutionStatus
-	ErrorCode  string
+	// fullContent survives display truncation until Runner persists an owned
+	// offload. It is never serialized as a second model or journal payload.
+	fullContent             string
+	terminalSubagentTaskIDs []string
+	ToolCallID              string
+	Name                    string
+	Content                 string
+	IsError                 bool
+	Truncated               bool
+	Status                  ToolExecutionStatus
+	ErrorCode               string
 	// SemanticArguments is the tool-owned, body-free argument projection used
 	// for durable semantic classification. It is populated only when a tool
 	// implements SemanticJournalSanitizer; raw model arguments never enter it.
@@ -215,6 +220,7 @@ func NewToolRuntimeWithConfig(sink EventSink, config ToolRuntimeConfig) *ToolRun
 		toolSessionState:       config.ToolSessionState,
 		modelContentStore:      config.ModelContentStore,
 		archivedHistoryService: config.ArchivedHistoryService,
+		historyAncestors:       append([]tool.HistoryRange(nil), config.HistoryAncestors...),
 		modelProfileID:         strings.TrimSpace(config.ModelProfileID),
 	}
 }
@@ -344,6 +350,15 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 			WorkspaceRoot:     rt.permissionContext.WorkspaceRoot,
 			ObservationSource: "runtime",
 		},
+	}
+	if call.Function.Name == askuser.ToolName && identity.AgentID != "" && identity.AgentID != "root" {
+		return finalizeToolResult(synthesizeUnsupportedToolResult(
+			result,
+			"ask_user_parent_required",
+			"子 Agent 不能直接向用户提问。请结束当前分配，把缺少的信息交给父 Agent；父 Agent 与用户确认后可以继续此任务。",
+			[]string{"return_missing_information_to_parent"},
+			[]tool.NextAction{{ID: "report_to_parent", Description: "Finish this assignment with the missing information so the parent can ask the user. Do not fabricate an answer or wait for a direct reply."}},
+		))
 	}
 
 	// Defense-in-depth: if this runtime belongs to a sub-agent, validate
@@ -524,6 +539,7 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 		rt.sink.Emit(MapACPEvent(e))
 	})
 	toolCtx = tool.ContextWithToolExecutionIdentity(toolCtx, identity)
+	toolCtx = tool.ContextWithAgentHistoryScope(toolCtx, tool.AgentHistoryScope{AgentID: identity.AgentID, Ancestors: rt.historyAncestors})
 	if rt.runPlanService != nil {
 		toolCtx = tool.ContextWithRunPlanService(toolCtx, rt.runPlanService)
 	}
@@ -696,6 +712,11 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 		return rt.executeTransformedTool(toolCtx, result, call, decision, permission, def, intent)
 	}
 
+	release, resourceErr := acquireReadResources(ctx, call)
+	if resourceErr != nil {
+		return finalizeToolResult(synthesizeAbortedToolResult(result, ToolDecision{Action: ToolDecisionAbort, Source: decision.Source, Reason: resourceErr.Error()}))
+	}
+	defer release()
 	rt.emitHostActivity(result, selectedTool, input)
 
 	output, trashedPaths, execOut, err := rt.routeToExecutor(toolCtx, result, intent, selectedTool, input)

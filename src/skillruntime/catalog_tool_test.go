@@ -221,6 +221,30 @@ func TestRecentInvocationSurvivesLocalReload(t *testing.T) {
 	}
 }
 
+func TestCatalogForkPreservesArgumentsWithoutTemplatePlaceholder(t *testing.T) {
+	root := t.TempDir()
+	writeCatalogSkill(t, root, "forked-arguments", "context: fork\nagent: general\n", "Read the input requested by the caller.")
+	registry := skills.NewSkillRegistry(nil)
+	registry.LoadFromSources(map[skills.SourceOrigin]string{skills.SourceUser: root})
+	arguments := "inputs/中文 文件.json\nKeep the original unchanged."
+	called := false
+	catalog := &CatalogTool{Registry: registry, Activator: NewActivator(registry, nil)}
+	ctx := WithChildAgentStarter(context.Background(), ChildAgentStarterFunc(func(_ context.Context, request SkillForkRequest) (SkillForkResult, error) {
+		called = true
+		if request.Arguments != arguments {
+			t.Fatalf("fork invocation arguments changed: %q", request.Arguments)
+		}
+		if strings.Contains(request.Body, arguments) {
+			t.Fatal("invocation arguments must remain separate from the package body")
+		}
+		return SkillForkResult{ChildID: "args-child", Content: "read confirmed"}, nil
+	}))
+	result, err := catalog.Invoke(ctx, SkillInvocationRequest{Skill: "forked-arguments", Args: arguments, Source: InvocationModel})
+	if err != nil || !called || result.ChildID != "args-child" {
+		t.Fatalf("fork handoff: %+v %v", result, err)
+	}
+}
+
 func TestLegacyFlatCommandActivatesOnDemand(t *testing.T) {
 	commands := t.TempDir()
 	if err := os.WriteFile(filepath.Join(commands, "review.md"), []byte("# Review\n\nInspect $ARGUMENTS now."), 0o644); err != nil {

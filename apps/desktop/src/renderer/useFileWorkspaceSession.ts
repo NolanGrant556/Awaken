@@ -1,36 +1,26 @@
-import { useEffect, useReducer, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   expandedFileComposerCompletionKey,
   shouldCollapseExpandedFileComposer,
   type ExpandedFileComposerIdleMode,
   type ExpandedFileComposerTrackedRun,
 } from "./ExpandedFileComposer";
-import {
-  activeArtifactPreviewTab,
-  artifactPreviewTabsReducer,
-  createArtifactPreviewTabsState,
-  type ArtifactPreviewTab,
-} from "./artifactPreviewTabs";
+import type { InspectorFileTab } from "./inspectorTabs";
+import type { useWorkbenchPanels } from "./useWorkbenchPanels";
 import type { WorkbenchNavSection } from "./desktopSurfacePresentation";
 import {
   ExpandedWorkspaceSurface,
   fileWorkspacePanelActionForState,
 } from "./desktopSurfacePresentation";
 import type { ProjectFileWorkspaceMode } from "./file-preview/FilePreviewHost";
-import {
-  activeProjectFileTab,
-  activeProjectFileTabSlot,
-  createProjectFileTabsState,
-  projectFileTabsReducer,
-  type ProjectFileTabSlot,
-  type ProjectFileWorkspaceTab,
-} from "./projectFileTabs";
+import type { ProjectFileWorkspaceTab } from "./projectFileTabs";
 import { workspaceLabelForPath } from "./projectWorkspace";
 import type { DeliverableFile } from "./run-narrative";
 import type { RuntimeViewState } from "./runtime/reducer";
 import { useProjectRegistry } from "./useProjectRegistry";
 import { useWorkbenchLayout } from "./useWorkbenchLayout";
 type Options = {
+  inspectorTabs: ReturnType<typeof useWorkbenchPanels>["inspectorTabs"];
   activeNavSection?: WorkbenchNavSection;
   runtimeState: Pick<
     RuntimeViewState,
@@ -72,6 +62,15 @@ export function useFileWorkspaceSession(options: Options) {
   } = options.registry;
 
   const [fileWorkspaceOpen, setFileWorkspaceOpen] = useState(false);
+  const { state: tabsState, dispatch: dispatchTabs } = options.inspectorTabs;
+  const selectedTab = tabsState.tabs.find(tab => tab.id === tabsState.activeId);
+  const subagentPanelActive = selectedTab?.kind === "subagent";
+  const inspectorChooserActive = tabsState.activeId === "chooser";
+  const previewTab = tabsState.tabs.find(tab => tab.id === tabsState.previewId);
+  const fileWorkspaceMode = previewTab?.kind === "file" ? previewTab.mode : "files";
+  function setFileWorkspaceMode(mode: ProjectFileWorkspaceMode): void {
+    dispatchTabs({ type: "set-mode", mode });
+  }
 
   const [fileWorkspaceExpanded, setFileWorkspaceExpanded] = useState(false);
 
@@ -84,31 +83,14 @@ export function useFileWorkspaceSession(options: Options) {
   const [expandedFileComposerTrackedRun, setExpandedFileComposerTrackedRun] =
     useState<ExpandedFileComposerTrackedRun>();
 
-  const [fileWorkspaceMode, setFileWorkspaceMode] =
-    useState<ProjectFileWorkspaceMode>("files");
-
-  const [fileWorkspaceTabsState, dispatchFileWorkspaceTabs] = useReducer(
-    projectFileTabsReducer,
-    undefined,
-    createProjectFileTabsState,
-  );
-
-  const [artifactPreviewTabsState, dispatchArtifactPreviewTabs] = useReducer(
-    artifactPreviewTabsReducer,
-    undefined,
-    createArtifactPreviewTabsState,
-  );
-
-  const deliverablePreview = activeArtifactPreviewTab(
-    artifactPreviewTabsState,
-  )?.selection;
+  const deliverablePreview = previewTab?.kind === "artifact" ? previewTab.selection : undefined;
 
   useEffect(() => {
-    dispatchFileWorkspaceTabs({ type: "reset" });
+    dispatchTabs({ type: "project", projectId: workspaceLabelProjectId ? backendProjectIdFor(workspaceLabelProjectId) : undefined });
   }, [workspaceLabelProjectId]);
 
   const fileWorkspaceExpandedActive =
-    fileWorkspaceOpen && fileWorkspaceExpanded;
+    fileWorkspaceOpen && fileWorkspaceExpanded && !subagentPanelActive && !inspectorChooserActive;
 
   const fileWorkspaceSurfaceActive =
     fileWorkspaceExpandedActive && expandedWorkspaceSurface === "file";
@@ -139,7 +121,7 @@ export function useFileWorkspaceSession(options: Options) {
   const expandedFileComposerHasDraft = options.hasDraft;
 
   const workbenchLayout = useWorkbenchLayout(
-    fileWorkspaceOpen,
+    fileWorkspaceOpen && !subagentPanelActive && !inspectorChooserActive,
     activeNavSection,
   );
 
@@ -165,7 +147,7 @@ export function useFileWorkspaceSession(options: Options) {
   } = workbenchLayout;
 
   const fileWorkspacePanelAction = fileWorkspacePanelActionForState({
-    fileWorkspaceOpen,
+    fileWorkspaceOpen: fileWorkspaceOpen && !subagentPanelActive && !inspectorChooserActive,
     fileWorkspaceExpanded: fileWorkspaceExpandedActive,
     inspectorCollapsed: inspectorPresentation.effectiveCollapsed,
   });
@@ -191,12 +173,18 @@ export function useFileWorkspaceSession(options: Options) {
     onBeforeFileOpen();
     setFileWorkspaceOpen(true);
     setExpandedWorkspaceSurface("file");
-    setFileWorkspaceMode(mode);
+    if (selectedTab?.kind !== "file" && selectedTab?.kind !== "artifact") {
+      dispatchTabs({ type: "add-file", projectId: fileWorkspaceProjectId, mode });
+    } else setFileWorkspaceMode(mode);
     setFileWorkspaceInspectorWidth(undefined);
     setInspectorCollapsed(false);
     if (inspectorCollapsedBeforeResponsiveRef.current !== null) {
       inspectorCollapsedBeforeResponsiveRef.current = false;
     }
+  }
+
+  function handleChooseInspectorEntry(mode: ProjectFileWorkspaceMode = "files"): void {
+    handleOpenFileWorkspace(mode);
   }
 
   function handleExpandFileWorkspace(): void {
@@ -222,6 +210,7 @@ export function useFileWorkspaceSession(options: Options) {
   }
 
   function handleShowFileWorkspaceSurface(): void {
+    onBeforeFileOpen();
     if (fileWorkspaceExpanded) {
       onBeforeFileExpand();
       setExpandedWorkspaceSurface("file");
@@ -256,113 +245,46 @@ export function useFileWorkspaceSession(options: Options) {
     setExpandedWorkspaceSurface("file");
     setExpandedFileComposerIdleMode("full");
     setExpandedFileComposerTrackedRun(undefined);
-    dispatchFileWorkspaceTabs({ type: "reset" });
-    dispatchArtifactPreviewTabs({ type: "reset" });
+    dispatchTabs({ type: "remove-workspace" });
     setFileWorkspaceInspectorWidth(undefined);
   }
 
   function handleOpenProjectFileTab(tab: ProjectFileWorkspaceTab): void {
-    dispatchArtifactPreviewTabs({ type: "deactivate" });
-    dispatchFileWorkspaceTabs({ type: "open", tab });
-    setFileWorkspaceMode(tab.mode);
+    dispatchTabs({ type: "open-file", tab });
     handleShowFileWorkspaceSurface();
   }
 
   function handleAddProjectFileTab(): void {
-    if (!fileWorkspaceProjectId) return;
-    dispatchArtifactPreviewTabs({ type: "deactivate" });
-    dispatchFileWorkspaceTabs({
-      type: "add",
-      projectId: fileWorkspaceProjectId,
-    });
-    setFileWorkspaceMode("files");
+    onBeforeFileOpen();
+    dispatchTabs({ type: "chooser" });
+    setInspectorCollapsed(false);
+    if (inspectorCollapsedBeforeResponsiveRef.current !== null) {
+      inspectorCollapsedBeforeResponsiveRef.current = false;
+    }
+  }
+
+  function handleActivateInspectorTab(id: string): void {
+    dispatchTabs({ type: "activate", id });
     handleShowFileWorkspaceSurface();
   }
-
-  function handleActivateProjectFileTab(slot: ProjectFileTabSlot): void {
-    dispatchArtifactPreviewTabs({ type: "deactivate" });
-    dispatchFileWorkspaceTabs({ type: "activate", tabId: slot.id });
-    setFileWorkspaceMode(slot.tab?.mode ?? "files");
-    handleShowFileWorkspaceSurface();
+  function handleActivateProjectFileTab(slot: InspectorFileTab): void {
+    handleActivateInspectorTab(slot.id);
   }
-
-  function handleCloseProjectFileTab(tabId: string): void {
-    const nextState = projectFileTabsReducer(fileWorkspaceTabsState, {
-      type: "close",
-      tabId,
-    });
-    dispatchFileWorkspaceTabs({ type: "close", tabId });
-    const nextProjectSlot = activeProjectFileTabSlot(nextState);
-    if (nextProjectSlot) {
-      setFileWorkspaceMode(nextProjectSlot.tab?.mode ?? "files");
-      return;
-    }
-    const previousArtifactTab = artifactPreviewTabsState.tabs.at(-1);
-    if (previousArtifactTab) {
-      dispatchArtifactPreviewTabs({
-        type: "activate",
-        tabId: previousArtifactTab.id,
-      });
-    }
-    setFileWorkspaceMode("files");
-  }
-
-  function handleActivateArtifactPreviewTab(tab: ArtifactPreviewTab): void {
-    dispatchArtifactPreviewTabs({ type: "activate", tabId: tab.id });
-    setFileWorkspaceMode("files");
-    handleShowFileWorkspaceSurface();
-  }
-
-  function handleCloseArtifactPreviewTab(tabId: string): void {
-    const closingIndex = artifactPreviewTabsState.tabs.findIndex(
-      (tab) => tab.id === tabId,
-    );
-    const closingActive = artifactPreviewTabsState.activeTabId === tabId;
-    const hasRightArtifact =
-      closingIndex >= 0 &&
-      Boolean(artifactPreviewTabsState.tabs[closingIndex + 1]);
-    const firstProjectSlot = fileWorkspaceTabsState.tabs.find(
-      (slot) => slot.projectId === fileWorkspaceProjectId,
-    );
-    const nextState = artifactPreviewTabsReducer(artifactPreviewTabsState, {
-      type: "close",
-      tabId,
-    });
-    dispatchArtifactPreviewTabs({ type: "close", tabId });
-    if (closingActive && !hasRightArtifact && firstProjectSlot) {
-      dispatchArtifactPreviewTabs({ type: "deactivate" });
-      dispatchFileWorkspaceTabs({
-        type: "activate",
-        tabId: firstProjectSlot.id,
-      });
-      setFileWorkspaceMode(firstProjectSlot.tab?.mode ?? "files");
-      return;
-    }
-    if (!activeArtifactPreviewTab(nextState)) {
-      setFileWorkspaceMode(
-        activeProjectFileTab(fileWorkspaceTabsState)?.mode ?? "files",
-      );
-    }
-  }
+  function handleCloseProjectFileTab(id: string): void { dispatchTabs({ type: "close", id }); }
 
   function handleOpenDeliverablePreview(
     file: Pick<DeliverableFile, "artifactId" | "runId" | "title" | "fileType">,
     threadId: string,
   ): void {
-    dispatchArtifactPreviewTabs({
-      type: "open",
-      selection: {
-        threadId,
-        runId: file.runId,
-        artifactId: file.artifactId,
-        title: file.title,
-        mediaKind:
-          file.fileType === "image" || file.fileType === "video"
-            ? file.fileType
-            : undefined,
-      },
-    });
-    handleOpenFileWorkspace("files");
+    dispatchTabs({ type: "open-artifact", selection: {
+      threadId, runId: file.runId, artifactId: file.artifactId, title: file.title,
+      mediaKind: file.fileType === "image" || file.fileType === "video" ? file.fileType : undefined,
+    } });
+    onBeforeFileOpen();
+    setFileWorkspaceOpen(true);
+    setExpandedWorkspaceSurface("file");
+    setInspectorCollapsed(false);
+    if (inspectorCollapsedBeforeResponsiveRef.current !== null) inspectorCollapsedBeforeResponsiveRef.current = false;
   }
 
   const fileWorkspaceProjectId = workspaceLabelProjectId
@@ -381,38 +303,16 @@ export function useFileWorkspaceSession(options: Options) {
       }))
     : [];
 
-  const activeFileWorkspaceTabSlotCandidate = activeProjectFileTabSlot(
-    fileWorkspaceTabsState,
-  );
-
-  const activeFileWorkspaceTabCandidate = activeProjectFileTab(
-    fileWorkspaceTabsState,
-  );
-
-  const activeFileWorkspaceTab =
-    activeFileWorkspaceTabCandidate?.projectId === fileWorkspaceProjectId
-      ? activeFileWorkspaceTabCandidate
-      : undefined;
-
-  const activeFileWorkspaceTabSlot =
-    activeFileWorkspaceTabSlotCandidate?.projectId === fileWorkspaceProjectId
-      ? activeFileWorkspaceTabSlotCandidate
-      : undefined;
-
-  const visibleFileWorkspaceTabSlots = fileWorkspaceTabsState.tabs.filter(
-    (slot) => slot.projectId === fileWorkspaceProjectId,
-  );
-
-  const showFileWorkspacePlaceholder =
-    artifactPreviewTabsState.tabs.length === 0 &&
-    visibleFileWorkspaceTabSlots.length === 0;
-
-  const fileWorkspaceTabsAreActive =
-    !fileWorkspaceExpandedActive || expandedWorkspaceSurface === "file";
-  useEffect(() => {
-    dispatchArtifactPreviewTabs({ type: "reset" });
-  }, [runtimeState.activeThreadId]);
+  const activeFileWorkspaceTabSlot = previewTab?.kind === "file" ? previewTab : undefined;
+  const activeFileWorkspaceTab = activeFileWorkspaceTabSlot?.tab;
+  const visibleFileWorkspaceTabSlots = tabsState.tabs.filter((tab): tab is InspectorFileTab => tab.kind === "file");
+  const showFileWorkspacePlaceholder = tabsState.tabs.length === 0;
+  const fileWorkspaceTabsAreActive = !subagentPanelActive && !inspectorChooserActive && (!fileWorkspaceExpandedActive || expandedWorkspaceSurface === "file");
   return {
+    inspectorTabs: options.inspectorTabs,
+    handleActivateInspectorTab,
+    inspectorChooserActive,
+    handleChooseInspectorEntry,
     fileWorkspaceOpen,
     setFileWorkspaceOpen,
     fileWorkspaceExpanded,
@@ -425,10 +325,6 @@ export function useFileWorkspaceSession(options: Options) {
     setExpandedFileComposerTrackedRun,
     fileWorkspaceMode,
     setFileWorkspaceMode,
-    fileWorkspaceTabsState,
-    dispatchFileWorkspaceTabs,
-    artifactPreviewTabsState,
-    dispatchArtifactPreviewTabs,
     deliverablePreview,
     fileWorkspaceExpandedActive,
     fileWorkspaceSurfaceActive,
@@ -470,14 +366,10 @@ export function useFileWorkspaceSession(options: Options) {
     handleAddProjectFileTab,
     handleActivateProjectFileTab,
     handleCloseProjectFileTab,
-    handleActivateArtifactPreviewTab,
-    handleCloseArtifactPreviewTab,
     handleOpenDeliverablePreview,
     fileWorkspaceProjectId,
     fileWorkspaceProjectLabel,
     fileWorkspaceFolders,
-    activeFileWorkspaceTabSlotCandidate,
-    activeFileWorkspaceTabCandidate,
     activeFileWorkspaceTab,
     activeFileWorkspaceTabSlot,
     visibleFileWorkspaceTabSlots,

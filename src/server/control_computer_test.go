@@ -187,6 +187,38 @@ func TestComputerControlSessionLifecycle(t *testing.T) {
 		t.Fatalf("expected 200 for session status, got %d: %s", rr.Code, rr.Body.String())
 	}
 
+	// A stale handoff must not return whichever session currently owns the lease.
+	cr, err := service.ComputerRuntime(run.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, err := cr.OpenSession(context.Background(), computer.CaptureDesktop, computer.TargetRef{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cr.Takeover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, sessionID := range []string{"stale-session", string(active.SessionID)} {
+		req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/v1/control/computer/sessions/%s/return", run.RunID), strings.NewReader(fmt.Sprintf(`{"session_id":%q}`, sessionID)))
+		req.Header.Set("Authorization", "Bearer test-token")
+		rr = httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		if sessionID == "stale-session" {
+			if rr.Code == http.StatusOK {
+				t.Fatal("stale handoff was accepted")
+			}
+			if current, _ := cr.Session(); current.State != computer.SessionTakenOver {
+				t.Fatal("stale handoff changed active session")
+			}
+		} else if rr.Code != http.StatusOK {
+			t.Fatalf("original session return failed: %d %s", rr.Code, rr.Body.String())
+		}
+	}
+	if err := cr.Close(context.Background(), "test_reset"); err != nil {
+		t.Fatal(err)
+	}
+
 	// Terminate should succeed even without an open session.
 	req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/v1/control/computer/sessions/%s/terminate", run.RunID), nil)
 	req.Header.Set("Authorization", "Bearer test-token")

@@ -1,0 +1,500 @@
+{
+  "date": "2026-09-10",
+  "scope": "主任务拥有全部后代的执行生命周期",
+  "desktop": {
+    "entry": "npm run close:desktop && npm run open:desktop",
+    "platform": "macOS arm64",
+    "electron_pid": 59055,
+    "core_pid": 59332,
+    "project": "协作优化验收0909",
+    "thread_id": "thread_1788973222914447000_2",
+    "model": "k3",
+    "effort": "high",
+    "result": "passed",
+    "run_ids": [
+      "run_1788973222914443000_1",
+      "run_1788973360678557000_3",
+      "run_1788973466050111000_4"
+    ],
+    "scenarios": {
+      "wait_and_summarize": {
+        "child_terminal_sequences": [
+          87,
+          111
+        ],
+        "root_terminal_sequence": 124
+      },
+      "computer_handoff": {
+        "root_release_sequence": 78,
+        "child_open_sequence": 97
+      },
+      "stop_tree": {
+        "child_terminal_sequences": [
+          193,
+          194
+        ],
+        "root_terminal_sequence": 195,
+        "trigger": "点击主 Composer 停止运行"
+      },
+      "next_round": {
+        "answer": "TREE-918-NEXT",
+        "no_child_revival": true
+      }
+    }
+  },
+  "background_command_cleanup": [
+    {
+      "tool_result_seq": 70,
+      "subagent_task_id": "subtask_e42741506d0ace1e0fee9331",
+      "status_path": "/Users/nolangrant/Library/Caches/Awaken/tasks/thread_1788973222914447000_2/tool_3ttqeORojNE7Wr6y3931vZ4q/status.json",
+      "status": {
+        "task_id": "tool_3ttqeORojNE7Wr6y3931vZ4q",
+        "thread_id": "thread_1788973222914447000_2",
+        "state": "cancelled",
+        "command": "sleep 120",
+        "shell": "/bin/zsh",
+        "cwd": "/private/tmp/awaken-optimization-acceptance-20260909",
+        "pid": 59970,
+        "exit_code": -1,
+        "cancelled": true,
+        "started_at": "2026-09-09T17:01:15.966347Z",
+        "finished_at": "2026-09-09T17:01:19.849162Z"
+      }
+    }
+  ],
+  "journal": {
+    "path": "/Users/nolangrant/.awaken/store-generations/gen-001/sessions/thread_1788973222914447000_2/journal.jsonl",
+    "sha256": "87de34b13f61d9544602e5d9193f328394211babfd149e46c11dcbce69d091e9",
+    "records": 211,
+    "selected_events": [
+      {
+        "seq": 6,
+        "kind": "run_started",
+        "timestamp": "2026-09-09T17:00:23.687539Z",
+        "run_id": "run_1788973222914443000_1",
+        "payload": {}
+      },
+      {
+        "seq": 23,
+        "kind": "computer_session_opened",
+        "timestamp": "2026-09-09T17:00:46.976728Z",
+        "run_id": "run_1788973222914443000_1",
+        "payload": {
+          "session_id": "sess_17d2bd5107c85e52414c072f6b5ba6cb",
+          "binding_id": "bind_2ee213a2074b136a7c5cd4dca11dd9f9",
+          "resource_key": "host://local/desktop"
+        }
+      },
+      {
+        "seq": 24,
+        "kind": "computer_observation_captured",
+        "timestamp": "2026-09-09T17:00:47.493605Z",
+        "run_id": "run_1788973222914443000_1",
+        "payload": {
+          "session_id": "sess_17d2bd5107c85e52414c072f6b5ba6cb",
+          "has_screenshot": true,
+          "observation_id": "obs_ec478292b0cc927cb492ee1b0954b242"
+        }
+      },
+      {
+        "seq": 35,
+        "kind": "subagent_spawned",
+        "timestamp": "2026-09-09T17:01:07.684104Z",
+        "run_id": "run_1788973222914443000_1",
+        "payload": {
+          "agent_id": "subagent_09234dd25ea835f401aaac47",
+          "parent_agent_id": "root",
+          "task_id": "subtask_e7cf8fc777ddae5b53e849d9",
+          "attempt_id": "attempt_0a13a2a070c8bd85ef229263",
+          "status": "queued",
+          "description": "等待桌面"
+        }
+      },
+      {
+        "seq": 36,
+        "kind": "subagent_status_changed",
+        "timestamp": "2026-09-09T17:01:07.688492Z",
+        "run_id": "run_1788973222914443000_1",
+        "payload": {
+          "agent_id": "subagent_09234dd25ea835f401aaac47",
+          "parent_agent_id": "root",
+          "task_id": "subtask_e7cf8fc777ddae5b53e849d9",
+          "attempt_id": "attempt_0a13a2a070c8bd85ef229263",
+          "status": "running",
+          "description": "等待桌面"
+        }
+      },
+      {
+        "seq": 42,
+        "kind": "subagent_spawned",
+        "timestamp": "2026-09-09T17:01:07.764667Z",
+        "run_id": "run_1788973222914443000_1",
+        "payload": {
+          "agent_id": "subagent_262324bbdad1a1b43b04bc2d",
+          "parent_agent_id": "root",
+          "task_id": "subtask_e42741506d0ace1e0fee9331",
+          "attempt_id": "attempt_a9e4310105da8798c8f75422",
+          "status": "queued",
+          "description": "后台命令清理"
+        }
+      },
+      {
+        "seq": 44,
+        "kind": "subagent_status_changed",
+        "timestamp": "2026-09-09T17:01:07.769679Z",
+        "run_id": "run_1788973222914443000_1",
+        "payload": {
+          "agent_id": "subagent_262324bbdad1a1b43b04bc2d",
+          "parent_agent_id": "root",
+          "task_id": "subtask_e42741506d0ace1e0fee9331",
+          "attempt_id": "attempt_a9e4310105da8798c8f75422",
+          "status": "running",
+          "description": "后台命令清理"
+        }
+      },
+      {
+        "seq": 78,
+        "kind": "computer_session_closed",
+        "timestamp": "2026-09-09T17:01:19.563156Z",
+        "run_id": "run_1788973222914443000_1",
+        "payload": {
+          "session_id": "sess_17d2bd5107c85e52414c072f6b5ba6cb",
+          "reason": "waiting_for_delegated_work"
+        }
+      },
+      {
+        "seq": 87,
+        "kind": "subagent_terminal",
+        "timestamp": "2026-09-09T17:01:19.858851Z",
+        "run_id": "run_1788973222914443000_1",
+        "payload": {
+          "agent_id": "subagent_262324bbdad1a1b43b04bc2d",
+          "parent_agent_id": "root",
+          "task_id": "subtask_e42741506d0ace1e0fee9331",
+          "attempt_id": "attempt_a9e4310105da8798c8f75422",
+          "status": "completed",
+          "description": "后台命令清理"
+        }
+      },
+      {
+        "seq": 97,
+        "kind": "computer_session_opened",
+        "timestamp": "2026-09-09T17:01:35.901425Z",
+        "run_id": "run_1788973222914443000_1",
+        "payload": {
+          "agent_id": "subagent_09234dd25ea835f401aaac47",
+          "parent_agent_id": "root",
+          "subagent_task_id": "subtask_e7cf8fc777ddae5b53e849d9",
+          "attempt_id": "attempt_0a13a2a070c8bd85ef229263",
+          "session_id": "sess_e7e588f9ab78aa12cbe15c30f9813edc",
+          "binding_id": "bind_737ee5a79d1594c961cdd729add3d76d",
+          "resource_key": "host://local/desktop"
+        }
+      },
+      {
+        "seq": 98,
+        "kind": "computer_observation_captured",
+        "timestamp": "2026-09-09T17:01:36.346357Z",
+        "run_id": "run_1788973222914443000_1",
+        "payload": {
+          "agent_id": "subagent_09234dd25ea835f401aaac47",
+          "parent_agent_id": "root",
+          "subagent_task_id": "subtask_e7cf8fc777ddae5b53e849d9",
+          "attempt_id": "attempt_0a13a2a070c8bd85ef229263",
+          "session_id": "sess_e7e588f9ab78aa12cbe15c30f9813edc",
+          "has_screenshot": true,
+          "observation_id": "obs_9584f9c162c6b498d5cd5db270d12916"
+        }
+      },
+      {
+        "seq": 110,
+        "kind": "computer_session_closed",
+        "timestamp": "2026-09-09T17:01:41.028367Z",
+        "run_id": "run_1788973222914443000_1",
+        "payload": {
+          "agent_id": "subagent_09234dd25ea835f401aaac47",
+          "parent_agent_id": "root",
+          "subagent_task_id": "subtask_e7cf8fc777ddae5b53e849d9",
+          "attempt_id": "attempt_0a13a2a070c8bd85ef229263",
+          "session_id": "sess_e7e588f9ab78aa12cbe15c30f9813edc",
+          "reason": "agent_attempt_ended"
+        }
+      },
+      {
+        "seq": 111,
+        "kind": "subagent_terminal",
+        "timestamp": "2026-09-09T17:01:41.041848Z",
+        "run_id": "run_1788973222914443000_1",
+        "payload": {
+          "agent_id": "subagent_09234dd25ea835f401aaac47",
+          "parent_agent_id": "root",
+          "task_id": "subtask_e7cf8fc777ddae5b53e849d9",
+          "attempt_id": "attempt_0a13a2a070c8bd85ef229263",
+          "status": "completed",
+          "description": "等待桌面"
+        }
+      },
+      {
+        "seq": 124,
+        "kind": "run_terminal",
+        "timestamp": "2026-09-09T17:01:52.858508Z",
+        "run_id": "run_1788973222914443000_1",
+        "payload": {
+          "status": "finished",
+          "terminal_reason": "completed"
+        }
+      },
+      {
+        "seq": 128,
+        "kind": "run_started",
+        "timestamp": "2026-09-09T17:02:41.283338Z",
+        "run_id": "run_1788973360678557000_3",
+        "payload": {}
+      },
+      {
+        "seq": 138,
+        "kind": "subagent_spawned",
+        "timestamp": "2026-09-09T17:02:54.550604Z",
+        "run_id": "run_1788973360678557000_3",
+        "payload": {
+          "agent_id": "subagent_092de4dcd23b1276a5900988",
+          "parent_agent_id": "root",
+          "task_id": "subtask_59058427a532b9170441cc11",
+          "attempt_id": "attempt_4fe7675e6ca7f19a06a896e2",
+          "status": "queued",
+          "description": "树内父Agent"
+        }
+      },
+      {
+        "seq": 139,
+        "kind": "subagent_status_changed",
+        "timestamp": "2026-09-09T17:02:54.556205Z",
+        "run_id": "run_1788973360678557000_3",
+        "payload": {
+          "agent_id": "subagent_092de4dcd23b1276a5900988",
+          "parent_agent_id": "root",
+          "task_id": "subtask_59058427a532b9170441cc11",
+          "attempt_id": "attempt_4fe7675e6ca7f19a06a896e2",
+          "status": "running",
+          "description": "树内父Agent"
+        }
+      },
+      {
+        "seq": 161,
+        "kind": "subagent_spawned",
+        "timestamp": "2026-09-09T17:03:09.477139Z",
+        "run_id": "run_1788973360678557000_3",
+        "payload": {
+          "agent_id": "subagent_d64a4a46a203aae846582daa",
+          "parent_agent_id": "subagent_092de4dcd23b1276a5900988",
+          "task_id": "subtask_750eea79f9b5e941daef68bb",
+          "attempt_id": "attempt_2fd66262188a3b64d18e355d",
+          "status": "queued",
+          "description": "树内孙Agent"
+        }
+      },
+      {
+        "seq": 162,
+        "kind": "subagent_status_changed",
+        "timestamp": "2026-09-09T17:03:09.481634Z",
+        "run_id": "run_1788973360678557000_3",
+        "payload": {
+          "agent_id": "subagent_d64a4a46a203aae846582daa",
+          "parent_agent_id": "subagent_092de4dcd23b1276a5900988",
+          "task_id": "subtask_750eea79f9b5e941daef68bb",
+          "attempt_id": "attempt_2fd66262188a3b64d18e355d",
+          "status": "running",
+          "description": "树内孙Agent"
+        }
+      },
+      {
+        "seq": 185,
+        "kind": "subagent_status_changed",
+        "timestamp": "2026-09-09T17:04:03.380574Z",
+        "run_id": "run_1788973360678557000_3",
+        "payload": {
+          "agent_id": "subagent_d64a4a46a203aae846582daa",
+          "parent_agent_id": "subagent_092de4dcd23b1276a5900988",
+          "task_id": "subtask_750eea79f9b5e941daef68bb",
+          "attempt_id": "attempt_2fd66262188a3b64d18e355d",
+          "status": "cancelling",
+          "description": "树内孙Agent"
+        }
+      },
+      {
+        "seq": 186,
+        "kind": "subagent_status_changed",
+        "timestamp": "2026-09-09T17:04:03.380616Z",
+        "run_id": "run_1788973360678557000_3",
+        "payload": {
+          "agent_id": "subagent_092de4dcd23b1276a5900988",
+          "parent_agent_id": "root",
+          "task_id": "subtask_59058427a532b9170441cc11",
+          "attempt_id": "attempt_4fe7675e6ca7f19a06a896e2",
+          "status": "cancelling",
+          "description": "树内父Agent"
+        }
+      },
+      {
+        "seq": 189,
+        "kind": "subagent_status_changed",
+        "timestamp": "2026-09-09T17:04:03.385326Z",
+        "run_id": "run_1788973360678557000_3",
+        "payload": {
+          "agent_id": "subagent_d64a4a46a203aae846582daa",
+          "parent_agent_id": "subagent_092de4dcd23b1276a5900988",
+          "task_id": "subtask_750eea79f9b5e941daef68bb",
+          "attempt_id": "attempt_2fd66262188a3b64d18e355d",
+          "status": "cancelling",
+          "description": "树内孙Agent"
+        }
+      },
+      {
+        "seq": 191,
+        "kind": "subagent_status_changed",
+        "timestamp": "2026-09-09T17:04:03.390441Z",
+        "run_id": "run_1788973360678557000_3",
+        "payload": {
+          "agent_id": "subagent_d64a4a46a203aae846582daa",
+          "parent_agent_id": "subagent_092de4dcd23b1276a5900988",
+          "task_id": "subtask_750eea79f9b5e941daef68bb",
+          "attempt_id": "attempt_2fd66262188a3b64d18e355d",
+          "status": "cancelling",
+          "description": "树内孙Agent"
+        }
+      },
+      {
+        "seq": 192,
+        "kind": "subagent_status_changed",
+        "timestamp": "2026-09-09T17:04:03.390461Z",
+        "run_id": "run_1788973360678557000_3",
+        "payload": {
+          "agent_id": "subagent_092de4dcd23b1276a5900988",
+          "parent_agent_id": "root",
+          "task_id": "subtask_59058427a532b9170441cc11",
+          "attempt_id": "attempt_4fe7675e6ca7f19a06a896e2",
+          "status": "cancelling",
+          "description": "树内父Agent"
+        }
+      },
+      {
+        "seq": 193,
+        "kind": "subagent_terminal",
+        "timestamp": "2026-09-09T17:04:03.395689Z",
+        "run_id": "run_1788973360678557000_3",
+        "payload": {
+          "agent_id": "subagent_d64a4a46a203aae846582daa",
+          "parent_agent_id": "subagent_092de4dcd23b1276a5900988",
+          "task_id": "subtask_750eea79f9b5e941daef68bb",
+          "attempt_id": "attempt_2fd66262188a3b64d18e355d",
+          "status": "cancelled",
+          "description": "树内孙Agent"
+        }
+      },
+      {
+        "seq": 194,
+        "kind": "subagent_terminal",
+        "timestamp": "2026-09-09T17:04:03.407185Z",
+        "run_id": "run_1788973360678557000_3",
+        "payload": {
+          "agent_id": "subagent_092de4dcd23b1276a5900988",
+          "parent_agent_id": "root",
+          "task_id": "subtask_59058427a532b9170441cc11",
+          "attempt_id": "attempt_4fe7675e6ca7f19a06a896e2",
+          "status": "cancelled",
+          "description": "树内父Agent"
+        }
+      },
+      {
+        "seq": 195,
+        "kind": "run_terminal",
+        "timestamp": "2026-09-09T17:04:03.41262Z",
+        "run_id": "run_1788973360678557000_3",
+        "payload": {
+          "status": "cancelled",
+          "terminal_reason": "cancelled"
+        }
+      },
+      {
+        "seq": 199,
+        "kind": "run_started",
+        "timestamp": "2026-09-09T17:04:26.639484Z",
+        "run_id": "run_1788973466050111000_4",
+        "payload": {}
+      },
+      {
+        "seq": 210,
+        "kind": "run_terminal",
+        "timestamp": "2026-09-09T17:04:32.774416Z",
+        "run_id": "run_1788973466050111000_4",
+        "payload": {
+          "status": "finished",
+          "terminal_reason": "completed"
+        }
+      }
+    ]
+  },
+  "automated": {
+    "desktop_tests": {
+      "files": 151,
+      "tests": 1563,
+      "result": "passed"
+    },
+    "typecheck": "passed",
+    "desktop_build": "passed",
+    "core_final_build": "passed",
+    "go_race_packages": [
+      "./src/subagentruntime",
+      "./src/agentcore",
+      "./src/runtime",
+      "./src/server",
+      "./src/tools/bash",
+      "./src/tools/subagent"
+    ],
+    "go_race_result": "passed",
+    "docs_and_diff": "passed"
+  },
+  "limits": [
+    "排队项取消、spawn 持久化竞争、忽略取消的工具及缓慢资源清理由确定性自动化验证；本次 Desktop 实测使用可取消的 sleep。",
+    "仅覆盖 macOS managed Desktop 与当前 k3 配置；其他平台和供应商未执行本轮实测。",
+    "旧版允许 subagent 跨主回复继续的证据保留为历史，不再表示当前行为。"
+  ],
+  "files": [
+    {
+      "path": "new-round-state.txt",
+      "sha256": "a57aba79f1e03833f1d7854bddd577b78d78f4f65ac05256db2412f67dfaf05f"
+    },
+    {
+      "path": "parent-completed.png",
+      "sha256": "834b424eb23e9095260882764f8bf67499a74899cab6dad7524105a5d53e2858"
+    },
+    {
+      "path": "parent-waiting.png",
+      "sha256": "8292044f19697f3815bb5315fb19242fc6d2f1e7760ffbe461b7338cbc70ab22"
+    },
+    {
+      "path": "stop-tree-state.txt",
+      "sha256": "9a9538277ada92172e61ace4c502d02b8a036841b51b519538258718d63f56f7"
+    },
+    {
+      "path": "tree-stopped.png",
+      "sha256": "231793e834e1a6beeb71698913c6810b1bd1a3129b6da9f8afab7a1aa4ac7f40"
+    }
+  ],
+  "text_fixture_normalization": {
+    "date": "2026-09-10",
+    "operation": "移除两份 AX 导出文本的行尾空格与制表符；保留行顺序和全部可见文本。不是新一轮验收。",
+    "files": [
+      {
+        "path": "new-round-state.txt",
+        "original_sha256": "60ab374e1753137b3f8217ca73f636b11e4e4b234cab55aae262ec61fb179634",
+        "normalized_sha256": "a57aba79f1e03833f1d7854bddd577b78d78f4f65ac05256db2412f67dfaf05f"
+      },
+      {
+        "path": "stop-tree-state.txt",
+        "original_sha256": "60284313fa5003550f5000bba68fb95bd299846bddd921371839f6357e964e67",
+        "normalized_sha256": "9a9538277ada92172e61ace4c502d02b8a036841b51b519538258718d63f56f7"
+      }
+    ]
+  }
+}

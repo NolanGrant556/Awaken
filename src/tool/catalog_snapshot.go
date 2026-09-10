@@ -219,6 +219,26 @@ func (s RunToolAvailabilitySnapshot) Clone() RunToolAvailabilitySnapshot {
 	return clone
 }
 
+// WithComputerState rebinds only the pinned Computer providers to an Agent's
+// own device binding. It never observes newly registered tools or providers.
+func (s RunToolAvailabilitySnapshot) WithComputerState(environment ExecutionEnvironmentSnapshot, enabled bool) (RunToolAvailabilitySnapshot, ExecutionEnvironmentSnapshot) {
+	environment = environment.Clone()
+	environment.ComputerEnabled = enabled
+	environment.SnapshotID = environmentSnapshotIdentity(environment)
+	clone := s.Clone()
+	clone.EnvironmentSnapshotID = environment.SnapshotID
+	for name, entry := range clone.entries {
+		switch entry.Definition.Annotations.CapabilityClass {
+		case CapabilityClassComputerObserve, CapabilityClassComputerAct, CapabilityClassComputerVerify:
+			entry.Readiness = resolveProviderReadiness(entry.Runtime, entry.Provider, environment)
+			entry.Provider.Readiness = entry.Readiness.Readiness
+			clone.entries[name] = entry
+		}
+	}
+	clone.SnapshotID = snapshotIdentity(clone)
+	return clone, environment
+}
+
 // LookupCandidateInstallPlan resolves an exact plan ID only from this pinned
 // snapshot. It revalidates the deterministic plan identity and environment
 // binding before returning a deep clone. Registry refreshes or caller mutation

@@ -331,7 +331,7 @@ export function contextUsagePanelData(
   );
   const hasRetainedContributionContract =
     ((snapshot?.schemaVersion === 4 &&
-      snapshot.estimatorId === "awaken_leaf_v4") ||
+      (snapshot.estimatorId === "awaken_leaf_v4" || snapshot.estimatorId === "awaken_leaf_v5")) ||
       (snapshot?.schemaVersion === 3 &&
         snapshot.estimatorId === "awaken_leaf_v3")) &&
     rawContributions.every((contribution) =>

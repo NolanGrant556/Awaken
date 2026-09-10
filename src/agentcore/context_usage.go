@@ -11,7 +11,7 @@ import (
 	"awaken/src/tool"
 )
 
-const contextEstimatorID = "awaken_leaf_v4"
+const contextEstimatorID = "awaken_leaf_v5"
 
 type ContextContributionKind string
 
@@ -98,6 +98,12 @@ const (
 // ModelUsageRecord is request-scoped provider truth. Nullable token fields
 // distinguish a missing provider field from a reported zero.
 type ModelUsageRecord struct {
+	InputEstimatorID         string                `json:"input_estimator_id,omitempty"`
+	LogicalCallID            string                `json:"logical_call_id,omitempty"`
+	QueueWaitMS              *int64                `json:"queue_wait_ms,omitempty"`
+	PrepareMS                *int64                `json:"prepare_ms,omitempty"`
+	TransportMS              *int64                `json:"transport_ms,omitempty"`
+	FirstTokenMS             *int64                `json:"first_token_ms,omitempty"`
 	SchemaVersion            int                   `json:"schema_version"`
 	RequestID                string                `json:"request_id"`
 	Purpose                  string                `json:"purpose"`

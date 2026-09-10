@@ -57,6 +57,14 @@ func (e *runEventEmitter) modelRequest(ctx stdcontext.Context, snapshot ContextU
 		e.withAgentIdentity(ContextSnapshotSemanticRecord(e.threadID, e.runID, e.turnID(), e.sessionID, snapshot)),
 		e.withAgentIdentity(ModelRequestSemanticRecord(e.threadID, e.runID, e.turnID(), e.sessionID, snapshot, purpose)),
 	}
+	if e.inboxMessageIDs != nil {
+		records[1].Payload["admitted_message_ids"] = e.inboxMessageIDs()
+	}
+	if e.contextRevision != nil {
+		records[1].Payload["context_revision"] = e.contextRevision() - 1
+	}
+	records[1].Payload["logical_call_id"] = e.logicalModelCallID
+	records[1].Payload["transport_attempt_index"] = e.transportAttempt
 	persistCtx, cancel := durablePersistenceContext(ctx)
 	defer cancel()
 	if err := PersistDurableBatch(persistCtx, e.recorder, e.sink, records, event); err != nil {

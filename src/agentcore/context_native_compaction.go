@@ -31,12 +31,16 @@ func (r *Runner) tryProviderNativeCompaction(ctx stdcontext.Context, result Comp
 	request := llm.Request{
 		RequestID: newAwakenID("model_request"), SystemPrompt: llmReq.SystemPrompt, Messages: messages,
 		Model: llmReq.Model, Purpose: llm.RequestPurposeNativeCompaction,
-		AffinityScopeID: r.threadID, ReasoningPolicy: r.config.ModelConfig.ReasoningEffort,
+		AffinityScopeID: agentAffinityScope(r.threadID, r.config), ReasoningPolicy: r.config.ModelConfig.ReasoningEffort,
 		NativeCompaction:      true,
 		NativeCompactionState: nativeCompactionStateFromBundle(r.config.ModelConfig, r.config.RestoredContextBundleV2),
 	}
 	authority := ModelCallAuthority{
 		ThreadID: r.threadID, RunID: r.runID, SessionID: r.sessionID, Recorder: r.recorder,
+		SubagentTaskID: r.config.SubagentTaskID, AttemptID: r.config.AttemptID, Progress: r.subagentProgress,
+	}
+	if origin := r.config.SubagentOrigin; origin != nil {
+		authority.AgentID, authority.ParentAgentID = origin.AgentID, origin.ParentAgentID
 	}
 	var response *llm.Response
 	if r.nativeCompactionInvoker != nil {

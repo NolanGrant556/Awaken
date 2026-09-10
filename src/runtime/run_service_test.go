@@ -1422,7 +1422,7 @@ func TestStartRunWithValidThreadIDReusesAgent(t *testing.T) {
 	}
 }
 
-func TestStartRunWithInMemoryThreadDoesNotRequireTranscriptLoad(t *testing.T) {
+func TestStartRunFailsClosedWhenActiveJournalWasChangedExternally(t *testing.T) {
 	setRuntimeUserDataDir(t)
 	root := t.TempDir()
 	service := NewRunService(
@@ -1461,15 +1461,14 @@ func TestStartRunWithInMemoryThreadDoesNotRequireTranscriptLoad(t *testing.T) {
 		t.Fatalf("failed to append corrupt transcript record: %v", err)
 	}
 
-	secondRun, err := service.StartRun(StartRunRequest{
+	_, err = service.StartRun(StartRunRequest{
 		Input:     "follow up",
 		ThreadID:  firstRun.ThreadID,
 		Workspace: WorkspaceConfig{WorkspaceRoot: root},
 	})
-	if err != nil {
-		t.Fatalf("expected in-memory thread reuse to ignore corrupt transcript, got %v", err)
+	if err == nil {
+		t.Fatal("expected an externally modified journal to reject another write")
 	}
-	waitForRunTerminal(t, service, secondRun.RunID)
 }
 
 // TestStartRunWithUnknownThreadIDReturnsErrThreadNotFound verifies that

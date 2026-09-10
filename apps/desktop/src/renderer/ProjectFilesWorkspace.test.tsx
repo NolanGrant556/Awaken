@@ -133,7 +133,7 @@ describe("ProjectFilesWorkspace", () => {
 
   it("switches the full-width file surface without an intermediate width animation", () => {
     expect(projectFileStyles).toMatch(
-      /\.aw-workbench-shell:has\(> \.aw-workbench-inspector > \.project-files-workspace\)\s*\{\s*transition:\s*none;/,
+      /\.aw-workbench-shell:has\(> \.aw-workbench-inspector > \.inspector-surfaces > \.inspector-surface\)\s*\{\s*transition:\s*none;/,
     );
   });
 

@@ -15,7 +15,6 @@ import {
   type ACPRunnersSettings,
   type ACPRunnerUpdateRequest,
   type ACPRunnerView,
-  type ModelPurpose,
   type ProjectMutationResult,
   type RenameThreadRequest,
   type RewindThreadRequest,
@@ -57,10 +56,19 @@ type Dependencies = {
   readonly prepareNetworkRoute: (surface: string) => Promise<void>;
   readonly ensureComputerRunMonitor: (runId: string) => void;
   readonly subscribeToRun: (target: WebContents, runId: string, subscriptionId: string, afterCursor?: number) => Promise<void>;
+  readonly subscribeToThreadActivity?: (target: WebContents, threadId: string, subscriptionId: string, afterCursor?: number) => Promise<void>;
   readonly toRendererSupervisorStatus: (info: SupervisorStatusInfo) => { status: SupervisorStatusInfo["status"]; };
 };
 
 export function registerRunsIpc(dependencies: Dependencies): void {
+  registerRuntimeRequest("awaken:subscribe-thread-activity", async (event, payload: { threadId: string; subscriptionId: string; afterCursor?: number }) => {
+    if (!dependencies.subscribeToThreadActivity) throw new Error("任务活动连接不可用");
+    await dependencies.subscribeToThreadActivity(event.sender, payload.threadId, payload.subscriptionId, payload.afterCursor);
+    return payload.subscriptionId;
+  });
+  registerRuntimeRequest("awaken:stop-thread-agents", async (_event, payload: { threadId: string }) => {
+    await dependencies.requestRuntimeOK(`/v1/threads/${encodeURIComponent(payload.threadId)}/agents/stop`, { method: "POST" });
+  });
   ipcMain.handle("awaken:get-runtime-info", async () => {
     try {
       const info = await dependencies.requestRuntime<RuntimeInfoWire>("/v1/runtime/info", {
@@ -388,28 +396,13 @@ export function registerRunsIpc(dependencies: Dependencies): void {
     return runDesktopOperation(async () => {
       await dependencies.cancelActiveDreams();
       const body = normalizeStartRunRequest(request);
-      const selectedProfile = await dependencies.modelProfileStore.resolveRunProfile(
+      const selectedProfile = await dependencies.modelProfileStore.resolveRunBundle(
         request.modelProfileId,
         request.reasoningEffort,
       );
       if (!selectedProfile) {
         throw new Error("请先在设置 > 模型中配置可用模型。");
       }
-      const purposeProfiles: NonNullable<typeof selectedProfile.purposeProfiles> = {};
-      for (const purpose of [
-        "thread_title",
-        "compact_summary",
-        "subagent",
-        "hook_prompt",
-        "hook_agent",
-      ] as ModelPurpose[]) {
-        const resolved = await dependencies.modelProfileStore.resolvePurposeRunProfile(
-          purpose,
-          selectedProfile.profileId,
-        );
-        if (resolved) purposeProfiles[purpose] = resolved;
-      }
-      selectedProfile.purposeProfiles = purposeProfiles;
       body.model_profile = normalizeModelProfileRunConfig(selectedProfile);
       // Renderer selection hints terminate at Main. Core receives only the
       // fully resolved, credential-bearing model_profile assembled here.
@@ -447,26 +440,6 @@ export function registerRunsIpc(dependencies: Dependencies): void {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ reason: payload.reason ?? "desktop_user" }),
-        },
-      );
-    },
-  );
-
-  registerRuntimeRequest(
-    "awaken:message-subagent",
-    async (
-      _event,
-      payload: { runId: string; taskId: string; content: string; idempotencyKey?: string; },
-    ) => {
-      await dependencies.requestRuntimeOK(
-        `/v1/runs/${encodeURIComponent(payload.runId)}/subagents/${encodeURIComponent(payload.taskId)}/messages`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            content: payload.content,
-            idempotency_key: payload.idempotencyKey,
-          }),
         },
       );
     },

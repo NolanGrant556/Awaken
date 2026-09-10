@@ -3,10 +3,10 @@ package subagentruntime
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -14,39 +14,51 @@ import (
 )
 
 const (
-	defaultMaxTasks      = 8
-	defaultMaxConcurrent = 4
-	defaultCancelGrace   = 2 * time.Second
-	maxDescriptionRunes  = 80
-	maxPromptBytes       = 32 * 1024
-	maxResultBytes       = 32 * 1024
+	defaultCancelGrace  = 2 * time.Second
+	maxDescriptionRunes = 80
+	maxPromptBytes      = 32 * 1024
+	maxResultBytes      = 32 * 1024
 )
 
 type Config struct {
-	MaxTasks      int
-	MaxConcurrent int
+	ForgetAgent            func(string)
+	ScopeDigest            string
+	RootContext            context.Context
+	RunID                  string
+	ThreadID               string
+	Retain                 func(TaskSnapshot) func()
+	PrepareSpawn           func(context.Context, SpawnRequest) (SpawnPreparation, error)
+	ListModels             func(context.Context) ([]ModelOption, error)
+	BindRunner             bool
+	Policy                 Policy
+	ModelID                string
+	ReasoningEffort        string
+	ModelBindingSource     string
+	ConfigSnapshotRevision string
 	// ModelProfileID is resolved by the Host for this run. When set it is the
 	// only profile identity recorded for spawned tasks; model-visible input
 	// cannot override it.
 	ModelProfileID string
-	// ParentWritableRoots is the root Agent's writable set. Concurrent shared
-	// write children that overlap this set fail closed.
+	// ParentWorkspaceRoot anchors host-owned worktree preparation.
 	ParentWorkspaceRoot string
-	ParentWritableRoots []string
 	Starter             Starter
 	Persist             Persister
 	CancelGrace         time.Duration
 }
 
 type managedTask struct {
+	role               Role
+	done               chan struct{}
+	releaseResources   func()
+	contextSeed        json.RawMessage
 	snapshot           TaskSnapshot
+	starter            Starter
 	prompt             string
 	cancel             context.CancelFunc
 	mutationMu         sync.Mutex
 	seenToolCalls      map[string]struct{}
 	seenModelRequests  map[string]struct{}
 	messages           []QueuedMessage
-	writableRoots      []string
 	host               *HostSpawnOptions
 	terminalPersistErr error
 }
@@ -60,18 +72,22 @@ type messageReceiptRecord struct {
 }
 
 type Manager struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-	cfg    Config
+	inboxMu sync.Mutex
+	ctx     context.Context
+	cancel  context.CancelFunc
+	cfg     Config
 
 	mu                           sync.RWMutex
 	tasks                        map[string]*managedTask
+	agentExecutions              map[string]chan struct{}
+	closedAgents                 map[string]bool
+	owners                       map[string]spawnOwner
 	order                        []string
 	delivered                    map[string]bool
 	pendingTerminalNotifications []string
 	messageReceipts              map[string]*messageReceiptRecord
-	reservedRoots                map[string][]string
 	closed                       bool
+	stopped                      bool
 	reserved                     int
 	slots                        chan struct{}
 	notify                       chan struct{}
@@ -82,30 +98,35 @@ func NewManager(parent context.Context, cfg Config) *Manager {
 	if parent == nil {
 		parent = context.Background()
 	}
-	if cfg.MaxTasks <= 0 {
-		cfg.MaxTasks = defaultMaxTasks
-	}
-	if cfg.MaxConcurrent <= 0 {
-		cfg.MaxConcurrent = defaultMaxConcurrent
-	}
+	cfg.Policy = cfg.Policy.Effective()
 	if cfg.CancelGrace <= 0 {
 		cfg.CancelGrace = defaultCancelGrace
 	}
 	ctx, cancel := context.WithCancel(parent)
+	rootCtx := cfg.RootContext
+	if rootCtx == nil {
+		rootCtx = ctx
+	}
 	return &Manager{
 		ctx: ctx, cancel: cancel, cfg: cfg,
+		owners:          map[string]spawnOwner{"root": {ctx: rootCtx, config: cfg}},
 		tasks:           make(map[string]*managedTask),
-		reservedRoots:   make(map[string][]string),
+		agentExecutions: make(map[string]chan struct{}), closedAgents: make(map[string]bool),
 		delivered:       make(map[string]bool),
 		messageReceipts: make(map[string]*messageReceiptRecord),
-		slots:           make(chan struct{}, cfg.MaxConcurrent),
-		notify:          make(chan struct{}, 1),
+		slots:           make(chan struct{}, cfg.Policy.MaxActiveAgents),
+		notify:          make(chan struct{}),
 	}
 }
 
 func (m *Manager) Spawn(ctx context.Context, request SpawnRequest) (TaskSnapshot, error) {
 	if m == nil || m.cfg.Starter == nil {
 		return TaskSnapshot{}, runtimeError(ErrorRuntimeUnavailable, "manager starter is unavailable")
+	}
+	// Historical requests may contain background, but execution always belongs to the parent.
+	request.Background = false
+	if err := ctx.Err(); err != nil {
+		return TaskSnapshot{}, err
 	}
 	request.Description = strings.TrimSpace(request.Description)
 	request.Prompt = strings.TrimSpace(request.Prompt)
@@ -120,69 +141,137 @@ func (m *Manager) Spawn(ctx context.Context, request SpawnRequest) (TaskSnapshot
 	if err := ValidateSpawnCombo(request.AgentType, request.WorkspaceMode); err != nil {
 		return TaskSnapshot{}, err
 	}
-	if strings.TrimSpace(request.ParentAgentID) != "" && request.ParentAgentID != "root" {
-		return TaskSnapshot{}, runtimeError(ErrorBoundaryViolation, "only the root agent may spawn a subagent")
+	role, _ := LookupRole(request.AgentType)
+	role.AllowedTools = append([]string(nil), role.AllowedTools...)
+	role.DisallowedTools = append([]string(nil), role.DisallowedTools...)
+	request.RoleSnapshot = &role
+	roleBytes, _ := json.Marshal(role)
+	roleHash := sha256.Sum256(roleBytes)
+	parentID := firstNonBlank(request.ParentAgentID, "root")
+	m.mu.RLock()
+	owner, known := m.owners[parentID]
+	m.mu.RUnlock()
+	if !known || owner.config.Starter == nil || owner.finished || owner.ctx.Err() != nil {
+		return TaskSnapshot{}, runtimeError(ErrorBoundaryViolation, "creator is not an active Agent in this task tree")
 	}
-	writableRoots := append([]string(nil), request.WritableRoots...)
-	if len(writableRoots) == 0 {
-		writableRoots = append([]string(nil), m.cfg.ParentWritableRoots...)
+	if owner.config.RunID != "" {
+		request.RunID = owner.config.RunID
 	}
-	if modelProfileID := strings.TrimSpace(m.cfg.ModelProfileID); modelProfileID != "" {
+	if owner.config.ThreadID != "" {
+		request.ThreadID = owner.config.ThreadID
+	}
+	if owner.depth >= m.cfg.Policy.MaxDepth {
+		return TaskSnapshot{}, runtimeError(ErrorLimitReached, "agent tree depth limit reached")
+	}
+	preparation := SpawnPreparation{Starter: owner.config.Starter, Model: ModelBinding{
+		ProfileID: owner.config.ModelProfileID, ModelID: owner.config.ModelID,
+		ReasoningEffort: owner.config.ReasoningEffort, Source: owner.config.ModelBindingSource, Revision: owner.config.ConfigSnapshotRevision,
+	}}
+	if request.ContextMode == "" {
+		request.ContextMode = "fresh"
+	}
+	if request.ContextMode != "fresh" && request.ContextMode != "full" && request.ContextMode != "recent" {
+		return TaskSnapshot{}, runtimeError(ErrorInvalidInput, "context_mode must be fresh, full, or recent")
+	}
+	if request.ContextMode == "recent" && (request.RecentTurns < 1 || request.RecentTurns > 100) {
+		return TaskSnapshot{}, runtimeError(ErrorInvalidInput, "recent context requires recent_turns between 1 and 100")
+	}
+	if request.Host != nil && request.ContextMode != "fresh" {
+		return TaskSnapshot{}, runtimeError(ErrorBoundaryViolation, "this Host workflow requires fresh context")
+	}
+	if owner.config.PrepareSpawn != nil {
+		var err error
+		preparation, err = owner.config.PrepareSpawn(ctx, request)
+		if err != nil {
+			return TaskSnapshot{}, err
+		}
+		request.ModelProfileID = preparation.Model.ProfileID
+	} else if modelProfileID := strings.TrimSpace(owner.config.ModelProfileID); modelProfileID != "" {
 		request.ModelProfileID = modelProfileID
 	}
 
 	m.mu.Lock()
-	if m.closed || m.ctx.Err() != nil {
+	if current := m.owners[parentID]; m.closed || m.stopped || m.ctx.Err() != nil || m.closedAgents[request.reuseAgentID] || current.finished || current.ctx.Err() != nil || current.config.RunID != owner.config.RunID || ctx.Err() != nil {
 		m.mu.Unlock()
 		return TaskSnapshot{}, runtimeError(ErrorRuntimeUnavailable, "manager is closed")
 	}
-	if request.WorkspaceMode == WorkspaceShared {
-		if err := m.rejectOverlappingSharedWrite(writableRoots); err != nil {
-			m.mu.Unlock()
-			return TaskSnapshot{}, err
+	queued := m.reserved
+	for _, task := range m.tasks {
+		if task.snapshot.Status == StatusQueued {
+			queued++
 		}
 	}
-	if len(m.order)+m.reserved >= m.cfg.MaxTasks {
+	if queued >= m.cfg.Policy.MaxQueuedAssignments {
 		m.mu.Unlock()
-		return TaskSnapshot{}, runtimeError(ErrorLimitReached, "maximum tasks for this run reached")
+		return TaskSnapshot{}, runtimeError("subagent_concurrency_queue_full", "assignment queue is full; wait for active work before retrying")
 	}
 	m.reserved++
 	now := time.Now().UTC()
 	taskID := newID("subtask")
-	if request.WorkspaceMode == WorkspaceShared {
-		m.reservedRoots[taskID] = writableRoots
-	}
 	m.wg.Add(1)
 	snapshot := TaskSnapshot{
-		TaskID: taskID, AgentID: newID("subagent"),
+		ScopeDigest: owner.config.ScopeDigest,
+		RoleDigest:  hex.EncodeToString(roleHash[:]),
+		Background:  request.Background, ContinuesFrom: request.ContinuesFrom,
+		ContextMode: request.ContextMode, RecentTurns: request.RecentTurns,
+		TaskID: taskID, AgentID: firstNonBlank(request.reuseAgentID, newID("subagent")), AttemptID: newID("attempt"),
 		ParentAgentID:    firstNonBlank(request.ParentAgentID, "root"),
 		ParentToolCallID: request.ParentToolCallID,
 		ThreadID:         request.ThreadID, RunID: request.RunID, TurnID: request.TurnID,
 		Description: request.Description, AgentType: request.AgentType,
 		WorkspaceMode: request.WorkspaceMode, ModelProfileID: request.ModelProfileID,
+		ModelID: preparation.Model.ModelID, ReasoningEffort: preparation.Model.ReasoningEffort,
+		ModelBindingSource: preparation.Model.Source, ConfigSnapshotRevision: preparation.Model.Revision,
 		Status: StatusQueued, SideEffectState: "none", CreatedAt: now,
+	}
+	if request.Host != nil {
+		snapshot.Workflow = "host_restricted"
+		if request.Host.Skill != nil {
+			snapshot.Workflow = "skill"
+		}
 	}
 	m.mu.Unlock()
 
-	if err := m.persist(ctx, "subagent_spawned", snapshot); err != nil {
+	if err := m.persistEvent(ctx, PersistEvent{Kind: "subagent_spawned", Snapshot: snapshot, Prompt: request.Prompt, ContextSeed: preparation.ContextSeed}); err != nil {
 		m.mu.Lock()
 		m.reserved--
-		delete(m.reservedRoots, taskID)
 		m.mu.Unlock()
 		m.wg.Done()
 		return TaskSnapshot{}, err
 	}
 
-	taskCtx, cancel := context.WithCancel(m.ctx)
+	taskCtx, cancel := context.WithCancel(owner.ctx)
 	task := &managedTask{
-		snapshot: snapshot, prompt: request.Prompt, cancel: cancel,
+		role:     role,
+		done:     make(chan struct{}),
+		snapshot: snapshot, prompt: request.Prompt, cancel: cancel, starter: preparation.Starter, contextSeed: preparation.ContextSeed,
 		seenToolCalls: make(map[string]struct{}), seenModelRequests: make(map[string]struct{}),
-		writableRoots: writableRoots, host: request.Host,
+		host: request.Host,
+	}
+	if m.cfg.Retain != nil {
+		task.releaseResources = m.cfg.Retain(snapshot)
+	}
+	if owner.config.Retain != nil {
+		ownerRelease := owner.config.Retain(snapshot)
+		sharedRelease := task.releaseResources
+		task.releaseResources = func() {
+			if ownerRelease != nil {
+				ownerRelease()
+			}
+			if sharedRelease != nil {
+				sharedRelease()
+			}
+		}
 	}
 	m.mu.Lock()
+	if current := m.owners[parentID]; m.stopped || m.closed || current.finished || current.ctx.Err() != nil || current.config.RunID != owner.config.RunID {
+		cancel()
+	}
 	m.reserved--
-	delete(m.reservedRoots, taskID)
 	m.tasks[taskID] = task
+	if m.agentExecutions[snapshot.AgentID] == nil {
+		m.agentExecutions[snapshot.AgentID] = make(chan struct{}, 1)
+	}
 	m.order = append(m.order, taskID)
 	m.mu.Unlock()
 	m.signal()
@@ -201,13 +290,50 @@ func (m *Manager) SpawnFromHost(ctx context.Context, request SpawnRequest) (Task
 
 func (m *Manager) runTask(ctx context.Context, taskID string) {
 	defer m.wg.Done()
+	defer func() {
+		if task := m.task(taskID); task != nil {
+			close(task.done)
+			m.signal()
+		}
+	}()
+	// Publish terminal only after execution and resource cleanup have returned.
+	status, result, code, message := StatusCancelled, "", ErrorCancelled, "subagent was cancelled"
+	finish := func(next TaskStatus, text, errorCode, errorMessage string) {
+		status, result, code, message = next, text, errorCode, errorMessage
+	}
+	defer func() { m.finish(taskID, status, result, code, message) }()
+	defer func() {
+		if task := m.task(taskID); task != nil {
+			task.cancel()
+			if task.releaseResources != nil {
+				task.releaseResources()
+			}
+		}
+		if task := m.task(taskID); task != nil {
+			task.mutationMu.Lock()
+			task.starter, task.contextSeed, task.prompt, task.releaseResources = nil, nil, "", nil
+			task.mutationMu.Unlock()
+		}
+	}()
+	m.mu.RLock()
+	agentID := m.tasks[taskID].snapshot.AgentID
+	serial := m.agentExecutions[agentID]
+	m.mu.RUnlock()
 	select {
-	case m.slots <- struct{}{}:
-		defer func() { <-m.slots }()
+	case serial <- struct{}{}:
+		defer func() { <-serial }()
 	case <-ctx.Done():
-		m.finishCancelled(taskID)
+		finish(StatusCancelled, "", ErrorCancelled, "subagent was cancelled")
 		return
 	}
+	var lease *executionLease
+	var err error
+	ctx, lease, err = acquireExecution(ctx, m.slots)
+	if err != nil {
+		finish(StatusCancelled, "", ErrorCancelled, "subagent was cancelled")
+		return
+	}
+	defer lease.release()
 
 	started := time.Now().UTC()
 	task := m.task(taskID)
@@ -216,9 +342,9 @@ func (m *Manager) runTask(ctx context.Context, taskID string) {
 	}
 	task.mutationMu.Lock()
 	snapshot := cloneTaskSnapshot(task.snapshot)
-	if ctx.Err() != nil || snapshot.Status == StatusCancelling {
+	if ctx.Err() != nil || snapshot.Status == StatusCancelling || !m.canStartAssignment(snapshot) {
 		task.mutationMu.Unlock()
-		m.finishCancelled(taskID)
+		finish(StatusCancelled, "", ErrorCancelled, "subagent was cancelled")
 		return
 	}
 	if snapshot.Terminal() {
@@ -230,7 +356,7 @@ func (m *Manager) runTask(ctx context.Context, taskID string) {
 	snapshot.CurrentActivity = "正在执行分配的任务"
 	if err := m.persist(ctx, "subagent_status_changed", snapshot); err != nil {
 		task.mutationMu.Unlock()
-		m.finish(taskID, StatusFailed, "", ErrorPersistence, err.Error())
+		finish(StatusFailed, "", ErrorPersistence, err.Error())
 		return
 	}
 	if !m.replaceSnapshot(taskID, snapshot) {
@@ -239,14 +365,25 @@ func (m *Manager) runTask(ctx context.Context, taskID string) {
 	}
 	task.mutationMu.Unlock()
 
+	// Stop may arrive while the running transition is being persisted. A
+	// released slot is not permission to start a queued assignment after the
+	// owning attempt has been fenced, even before cancellation reaches it.
+	if ctx.Err() != nil || !m.canStartAssignment(snapshot) {
+		finish(StatusCancelled, "", ErrorCancelled, "subagent was cancelled")
+		return
+	}
+
 	startCtx := ctx
 	cancel := func() {}
-	if role, ok := LookupRole(snapshot.AgentType); ok && role.Timeout > 0 {
-		startCtx, cancel = context.WithTimeout(ctx, role.Timeout)
+	if task.role.Timeout > 0 {
+		startCtx, cancel = context.WithTimeout(ctx, task.role.Timeout)
 	}
 	defer cancel()
-	result, err := m.cfg.Starter(startCtx, StartRequest{
-		Task: snapshot, Prompt: m.prompt(taskID), Host: m.hostOptions(taskID),
+	result, err = task.starter(startCtx, StartRequest{
+		RoleSnapshot:        &task.role,
+		IncorporateMessages: func(ids []string) { m.incorporateMessages(agentID, ids) },
+		ContextSeed:         append(json.RawMessage(nil), task.contextSeed...),
+		Task:                snapshot, Prompt: m.prompt(taskID), Host: m.hostOptions(taskID),
 		ReportProgress: func(progressCtx context.Context, update ProgressUpdate) error {
 			return m.reportProgress(progressCtx, taskID, update)
 		},
@@ -259,10 +396,10 @@ func (m *Manager) runTask(ctx context.Context, taskID string) {
 	})
 	if startCtx.Err() != nil {
 		if errors.Is(startCtx.Err(), context.DeadlineExceeded) {
-			m.finish(taskID, StatusFailed, "", "subagent_timeout", "subagent exceeded its role timeout")
+			finish(StatusFailed, "", "subagent_timeout", "subagent exceeded its role timeout")
 			return
 		}
-		m.finishCancelled(taskID)
+		finish(StatusCancelled, "", ErrorCancelled, "subagent was cancelled")
 		return
 	}
 	if err != nil {
@@ -270,14 +407,20 @@ func (m *Manager) runTask(ctx context.Context, taskID string) {
 		if code == "" {
 			code = "subagent_failed"
 		}
-		m.finish(taskID, StatusFailed, "", code, err.Error())
+		finish(StatusFailed, "", code, err.Error())
 		return
 	}
-	m.finish(taskID, StatusCompleted, bounded(result, maxResultBytes), "", "")
+	finish(StatusCompleted, result, "", "")
 }
 
-func (m *Manager) finishCancelled(taskID string) {
-	m.finish(taskID, StatusCancelled, "", ErrorCancelled, "subagent was cancelled")
+func (m *Manager) canStartAssignment(task TaskSnapshot) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	owner, known := m.owners[task.ParentAgentID]
+	return !m.closed && !m.stopped && m.ctx.Err() == nil &&
+		!m.closedAgents[task.AgentID] && known && !owner.finished &&
+		owner.ctx != nil && owner.ctx.Err() == nil &&
+		(owner.config.RunID == "" || owner.config.RunID == task.RunID)
 }
 
 func (m *Manager) finish(taskID string, status TaskStatus, result, code, message string) {
@@ -291,10 +434,16 @@ func (m *Manager) finish(taskID string, status TaskStatus, result, code, message
 	if snapshot.Terminal() {
 		return
 	}
+	if snapshot.Status == StatusCancelling {
+		status, result, code, message = StatusCancelled, "", ErrorCancelled, "subagent was cancelled"
+	}
 	finished := time.Now().UTC()
 	snapshot.Status = status
 	snapshot.CurrentActivity = ""
-	snapshot.ResultPreview = result
+	snapshot.ResultPreview = bounded(result, maxResultBytes)
+	snapshot.ResultContent = result
+	digest := sha256.Sum256([]byte(result))
+	snapshot.ResultDigest = hex.EncodeToString(digest[:])
 	snapshot.ErrorCode = code
 	snapshot.ErrorMessage = message
 	snapshot.FinishedAt = &finished
@@ -324,7 +473,6 @@ func (m *Manager) reportProgress(ctx context.Context, taskID string, update Prog
 	changed := false
 	if toolCallID := strings.TrimSpace(update.ToolCallID); toolCallID != "" {
 		if _, seen := task.seenToolCalls[toolCallID]; !seen {
-			task.seenToolCalls[toolCallID] = struct{}{}
 			snapshot.ToolUseCount++
 			changed = true
 			if toolName := strings.TrimSpace(update.ToolName); toolName != "" {
@@ -342,6 +490,7 @@ func (m *Manager) reportProgress(ctx context.Context, taskID string, update Prog
 		}
 		if !found {
 			copied := *receipt
+			copied.AgentID, copied.TaskID, copied.AttemptID = snapshot.AgentID, snapshot.TaskID, snapshot.AttemptID
 			copied.Details = cloneAnyMap(receipt.Details)
 			snapshot.HostToolReceipts = append(snapshot.HostToolReceipts, copied)
 			changed = true
@@ -349,7 +498,6 @@ func (m *Manager) reportProgress(ctx context.Context, taskID string, update Prog
 	}
 	if requestID := strings.TrimSpace(update.ModelRequestID); requestID != "" {
 		if _, seen := task.seenModelRequests[requestID]; !seen {
-			task.seenModelRequests[requestID] = struct{}{}
 			if update.HasInputTokens && update.InputTokens > 0 {
 				snapshot.InputTokens += update.InputTokens
 			}
@@ -389,6 +537,12 @@ func (m *Manager) reportProgress(ctx context.Context, taskID string, update Prog
 	if err != nil {
 		return err
 	}
+	if id := strings.TrimSpace(update.ToolCallID); id != "" {
+		task.seenToolCalls[id] = struct{}{}
+	}
+	if id := strings.TrimSpace(update.ModelRequestID); id != "" {
+		task.seenModelRequests[id] = struct{}{}
+	}
 	m.replaceSnapshot(taskID, snapshot)
 	return nil
 }
@@ -409,13 +563,23 @@ func (m *Manager) List() []TaskSnapshot {
 	result := make([]TaskSnapshot, 0, len(m.order))
 	for _, id := range m.order {
 		if task := m.tasks[id]; task != nil {
-			result = append(result, cloneTaskSnapshot(task.snapshot))
+			snapshot := cloneTaskSnapshot(task.snapshot)
+			snapshot.AgentClosed = snapshot.AgentClosed || m.closedAgents[snapshot.AgentID]
+			result = append(result, snapshot)
 		}
 	}
 	return result
 }
 
-func (m *Manager) Wait(ctx context.Context, request WaitRequest) (WaitResult, error) {
+func (m *Manager) Wait(ctx context.Context, request WaitRequest) (result WaitResult, waitErr error) {
+	if request.EventDriven || request.Timeout > 0 {
+		resume := SuspendExecution(ctx)
+		defer func() {
+			if err := resume(); err != nil && waitErr == nil {
+				waitErr = err
+			}
+		}()
+	}
 	if m == nil {
 		return WaitResult{}, runtimeError(ErrorRuntimeUnavailable, "manager is unavailable")
 	}
@@ -433,20 +597,23 @@ func (m *Manager) Wait(ctx context.Context, request WaitRequest) (WaitResult, er
 	}
 	waitCtx := ctx
 	cancel := func() {}
-	if request.Timeout > 0 {
+	if request.Timeout > 0 && !request.EventDriven {
 		waitCtx, cancel = context.WithTimeout(ctx, request.Timeout)
 	}
 	defer cancel()
 
 	for {
-		snapshots, ready, err := m.waitState(request, true)
+		m.mu.RLock()
+		notify := m.notify
+		m.mu.RUnlock()
+		snapshots, ready, err := m.waitState(request, !request.DeferAcknowledgement)
 		if err != nil {
 			return WaitResult{}, err
 		}
 		if ready {
 			return WaitResult{Tasks: snapshots, RetrievalStatus: RetrievalCompleted}, nil
 		}
-		if request.Timeout == 0 {
+		if request.Timeout == 0 && !request.EventDriven {
 			return WaitResult{Tasks: snapshots, RetrievalStatus: RetrievalRunning}, nil
 		}
 		select {
@@ -456,7 +623,7 @@ func (m *Manager) Wait(ctx context.Context, request WaitRequest) (WaitResult, er
 				return WaitResult{Tasks: snapshots, RetrievalStatus: RetrievalTimeout}, nil
 			}
 			return WaitResult{}, waitCtx.Err()
-		case <-m.notify:
+		case <-notify:
 		}
 	}
 }
@@ -484,7 +651,8 @@ func (m *Manager) waitState(request WaitRequest, consume bool) ([]TaskSnapshot, 
 	}
 	if request.ReturnWhen == "any" {
 		if len(newlyCompleted) == 0 {
-			return all, false, nil
+			// There can be no later completion once every requested task is terminal.
+			return all, terminal == len(all), nil
 		}
 		if consume {
 			for _, snapshot := range newlyCompleted {
@@ -590,15 +758,35 @@ func (m *Manager) MessageIdempotent(ctx context.Context, taskID, content, idempo
 }
 
 func (m *Manager) queueMessage(ctx context.Context, taskID, content string) (MessageReceipt, error) {
+	m.inboxMu.Lock()
+	defer m.inboxMu.Unlock()
 	task := m.task(taskID)
 	if task == nil {
 		return MessageReceipt{}, runtimeError(ErrorNotFound, "task does not exist in this run")
 	}
+	identity, _ := m.snapshot(taskID)
+	pending := 0
+	for _, assignment := range m.List() {
+		if assignment.AgentID != identity.AgentID {
+			continue
+		}
+		entry := m.task(assignment.TaskID)
+		entry.mutationMu.Lock()
+		pending += len(entry.messages)
+		entry.mutationMu.Unlock()
+	}
 	task.mutationMu.Lock()
 	snapshot := cloneTaskSnapshot(task.snapshot)
-	if snapshot.Terminal() || snapshot.Status == StatusCancelling {
+	m.mu.RLock()
+	closed := m.closedAgents[snapshot.AgentID] || m.closed
+	m.mu.RUnlock()
+	if closed || snapshot.Status == StatusCancelling || snapshot.AgentClosed {
 		task.mutationMu.Unlock()
 		return MessageReceipt{}, runtimeError(ErrorNotRunning, "subagent is not running")
+	}
+	if pending >= 128 {
+		task.mutationMu.Unlock()
+		return MessageReceipt{}, runtimeError(ErrorLimitReached, "agent inbox is full")
 	}
 	queued := QueuedMessage{ID: newID("submsg"), Content: content, QueuedAt: time.Now().UTC()}
 	if err := m.persistMessage(ctx, snapshot, queued); err != nil {
@@ -623,18 +811,43 @@ func (m *Manager) persistMessage(ctx context.Context, snapshot TaskSnapshot, mes
 }
 
 func (m *Manager) takeMessages(taskID string) []QueuedMessage {
-	task := m.task(taskID)
-	if task == nil {
+	current, ok := m.snapshot(taskID)
+	if !ok {
 		return nil
 	}
-	task.mutationMu.Lock()
-	defer task.mutationMu.Unlock()
-	if len(task.messages) == 0 {
-		return nil
+	var messages []QueuedMessage
+	for _, snapshot := range m.List() {
+		if snapshot.AgentID != current.AgentID {
+			continue
+		}
+		entry := m.task(snapshot.TaskID)
+		entry.mutationMu.Lock()
+		messages = append(messages, entry.messages...)
+		entry.mutationMu.Unlock()
 	}
-	queued := append([]QueuedMessage(nil), task.messages...)
-	task.messages = nil
-	return queued
+	return messages
+}
+
+func (m *Manager) incorporateMessages(agentID string, ids []string) {
+	consumed := map[string]bool{}
+	for _, id := range ids {
+		consumed[id] = true
+	}
+	for _, snapshot := range m.List() {
+		if snapshot.AgentID != agentID {
+			continue
+		}
+		task := m.task(snapshot.TaskID)
+		task.mutationMu.Lock()
+		pending := task.messages[:0]
+		for _, message := range task.messages {
+			if !consumed[message.ID] {
+				pending = append(pending, message)
+			}
+		}
+		task.messages = pending
+		task.mutationMu.Unlock()
+	}
 }
 
 func (m *Manager) attachWorktree(taskID string, receipt *WorktreeReceipt) {
@@ -647,85 +860,6 @@ func (m *Manager) attachWorktree(taskID string, receipt *WorktreeReceipt) {
 	snapshot := cloneTaskSnapshot(task.snapshot)
 	snapshot.Worktree = receipt
 	m.replaceSnapshot(taskID, snapshot)
-}
-
-func (m *Manager) rejectOverlappingSharedWrite(writableRoots []string) error {
-	if len(writableRoots) == 0 {
-		return nil
-	}
-	for _, roots := range m.reservedRoots {
-		if rootsOverlap(writableRoots, roots) {
-			return runtimeError(ErrorBoundaryViolation, "a pending child already reserved this writable root")
-		}
-	}
-	for _, task := range m.tasks {
-		if task == nil {
-			continue
-		}
-		snapshot := cloneTaskSnapshot(task.snapshot)
-		if snapshot.Terminal() || snapshot.WorkspaceMode != WorkspaceShared {
-			continue
-		}
-		if rootsOverlap(writableRoots, task.writableRoots) {
-			return runtimeError(ErrorBoundaryViolation, "two write-capable children cannot share the same writable root")
-		}
-	}
-	return nil
-}
-
-func rootsOverlap(left, right []string) bool {
-	for _, a := range left {
-		a = normalizeRoot(a)
-		if a == "" {
-			continue
-		}
-		for _, b := range right {
-			b = normalizeRoot(b)
-			if b == "" {
-				continue
-			}
-			if rootContains(a, b) || rootContains(b, a) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func rootContains(root, path string) bool {
-	rel, err := filepath.Rel(root, path)
-	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
-}
-
-func normalizeRoot(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return ""
-	}
-	absolute, err := filepath.Abs(value)
-	if err != nil {
-		return filepath.Clean(value)
-	}
-	ancestor := absolute
-	var suffix []string
-	for {
-		if resolved, err := filepath.EvalSymlinks(ancestor); err == nil {
-			for i := len(suffix) - 1; i >= 0; i-- {
-				resolved = filepath.Join(resolved, suffix[i])
-			}
-			absolute = resolved
-			break
-		}
-		if filepath.Dir(ancestor) == ancestor {
-			break
-		}
-		suffix = append(suffix, filepath.Base(ancestor))
-		ancestor = filepath.Dir(ancestor)
-	}
-	if runtime.GOOS == "windows" {
-		absolute = strings.ToLower(absolute)
-	}
-	return absolute
 }
 
 func (m *Manager) Cancel(ctx context.Context, taskID, _ string) (TaskSnapshot, error) {
@@ -747,18 +881,40 @@ func (m *Manager) Cancel(ctx context.Context, taskID, _ string) (TaskSnapshot, e
 	}
 	m.replaceSnapshot(taskID, snapshot)
 	task.cancel()
-	go m.interruptAfterCancelGrace(taskID)
+	go m.noteSlowCancellation(taskID)
 	return snapshot, nil
 }
 
-func (m *Manager) interruptAfterCancelGrace(taskID string) {
+func (m *Manager) noteSlowCancellation(taskID string) {
+	task := m.task(taskID)
+	if task == nil {
+		return
+	}
 	timer := time.NewTimer(m.cfg.CancelGrace)
 	defer timer.Stop()
 	select {
 	case <-timer.C:
-		m.finish(taskID, StatusInterrupted, "", ErrorInterrupted, "subagent did not stop within the cancellation grace period")
-	case <-m.ctx.Done():
+		m.markStillStopping(taskID, "正在停止，等待执行与资源清理退出")
+	case <-task.done:
+	}
+}
+
+func (m *Manager) markStillStopping(taskID, message string) {
+	task := m.task(taskID)
+	if task == nil {
 		return
+	}
+	task.mutationMu.Lock()
+	defer task.mutationMu.Unlock()
+	snapshot := cloneTaskSnapshot(task.snapshot)
+	if snapshot.Terminal() {
+		return
+	}
+	snapshot.Status, snapshot.CurrentActivity = StatusCancelling, message
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := m.persist(ctx, "subagent_status_changed", snapshot); err == nil {
+		m.replaceSnapshot(taskID, snapshot)
 	}
 }
 
@@ -779,6 +935,7 @@ func (m *Manager) Close(ctx context.Context) error {
 	m.closed = true
 	m.cancel()
 	m.mu.Unlock()
+	stopErr := m.StopAll(ctx)
 	done := make(chan struct{})
 	go func() {
 		m.wg.Wait()
@@ -786,9 +943,9 @@ func (m *Manager) Close(ctx context.Context) error {
 	}()
 	select {
 	case <-done:
-		return m.terminalPersistenceError()
+		return errors.Join(stopErr, m.terminalPersistenceError())
 	case <-ctx.Done():
-		m.interruptNonTerminal("subagent manager close timed out")
+		m.markRemainingStopping("subagent manager close timed out")
 		if err := m.terminalPersistenceError(); err != nil {
 			return errors.Join(ctx.Err(), err)
 		}
@@ -796,12 +953,12 @@ func (m *Manager) Close(ctx context.Context) error {
 	}
 }
 
-func (m *Manager) interruptNonTerminal(message string) {
+func (m *Manager) markRemainingStopping(message string) {
 	for _, snapshot := range m.List() {
 		if snapshot.Terminal() {
 			continue
 		}
-		m.finish(snapshot.TaskID, StatusInterrupted, "", ErrorInterrupted, message)
+		m.markStillStopping(snapshot.TaskID, message)
 	}
 }
 
@@ -827,10 +984,14 @@ func (m *Manager) terminalPersistenceError() error {
 }
 
 func (m *Manager) persist(ctx context.Context, kind string, snapshot TaskSnapshot) error {
+	return m.persistEvent(ctx, PersistEvent{Kind: kind, Snapshot: snapshot})
+}
+
+func (m *Manager) persistEvent(ctx context.Context, event PersistEvent) error {
 	if m.cfg.Persist == nil {
 		return nil
 	}
-	if err := m.cfg.Persist(ctx, PersistEvent{Kind: kind, Snapshot: snapshot}); err != nil {
+	if err := m.cfg.Persist(ctx, event); err != nil {
 		return runtimeError(ErrorPersistence, err.Error())
 	}
 	return nil
@@ -846,7 +1007,9 @@ func (m *Manager) snapshot(taskID string) (TaskSnapshot, bool) {
 	if task == nil {
 		return TaskSnapshot{}, false
 	}
-	return cloneTaskSnapshot(task.snapshot), true
+	snapshot := cloneTaskSnapshot(task.snapshot)
+	snapshot.AgentClosed = snapshot.AgentClosed || m.closedAgents[snapshot.AgentID]
+	return snapshot, true
 }
 
 func (m *Manager) replaceSnapshot(taskID string, snapshot TaskSnapshot) bool {
@@ -934,10 +1097,10 @@ func (m *Manager) hostOptions(taskID string) *HostSpawnOptions {
 }
 
 func (m *Manager) signal() {
-	select {
-	case m.notify <- struct{}{}:
-	default:
-	}
+	m.mu.Lock()
+	close(m.notify)
+	m.notify = make(chan struct{})
+	m.mu.Unlock()
 }
 
 func runtimeError(code, message string) error {
@@ -965,5 +1128,15 @@ func bounded(value string, limit int) string {
 	if len(value) <= limit {
 		return value
 	}
-	return value[:limit] + "\n\n[truncated]"
+	const suffix = "\n\n[truncated]"
+	if limit <= len(suffix) {
+		return suffix[:max(0, limit)]
+	}
+	end := limit - len(suffix)
+	for end > 0 && !utf8.RuneStart(value[end]) {
+		end--
+	}
+	return value[:end] + suffix
 }
+
+func (m *Manager) EventDrivenWaits() bool { return m != nil }

@@ -456,6 +456,8 @@ func TestAFolderDetachedByOneProjectIsUsableAfterAnotherAttachesIt(t *testing.T)
 	t.Setenv(awakenHomeEnv, t.TempDir())
 	roots := mustTempDirs(t, 2)
 	service := newDurableThreadTestService()
+	// StartRun is asynchronous. Let its journal writer exit before TempDir cleanup.
+	t.Cleanup(service.drainRunWorkers)
 	projects := service.ProjectService()
 
 	first, err := projects.CreateProject([]ProjectFolder{{Path: roots[0]}}, "first")

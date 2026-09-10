@@ -934,15 +934,6 @@ export function ProjectFilesWorkspace({
             <AwakenIcon concept="file-text" size={16} />
             文件
           </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={workspaceMode === "browser"}
-            onClick={() => changeWorkspaceMode("browser")}
-          >
-            <AwakenIcon concept="browser" size={16} />
-            浏览器
-          </button>
         </div>
         <div className="project-files-pathbar__actions">
           <button

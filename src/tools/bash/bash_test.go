@@ -210,3 +210,38 @@ func writeExecutableFixture(t *testing.T, path string) string {
 	}
 	return path
 }
+
+func TestSubagentCleanupDrainsOnlyOwnedBackgroundCommands(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX command fixture")
+	}
+	var paths []string
+	for _, id := range []string{"child-a", "child-b"} {
+		ctx := bashContext(t.TempDir(), "thread-child-cleanup", id)
+		ctx = tool.ContextWithToolExecutionIdentity(ctx, tool.ToolExecutionIdentity{RunID: "run", SubagentTaskID: id, ToolCallID: id, ToolName: ToolName})
+		outcome, err := (&Tool{}).ExecuteOutcome(ctx, `{"command":"sleep 30","timeout":60000,"run_in_background":true}`, nil)
+		if err != nil || outcome.IsError() {
+			t.Fatalf("%+v %v", outcome, err)
+		}
+		paths = append(paths, outcome.Details["status_path"].(string))
+	}
+	defer FinishSubagentTasks("child-b")
+	FinishSubagentTasks("child-a")
+	for i, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var status backgroundStatus
+		if err := json.Unmarshal(data, &status); err != nil {
+			t.Fatal(err)
+		}
+		want := "cancelled"
+		if i == 1 {
+			want = "running"
+		}
+		if status.State != want {
+			t.Fatalf("%s: got %s want %s", path, status.State, want)
+		}
+	}
+}

@@ -37,13 +37,14 @@ export function registerComputerIpc(dependencies: Dependencies): void {
       payload: {
         runId: string;
         action: "takeover" | "return" | "pause" | "terminate";
+        sessionId?: string;
       },
     ) => {
       const client = dependencies.supervisor.getControlClient();
       if (!client) {
         throw new Error("runtime control client is not available");
       }
-      await client.computerSessionControl(payload.runId, payload.action);
+      await client.computerSessionControl(payload.runId, payload.action, payload.sessionId);
     },
   );
 

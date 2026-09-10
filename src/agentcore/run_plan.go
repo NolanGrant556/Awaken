@@ -50,6 +50,7 @@ type RunPlanPersistFunc func(ctx stdcontext.Context, record SemanticRecord) erro
 
 // RunPlanServiceConfig binds the run-scoped service to its host identity.
 type RunPlanServiceConfig struct {
+	Restored  *tool.RunPlanSnapshot
 	ThreadID  string
 	RunID     string
 	SessionID string
@@ -65,8 +66,8 @@ type runPlanService struct {
 	snapshot *tool.RunPlanSnapshot
 }
 
-// NewRunPlanService creates the run-scoped RunPlanService for one root run.
-// Child agents must never receive one (contract [工具定义](docs/02_主智能体闭环/运行计划/实现方案.md#工具定义): root-only tool).
+// NewRunPlanService creates one Agent's plan service; children never share the
+// parent's mutable service. A continuation can restore its own last snapshot.
 func NewRunPlanService(config RunPlanServiceConfig) tool.RunPlanService {
 	if config.Now == nil {
 		config.Now = func() time.Time { return time.Now().UTC() }
@@ -74,7 +75,12 @@ func NewRunPlanService(config RunPlanServiceConfig) tool.RunPlanService {
 	if config.NewPlanID == nil {
 		config.NewPlanID = func() string { return newAwakenID("plan") }
 	}
-	return &runPlanService{config: config}
+	service := &runPlanService{config: config}
+	if config.Restored != nil {
+		snapshot := cloneRunPlanSnapshot(*config.Restored)
+		service.snapshot = &snapshot
+	}
+	return service
 }
 
 func (s *runPlanService) Snapshot() (tool.RunPlanSnapshot, bool) {

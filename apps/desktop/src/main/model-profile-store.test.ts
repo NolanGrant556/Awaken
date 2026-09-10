@@ -69,6 +69,42 @@ afterEach(async () => {
 });
 
 describe("ModelProfileStore", () => {
+  it("resolves one run snapshot, retains effective effort, and leaves inherited routes unexpanded", async () => {
+    const store = new ModelProfileStore(configDir);
+    const root = await store.saveProfile({ providerId: "deepseek", modelId: "deepseek-v4-pro", protocol: "openai_chat", apiKey: "test-only-key", advanced: { defaultReasoningEffort: "high" } });
+    const readStore = vi.spyOn(store as any, "readStore");
+    const credentials = vi.spyOn(store as any, "readProfileCredential");
+    const bundle = await store.resolveRunBundle(root.id, "max");
+    expect(bundle).toMatchObject({ profileId: root.id, reasoningEffort: "max", purposeProfiles: {}, purposeProfileSources: { subagent: "inherited", compact_summary: "inherited" } });
+    expect(bundle?.configSnapshotRevision).toMatch(/^[a-f0-9]{64}$/);
+    expect(readStore).toHaveBeenCalledTimes(1);
+    expect(credentials).toHaveBeenCalledTimes(1);
+    await store.savePurposeRouting({ subagent: root.id, compact_summary: root.id, hook_agent: root.id });
+    readStore.mockClear(); credentials.mockClear();
+    const routed = await store.resolveRunBundle(root.id, "max");
+    expect(routed?.purposeProfiles?.subagent).toMatchObject({ profileId: root.id, reasoningEffort: "max" });
+    expect(routed?.purposeProfileSources?.subagent).toBe("host_route");
+    expect(credentials).toHaveBeenCalledTimes(1);
+    expect(readStore).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses a different routed profile's default and preserves an explicit summary route", async () => {
+    const store = new ModelProfileStore(configDir);
+    const root = await store.saveProfile({ providerId: "deepseek", modelId: "deepseek-v4-pro", protocol: "openai_chat", apiKey: "root-test-key" });
+    const child = await store.saveProfile({ providerId: "deepseek", modelId: "deepseek-v4-flash", protocol: "openai_responses", apiKey: "child-test-key", advanced: { defaultReasoningEffort: "high" } });
+    const summary = await store.saveProfile({ providerId: "anthropic", modelId: "claude-sonnet-4-6", protocol: "anthropic_messages", apiKey: "summary-test-key" });
+    await store.savePurposeRouting({ subagent: child.id, compact_summary: summary.id });
+    const bundle = await store.resolveRunBundle(root.id, "max");
+    expect(bundle?.reasoningEffort).toBe("max");
+    expect(bundle?.purposeProfiles?.subagent).toMatchObject({ profileId: child.id, reasoningEffort: "high", protocol: "openai_responses" });
+    expect(bundle?.purposeProfiles?.compact_summary).toMatchObject({ profileId: summary.id, protocol: "anthropic_messages" });
+    await store.saveProfile({ id: child.id, providerId: "deepseek", modelId: "deepseek-v4-flash", protocol: "openai_responses", enabled: false });
+    const fallback = await store.resolveRunBundle(root.id, "max");
+    expect(fallback?.purposeProfiles?.subagent).toBeUndefined();
+    expect(fallback?.purposeProfileSources?.subagent).toBe("optional_route_fallback");
+    expect(fallback?.reasoningEffort).toBe("max");
+  });
+
   it("groups built-in entries into Coding Plan, API, Agent Plan, and Custom", () => {
     const providers = new ModelProfileStore(configDir).listProviders();
     expect(

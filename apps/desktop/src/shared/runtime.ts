@@ -731,6 +731,7 @@ export type RuntimeThreadTranscriptRunWire = {
 };
 
 export type RuntimeThreadTranscriptWire = {
+  activity_cursor?: number;
   thread: RuntimeThreadWire;
   runs: RuntimeThreadTranscriptRunWire[];
 };
@@ -742,6 +743,7 @@ export type RuntimeThreadTranscriptRun = {
 };
 
 export type RuntimeThreadTranscript = {
+  activityCursor?: number;
   thread: RuntimeThread;
   runs: RuntimeThreadTranscriptRun[];
 };
@@ -2107,6 +2109,8 @@ export type ModelProfileRunConfigWire = {
   supports_prompt_cache?: boolean;
   reasoning_effort?: ReasoningEffortLevel;
   purpose_profiles?: Partial<Record<ModelPurpose, ModelProfileRunConfigWire>>;
+  purpose_profile_sources?: Partial<Record<ModelPurpose, "inherited" | "host_route" | "optional_route_fallback">>;
+  config_snapshot_revision?: string;
 };
 
 export type ModelProfileRunConfig = {
@@ -2135,6 +2139,8 @@ export type ModelProfileRunConfig = {
   supportsPromptCache?: boolean;
   reasoningEffort?: ReasoningEffortLevel;
   purposeProfiles?: Partial<Record<ModelPurpose, ModelProfileRunConfig>>;
+  purposeProfileSources?: Partial<Record<ModelPurpose, "inherited" | "host_route" | "optional_route_fallback">>;
+  configSnapshotRevision?: string;
 };
 
 export type WorkspacePickResult =
@@ -2650,12 +2656,6 @@ export type AwakenBridge = {
   startRun: (request: StartRunRequest) => Promise<DesktopOperationResult<RuntimeRun>>;
   cancelRun: (runId: string) => Promise<DesktopRequestResult<RuntimeRun>>;
   cancelSubagent: (runId: string, taskId: string, reason?: string) => Promise<DesktopRequestResult<void>>;
-  messageSubagent: (
-    runId: string,
-    taskId: string,
-    content: string,
-    idempotencyKey?: string,
-  ) => Promise<DesktopRequestResult<void>>;
   answerUserQuestion: (runId: string, questionId: string, answer: string) => Promise<DesktopRequestResult<void>>;
   cancelUserQuestion: (runId: string, questionId: string) => Promise<DesktopRequestResult<void>>;
   resolveExternalInteraction: (
@@ -2678,6 +2678,7 @@ export type AwakenBridge = {
   computerSessionControl: (
     runId: string,
     action: "takeover" | "return" | "pause" | "terminate",
+    sessionId?: string,
   ) => Promise<void>;
   getComputerHostStatus: () => Promise<ComputerHostStatus>;
   getComputerSettings: () => Promise<ComputerSettingsDocument>;
@@ -2690,6 +2691,8 @@ export type AwakenBridge = {
     permission: ComputerPermission,
   ) => Promise<void>;
   subscribeRun: (runId: string, handlers: RunStreamHandlers, afterSeq?: number) => Promise<DesktopRequestResult<string>>;
+  subscribeThreadActivity?: (threadId: string, handlers: RunStreamHandlers, afterCursor?: number) => Promise<DesktopRequestResult<string>>;
+  stopThreadAgents?: (threadId: string) => Promise<DesktopRequestResult<void>>;
   unsubscribeRun: (subscriptionId: string) => void;
   getDesktopPreferences: () => Promise<DesktopPreferences>;
   saveDesktopPreferences: (request: DesktopPreferencesSaveRequest) => Promise<DesktopPreferences>;
@@ -3051,6 +3054,7 @@ export function normalizeRuntimeThreadTranscript(
   transcript: RuntimeThreadTranscriptWire,
 ): RuntimeThreadTranscript {
   return {
+    activityCursor: transcript.activity_cursor ?? 0,
     thread: normalizeRuntimeThread(transcript.thread),
     runs: transcript.runs.map((entry) => ({
       run: normalizeRuntimeRun(entry.run),
@@ -3308,6 +3312,8 @@ export function normalizeModelProfileRunConfig(
     supports_tools: profile.supportsTools,
     supports_prompt_cache: profile.supportsPromptCache,
     reasoning_effort: profile.reasoningEffort,
+    purpose_profile_sources: profile.purposeProfileSources,
+    config_snapshot_revision: profile.configSnapshotRevision,
     purpose_profiles: profile.purposeProfiles
       ? Object.fromEntries(
           Object.entries(profile.purposeProfiles).map(([purpose, value]) => [

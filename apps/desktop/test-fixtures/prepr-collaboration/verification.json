@@ -1,0 +1,336 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-09-10T05:46:23.765070+00:00",
+  "scope": "PR 前协作生命周期修复与代码收敛；不替代 September 10 完整矩阵",
+  "git": {
+    "branch": "main",
+    "head": "f9b1dc16ae9bd2e8d02e3bc5634aaa2bae174f42",
+    "worktree": "dirty; not committed"
+  },
+  "source_sha256": {
+    "src/agentcore/skill_fork_integration_test.go": "e195194d9927981d9412b80a037317595ba6fb805f260544e27858c958c4d335",
+    "src/agentcore/runner.go": "526f38d9ce4a403b164965d41ef692c15558af13a4943f1a109875cd6bc29cfc",
+    "src/agentcore/child_creator.go": "5bf40c33e94f0c81a3e1848b5f9bf5e82ca0e846dc38c39bec5f6735f3e0dc6c",
+    "src/agentcore/types.go": "8ad722c62a6b0b21e015f1d42e4258b9ffdf41eef2927dc1292dbc08476783bc",
+    "src/agentcore/native_subagent_integration_test.go": "9f9cc5e7ef582e89b79482b6e049bf414cbdf59f99a588a0c8ffa4756e128ad2",
+    "src/agentcore/context_epoch.go": "dba0b5fd9428ab8129812527675b11d360ffa56008a73f7ec09305605efdb3ec",
+    "src/agentcore/runner_subagents.go": "ff3c0ca0af3cccd9f8aec72d979caf97e829bfa6a1686bab22088ac7ee84f298",
+    "src/agentcore/spawner.go": "5bdc3bcc487f45f8bae87c2b7cc202d3f0f2cce780fba8000bd3541a9173d2ff",
+    "src/agentcore/child_sessions.go": "e7f39b1c019a660753a1dbed26118ddb3779ab248d242201fc769a5001dab777",
+    "src/runtime/execution_journal.go": "7c4bdeabd103481dd53f888bfb5267c3b0ac45843963da0e1b0bc6b9e0d38730",
+    "src/runtime/context_epoch_store.go": "e625754dbb640da556a5d8ac3f7d3bdbf7429b1a67c3a554e40cabe86563ba69",
+    "src/runtime/event_bus.go": "75461fb00ebafaadd24e915d149437db6cb7cc1d86580a78d831e7f75197e80c",
+    "src/runtime/context_epoch_store_test.go": "a331f49579ee78c82cc12e85a3ca7f2df33fc9c5a9ceddd4f4030d4d9becc409",
+    "src/subagentruntime/manager_test.go": "5a22fbf03bdcd8542c5310fa60273e17cdd33b2462f140467926415e36d2528f",
+    "src/subagentruntime/manager.go": "0ab8b5683fcb307bada309aea88fac2045502c626ef6605e9d3d8ea3ff5185a5",
+    "apps/desktop/src/renderer/DesktopWorkbenchChrome.tsx": "431e0bd32a6648090b20f4a28c11802d45cbbf2651149decbc7cd37a47396c0c"
+  },
+  "binary_sha256": "346778f146d9c366075275ca73a923261eee0b4806a394bc218600f3d1b3e34f",
+  "desktop": {
+    "entry": "npm run close:desktop; npm run open:desktop",
+    "platform": "macOS arm64",
+    "provider": "Doubao-Seed-2.1-Pro",
+    "effort": "high",
+    "workspace": "/private/tmp/awaken-optimization-acceptance-20260909",
+    "skill_fixture": "---\nname: prepr-fork-0910\ndescription: PR 前生命周期回归专用，本地隔离 Skill。\ncontext: fork\nagent: general\n---\n这是一次受控本地验收。只读取工作区 prepr-fix-0910/seed.txt，返回其完整内容后结束。不访问任何其他文件，不派生子任务，不调用外部服务或连接器，不修改文件。\n",
+    "seed": "FORK-PREPR-913\n"
+  },
+  "cases": [
+    {
+      "title": "PRFIX-0910-A回归任务执行",
+      "thread_id": "thread_1789018618290684000_2",
+      "run_id": "run_1789018618290682000_1",
+      "journal_path": "/Users/nolangrant/.awaken/store-generations/gen-001/sessions/thread_1789018618290684000_2/journal.jsonl",
+      "journal_sha256": "fa208bbd7cc001dadd0eda62fac90e6a297300f2e5b80637d4d503638c961a65",
+      "root_terminal_seq": 183,
+      "terminal_reason": "completed",
+      "prompt": "PRFIX-0910-A：本地协作生命周期回归。仅使用当前工作区 prepr-fix-0910/ 夹具，不访问业务文件，不调用连接器、邮件或外部服务。按顺序完成：1. 用 Skill 工具执行已安装的 prepr-fork-0910（必须工具运行，不要只读 SKILL.md 代替），取得 FORK-PREPR-913。2. Skill 返回后，新建一个普通 general 子任务，描述 PREPR-AFTER-SKILL，要求它只运行一次 Bash 前台 sleep 2，然后返回 CHILD-PREPR-427；不要写文件。3. 用 subagent 的 wait 动作、return_when=any 等待这个 task_id，取得结果后，对同一个 task_id 再执行一次 wait any，验证立即返回终态。4. 最终只报告 Skill 结果、子任务结果、两次 wait 的实际状态。任何错误如实报告，不换新任务规避。",
+      "tools": [
+        {
+          "tool": "Read",
+          "call_seq": 38,
+          "result_seq": 41,
+          "agent_id": "subagent_7e8f5ddf4d16487188a7efb2",
+          "arguments": {
+            "file_path": "prepr-fix-0910/seed.txt"
+          },
+          "duration_ms": 2,
+          "is_error": false
+        },
+        {
+          "tool": "skill",
+          "call_seq": 26,
+          "result_seq": 54,
+          "agent_id": "root",
+          "arguments": {
+            "skill": "prepr-fork-0910"
+          },
+          "duration_ms": 13604,
+          "is_error": false,
+          "result_contains_fixture": true
+        },
+        {
+          "tool": "subagent",
+          "call_seq": 80,
+          "result_seq": 84,
+          "agent_id": "root",
+          "arguments": {
+            "action": "spawn",
+            "agent_type": "general",
+            "context_mode": "fresh",
+            "description": "PREPR-AFTER-SKILL 子任务",
+            "prompt": "你只需要执行一次Bash前台命令sleep 2，执行完成后返回CHILD-PREPR-427，不要写任何文件，不要做其他任何操作。",
+            "workspace_mode": "shared"
+          },
+          "duration_ms": 900,
+          "is_error": false,
+          "retrieval_status": null,
+          "tasks": [
+            {
+              "task_id": "subtask_42a21d0d692799ff2bbe2d7b",
+              "agent_id": "subagent_19325b91011ac14d9ab02969",
+              "status": "queued",
+              "result_content": null
+            }
+          ]
+        },
+        {
+          "tool": "Bash",
+          "call_seq": 97,
+          "result_seq": 110,
+          "agent_id": "subagent_19325b91011ac14d9ab02969",
+          "arguments": {
+            "command": "sleep 2",
+            "description": "执行sleep 2命令等待2秒"
+          },
+          "duration_ms": 2039,
+          "is_error": false
+        },
+        {
+          "tool": "subagent",
+          "call_seq": 116,
+          "result_seq": 127,
+          "agent_id": "root",
+          "arguments": {
+            "action": "wait",
+            "return_when": "any",
+            "task_ids": [
+              "subtask_42a21d0d692799ff2bbe2d7b"
+            ],
+            "timeout_ms": 10000
+          },
+          "duration_ms": 224,
+          "is_error": false,
+          "retrieval_status": "completed",
+          "tasks": [
+            {
+              "task_id": "subtask_42a21d0d692799ff2bbe2d7b",
+              "agent_id": "subagent_19325b91011ac14d9ab02969",
+              "status": "completed",
+              "result_content": "CHILD-PREPR-427"
+            }
+          ]
+        },
+        {
+          "tool": "subagent",
+          "call_seq": 144,
+          "result_seq": 148,
+          "agent_id": "root",
+          "arguments": {
+            "action": "wait",
+            "return_when": "any",
+            "task_ids": [
+              "subtask_42a21d0d692799ff2bbe2d7b"
+            ],
+            "timeout_ms": 1000
+          },
+          "duration_ms": 1,
+          "is_error": false,
+          "retrieval_status": "completed",
+          "tasks": [
+            {
+              "task_id": "subtask_42a21d0d692799ff2bbe2d7b",
+              "agent_id": "subagent_19325b91011ac14d9ab02969",
+              "status": "completed",
+              "result_content": "CHILD-PREPR-427"
+            }
+          ]
+        }
+      ],
+      "incidental_errors": [
+        {
+          "seq": 63,
+          "tool": "update_plan",
+          "content": "plan_version_conflict: base_version 0 does not match current version 1"
+        }
+      ],
+      "child_terminals": [
+        {
+          "task_id": "subtask_e2b5efcd5c135274ac1e01dc",
+          "agent_id": "subagent_7e8f5ddf4d16487188a7efb2",
+          "attempt_id": "attempt_adb8bf84a220152a2df6ba6f",
+          "status": "completed",
+          "result_preview": "## 任务完成结果\n\n已按照要求读取 `prepr-fix-0910/seed.txt`，其完整内容为：\n\n```\nFORK-PREPR-913\n```\n\n**执行说明**：\n- 仅读取了指定文件，未访问其他任何文件\n- 未派生子任务，未调用外部服务/连接器\n- 未修改任何文件\n- 工具执行成功，无错误",
+          "seq": 52
+        },
+        {
+          "task_id": "subtask_42a21d0d692799ff2bbe2d7b",
+          "agent_id": "subagent_19325b91011ac14d9ab02969",
+          "attempt_id": "attempt_64d0ff26bd57e72cf90c6c48",
+          "status": "completed",
+          "result_preview": "CHILD-PREPR-427",
+          "seq": 124
+        }
+      ]
+    },
+    {
+      "title": "PRFIX-0910-B本地受控回归执行",
+      "thread_id": "thread_1789018863913469000_4",
+      "run_id": "run_1789018863913468000_3",
+      "journal_path": "/Users/nolangrant/.awaken/store-generations/gen-001/sessions/thread_1789018863913469000_4/journal.jsonl",
+      "journal_sha256": "003b2b7f255938b107ccbd2b32c1ca5146040b6c323fca9b6bb6c79cee1c3538",
+      "root_terminal_seq": 59,
+      "terminal_reason": "completed",
+      "prompt": "PRFIX-0910-B：宿主等待与结果汇总的本地受控回归。主 Agent 只允许调用一次 subagent spawn，派一个 general 子任务，描述 PREPR-HOST-WAIT：要求子任务只运行一次 Bash 前台 sleep 25（timeout 60000），结束后只返回 CHILD-WAIT-428，不访问文件或外部服务。主 Agent 得到 spawn 回执后立即输出候选分析“PARENT-ANALYSIS-913：已完成主侧分析，等待子结果后汇总。”不要调用 wait/status/update_plan 或任何其他工具。宿主会负责等待；当你实际收到子任务终态通知后，引用前一轮分析并结合 CHILD-WAIT-428 给出最终报告，说明是收到子结果后汇总。不要提前声称子任务完成。",
+      "tools": [
+        {
+          "tool": "subagent",
+          "call_seq": 14,
+          "result_seq": 18,
+          "agent_id": "root",
+          "arguments": {
+            "action": "spawn",
+            "agent_type": "general",
+            "context_mode": "fresh",
+            "description": "PREPR-HOST-WAIT受控回归子任务",
+            "prompt": "你仅需执行以下唯一操作：调用Bash工具前台执行命令`sleep 25`，设置timeout为60000，命令执行完成后仅返回字符串`CHILD-WAIT-428`，不要访问任何文件、不要调用外部服务、不要执行其他任何额外操作。"
+          },
+          "duration_ms": 164,
+          "is_error": false,
+          "retrieval_status": null,
+          "tasks": [
+            {
+              "task_id": "subtask_b6b63e9c741c2060ce5a14d8",
+              "agent_id": "subagent_0a9095cf5b87bb8fdd3d48ea",
+              "status": "queued",
+              "result_content": null
+            }
+          ]
+        },
+        {
+          "tool": "Bash",
+          "call_seq": 34,
+          "result_seq": 38,
+          "agent_id": "subagent_0a9095cf5b87bb8fdd3d48ea",
+          "arguments": {
+            "command": "sleep 25",
+            "description": "Execute sleep 25 as instructed",
+            "timeout": 60000
+          },
+          "duration_ms": 25031,
+          "is_error": false
+        }
+      ],
+      "incidental_errors": [],
+      "child_terminals": [
+        {
+          "task_id": "subtask_b6b63e9c741c2060ce5a14d8",
+          "agent_id": "subagent_0a9095cf5b87bb8fdd3d48ea",
+          "attempt_id": "attempt_aed0cd70b7b73dfeaff7904c",
+          "status": "completed",
+          "result_preview": "CHILD-WAIT-428",
+          "seq": 48
+        }
+      ],
+      "host_wait": {
+        "candidate_seq": 29,
+        "candidate": "PARENT-ANALYSIS-913：已完成主侧分析，等待子结果后汇总。",
+        "waiting_seq": 30,
+        "child_terminal_seq": 48,
+        "handoff_seq": 49,
+        "running_seq": 50,
+        "root_requests_during_wait": 0,
+        "final_report": "### PREPR-HOST-WAIT 本地受控回归最终报告\n引用前序主侧分析结论：**PARENT-ANALYSIS-913：已完成主侧分析，等待子结果后汇总。**\n\n当前已收到宿主转发的子任务终态通知，结合子任务返回结果完成最终汇总：\n1. 子任务严格按要求执行：仅运行了1次前台`sleep 25`命令（超时设置为60000ms），执行全程未访问任何本地文件、未调用外部服务，无额外操作\n2. 子任务返回预期标识：`CHILD-WAIT-428`\n3. 本次宿主等待、子任务执行、结果汇总全流程符合PRFIX-0910-B回归验证要求，流程正常。"
+      }
+    }
+  ],
+  "ui_observation": {
+    "method": "CUA native Electron AX and screenshots in this Codex conversation",
+    "passed": [
+      "Open completed Skill and ordinary child in read-only right-side tabs",
+      "New-tab chooser opens project files beside existing child tab",
+      "seed.txt exact readback FORK-PREPR-913",
+      "Switch child/file tabs and retain PREPR-DRAFT-KEEP in root composer",
+      "Return to file preserves preview and tree; clear only test draft",
+      "Root result visibly combines PARENT-ANALYSIS-913 and CHILD-WAIT-428"
+    ],
+    "not_covered": [
+      "cross-platform",
+      "all themes and narrow viewport matrix",
+      "stop-all click in this live run"
+    ],
+    "screenshots_location": "Original CUA image responses in this Codex conversation; no copied historical screenshots."
+  },
+  "automated_checks": [
+    {
+      "command": "go test ./...",
+      "result": "passed",
+      "log_path": "/tmp/awaken-prepr-fix-go-final.log",
+      "log_sha256": "d753c61311ca6ec334b686b7405d6cf6ea659b0bb045fc03cb5145dc20fab7b3"
+    },
+    {
+      "command": "go vet ./...",
+      "result": "passed",
+      "log_path": "/tmp/awaken-prepr-fix-vet.log",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "command": "go test -race ./src/agentcore ./src/subagentruntime ./src/runtime ./src/server",
+      "result": "passed",
+      "log_path": "/tmp/awaken-prepr-fix-race.log",
+      "log_sha256": "d128f3be0a0959b8ab32756affad460e3bf183d0521614396c26273e8127bff2"
+    },
+    {
+      "command": "20 repeated focused race regressions",
+      "result": "passed",
+      "log_path": "/tmp/awaken-prepr-fix-focused.log",
+      "log_sha256": "86434518ea62660ed65a0b472c48290b81e3a09f20a3d6572f7b26852370e75b"
+    },
+    {
+      "command": "legacy child epoch compatibility and Skill lifecycle",
+      "result": "passed",
+      "log_path": "/tmp/awaken-prepr-fix-compat.log",
+      "log_sha256": "fc63344e9daf20ffeec63bdbe111403c101c284e48600131f5fc9034df963390"
+    },
+    {
+      "command": "Desktop full Vitest: 151 files, 1566 tests",
+      "result": "passed",
+      "log_path": "/tmp/awaken-prepr-fix-desktop-tests.log",
+      "log_sha256": "dd3baa46b8b287cc33b175e86ae27966ea235c52d5a8b09efe9616070e765a2c"
+    },
+    {
+      "command": "Desktop typecheck",
+      "result": "passed",
+      "log_path": "/tmp/awaken-prepr-fix-types.log",
+      "log_sha256": "a4b40c009f2ac300e0fd6a005c7e48dc24adcc307fce76740e82d9e240aaea21"
+    },
+    {
+      "command": "Design System typecheck",
+      "result": "passed",
+      "log_path": "/tmp/awaken-prepr-fix-ds-types.log",
+      "log_sha256": "b12e0d12dae6ee7f111b17a5ca59416317c679be35df85d2f59ecf43b1bda753"
+    },
+    {
+      "command": "npm run build:desktop",
+      "result": "passed",
+      "log_path": "/tmp/awaken-prepr-fix-build.log",
+      "log_sha256": "6e4224b50e02638e8537f93ca51f394e8f5cb1a1e55d5ef0570354a4bd479cb9"
+    }
+  ],
+  "limits": [
+    "Provider request bodies are not recorded; candidate-once/order in next model input is checked by TestSubagentHandoffRetainsCandidateBeforeResult.",
+    "Skill/run stop barrier and same-Agent followup checked by TestSkillForkMustPreserveCreatorLifetime.",
+    "Run A included one plan_version_conflict rejected by the existing version check and then corrected by the model; its no-errors summary is not an acceptance assertion.",
+    "No complete workload/provider/recovery/business-service matrix was rerun."
+  ]
+}

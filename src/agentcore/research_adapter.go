@@ -50,7 +50,11 @@ func (r *Runner) runDeepResearch(ctx stdcontext.Context, events *runEventEmitter
 		Journal:   &researchJournal{runner: r, events: events},
 		Cancelled: func() bool { return ctx.Err() != nil },
 	}
-	result, err := orch.Run(ctx, *r.config.ResearchIntent)
+	resumeExecution := subagentruntime.SuspendExecution(ctx)
+	result, err := orch.Run(subagentruntime.WithoutExecutionLease(ctx), *r.config.ResearchIntent)
+	if resumeErr := resumeExecution(); resumeErr != nil && err == nil {
+		err = resumeErr
+	}
 	if err != nil {
 		if ctx.Err() != nil {
 			events.turnFinished(ctx, TerminalReasonCancelled, "")
@@ -207,7 +211,11 @@ func (c *researchChildClient) Run(ctx stdcontext.Context, spec researchruntime.C
 		task := wait.Tasks[0]
 		switch task.Status {
 		case subagentruntime.StatusCompleted:
-			return researchruntime.ChildResult{Output: task.ResultPreview, Receipts: task.HostToolReceipts}, nil
+			output := task.ResultContent
+			if output == "" {
+				output = task.ResultPreview
+			} // legacy/stub child adapter
+			return researchruntime.ChildResult{AgentID: task.AgentID, TaskID: task.TaskID, AttemptID: task.AttemptID, Output: output, Receipts: task.HostToolReceipts}, nil
 		case subagentruntime.StatusCancelled, subagentruntime.StatusInterrupted:
 			return researchruntime.ChildResult{}, stdcontext.Canceled
 		default:
@@ -343,14 +351,25 @@ func (s *researchSynthesizer) Synthesize(ctx stdcontext.Context, prompt string) 
 		return "", fmt.Errorf("synthesis model is unavailable")
 	}
 	req := LLMRequest{Model: model, Temperature: s.runner.config.ModelConfig.Temperature, MaxTokens: s.runner.config.ModelConfig.MaxTokens}
-	return llm.Call(ctx, s.runner.transportConfig(req), llm.Request{
-		RequestID:       newAwakenID("research_synth"),
-		SystemPrompt:    "Return JSON only. Do not call tools or invent citation IDs.",
-		UserPrompt:      prompt,
-		Model:           model,
-		Purpose:         llm.RequestPurposeAgentTurn,
-		AffinityScopeID: s.runner.threadID,
-	})
+	capacity := s.runner.config.ModelConfig.ContextWindow
+	if maxInput := s.runner.config.ModelConfig.MaxInputTokens; maxInput > 0 && (capacity <= 0 || maxInput < capacity) {
+		capacity = maxInput
+	}
+	response, err := InvokeRecordedModel(ctx, ModelCallAuthority{
+		ThreadID: s.runner.threadID, RunID: s.runner.runID, SessionID: s.runner.sessionID,
+		Recorder: s.runner.recorder, MaxInputTokens: capacity,
+	}, s.runner.transportConfig(req), llm.Request{
+		RequestID:    newAwakenID("research_synth"),
+		SystemPrompt: "Return JSON only. Do not call tools or invent citation IDs.",
+		UserPrompt:   prompt, Model: model,
+		MaxTokens:       s.runner.config.ModelConfig.MaxTokens,
+		ReasoningPolicy: s.runner.config.ModelConfig.ReasoningEffort,
+		Purpose:         llm.RequestPurposeResearchSynthesis, AffinityScopeID: s.runner.threadID,
+	}, 0, false)
+	if err != nil {
+		return "", err
+	}
+	return response.Content, nil
 }
 
 type researchJournal struct {

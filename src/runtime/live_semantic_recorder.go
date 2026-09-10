@@ -39,6 +39,23 @@ func (r *liveSemanticRecorder) SemanticRecords(fromSeq, toSeq uint64) ([]agentco
 	return reader.SemanticRecords(fromSeq, toSeq)
 }
 
+func (r *liveSemanticRecorder) SemanticRecordsForAgent(agentID string, fromSeq, toSeq uint64) ([]agentcore.SemanticRecord, error) {
+	if reader, ok := r.base.(agentcore.AgentSemanticRecordRangeReader); ok {
+		return reader.SemanticRecordsForAgent(agentID, fromSeq, toSeq)
+	}
+	records, err := r.SemanticRecords(fromSeq, toSeq)
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]agentcore.SemanticRecord, 0)
+	for _, record := range records {
+		if stringPayload(record.Payload, "agent_id") == agentID {
+			filtered = append(filtered, record)
+		}
+	}
+	return filtered, nil
+}
+
 func (r *liveSemanticRecorder) Append(ctx context.Context, record agentcore.SemanticRecord) error {
 	_, err := r.AppendAssigned(ctx, record)
 	return err

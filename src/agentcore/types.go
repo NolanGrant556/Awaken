@@ -18,12 +18,25 @@ import (
 )
 
 type AgentConfig struct {
-	SystemPrompt string
-	// MaxThoughts is the max agent turns. <= 0 uses DefaultMaxAgentTurns (128);
+	RestoredRunPlan         *tool.RunPlanSnapshot
+	NewChildComputerRuntime func(stdcontext.Context, subagentruntime.TaskSnapshot, ModelConfig) (*computer.Runtime, func(), error)
+
+	AttemptID           string
+	RoleDigest          string
+	ContextRevision     uint64
+	AgentTurnsUsed      int
+	AgentToolsUsed      int
+	LoadChildContext    func(stdcontext.Context, string) (*ChildRestoreState, error)
+	ChildSessions       *ChildSessions
+	ResolveModelBinding func(stdcontext.Context, string, string) (ModelConfig, error)
+	ListModelBindings   func(stdcontext.Context) ([]subagentruntime.ModelOption, error)
+	CollaborationPolicy subagentruntime.Policy
+	SystemPrompt        string
+	// MaxThoughts is the max agent turns. <= 0 uses DefaultMaxAgentTurns (256);
 	// it no longer means unlimited.
 	MaxThoughts int
 	// MaxToolExecutions caps real tool executions per run. <= 0 uses
-	// DefaultMaxToolExecutions (512).
+	// DefaultMaxToolExecutions (1024).
 	MaxToolExecutions int
 	ModelConfig       ModelConfig
 	// Purpose-specific configs are Host-resolved routes. Empty values inherit
@@ -52,14 +65,15 @@ type AgentConfig struct {
 	// authority and are not duplicated into the compact journal.
 	CompactedMemoryContext string
 	// RunPlanContextProvider renders the host-owned CurrentRunPlan block of
-	// the current root run at request build time. It is bound by the root
-	// Runner to the run-scoped RunPlanService; empty content skips the block.
-	// Child configs never inherit it (root-only contract).
+	// current Agent at request build time. Each Runner binds its own service;
+	// children never inherit the parent's mutable plan provider.
 	RunPlanContextProvider func() (string, error)
 	// ArchivedHistoryService is the host-owned, read-only bridge used by the
-	// root Agent to list archived threads and read bounded transcript pages.
-	// It never exposes the FileStore path and is not inherited by Subagents.
+	// Agent to list archived threads and read bounded transcript pages within
+	// the current authority. Restricted workflow roles do not receive it.
 	ArchivedHistoryService tool.ArchivedHistoryService
+	// HistoryAncestors contains only the ranges granted at a fork boundary.
+	HistoryAncestors []tool.HistoryRange
 	// MemoryRecallStart launches non-blocking manifest selection for a user
 	// turn. MemoryContextProvider exposes a completed result later.
 	MemoryRecallStart        func(stdcontext.Context, string, []string)
@@ -142,8 +156,8 @@ type AgentConfig struct {
 	// SubagentTaskID binds native child records to the host-owned task identity.
 	// It is empty for the root Agent and legacy Skill fork children.
 	SubagentTaskID string
-	// SubagentController is run-scoped and is only exposed to the root runner.
-	// It is never copied into child configs.
+	// SubagentController is the current Agent's scoped view of the thread's
+	// shared manager. Children receive their own descendant-only controller.
 	SubagentController subagentruntime.Controller
 	// ToolSessionState is mutable thread-local file/cwd state. It is never
 	// journaled and must not be shared with child agents.
@@ -307,26 +321,28 @@ type TaskScope struct {
 type WorkspaceConfig = TaskScope
 
 type ModelConfig struct {
-	APIKey                string
-	BaseURL               string
-	InferenceEndpoint     string
-	Model                 string
-	CapabilityModelID     string
-	EndpointSelector      string
-	ModelSelectorKind     string
-	Protocol              string
-	ProviderID            string
-	ProfileID             string
-	CredentialRevision    uint64
-	Temperature           float64
-	MaxTokens             int
-	AuthScheme            string
-	ContextWindow         int
-	MaxInputTokens        int
-	SupportsPromptCache   bool
-	AutoCompactTokenLimit int
-	Capabilities          tool.ModelCapabilities
-	ReasoningEffort       string
+	BindingSource          string
+	ConfigSnapshotRevision string
+	APIKey                 string
+	BaseURL                string
+	InferenceEndpoint      string
+	Model                  string
+	CapabilityModelID      string
+	EndpointSelector       string
+	ModelSelectorKind      string
+	Protocol               string
+	ProviderID             string
+	ProfileID              string
+	CredentialRevision     uint64
+	Temperature            float64
+	MaxTokens              int
+	AuthScheme             string
+	ContextWindow          int
+	MaxInputTokens         int
+	SupportsPromptCache    bool
+	AutoCompactTokenLimit  int
+	Capabilities           tool.ModelCapabilities
+	ReasoningEffort        string
 }
 
 type LLMRequest struct {

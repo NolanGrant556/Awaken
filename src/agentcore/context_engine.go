@@ -103,6 +103,11 @@ func (g *contextGovernor) RestoreUsageAnchor(anchor *ContextWindowUsageAnchor, c
 	}
 	g.lastAPIUsageTokens = anchor.UsageTokens
 	g.lastSentEstimatedInputTokens = anchor.SentEstimatedInputTokens
+	if anchor.EstimatorID != contextEstimatorID {
+		// Keep provider truth as a lower bound, but never apply an older
+		// estimator's calibration ratio to the new estimator's fixed floor.
+		g.lastSentEstimatedInputTokens = 0
+	}
 	g.pendingSentEstimatedInputTokens = 0
 }
 
@@ -440,7 +445,7 @@ func compactMandatoryFloorUnreachable(err error) bool {
 
 func (g *contextGovernor) evaluateCompactPostcondition(llmReq LLMRequest, preState ContextWindowState, result CompactResult) error {
 	if result.Fallback.Used {
-		return fmt.Errorf("%w: fallback summary is not a successful compact", errInsufficientReduction)
+		return fmt.Errorf("%w: fallback summary is not a successful compact: %s", errInsufficientReduction, strings.TrimSpace(result.Fallback.Reason))
 	}
 	summaryText := strings.TrimSpace(result.SummaryMessage.Content)
 	if summaryText == "" && len(result.Messages) > 0 {

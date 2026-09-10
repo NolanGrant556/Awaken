@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"awaken/src/tool"
 )
@@ -32,6 +34,7 @@ const (
 )
 
 type Message struct {
+	OriginAgentID     string                  `json:"origin_agent_id,omitempty"`
 	Role              Role                    `json:"role"`
 	Content           string                  `json:"content"`
 	Attachments       []MessageAttachment     `json:"attachments,omitempty"`
@@ -317,7 +320,20 @@ func EstimateTokens(text string) int {
 		return 0
 	}
 	wordEstimate := len(strings.Fields(text)) * 4 / 3
-	charEstimate := len([]rune(text)) / 4
+	// CJK text often uses roughly one token per character; treating it like
+	// four Latin characters severely underestimates large Read results.
+	latin, cjk := utf8.RuneCountInString(text), 0
+	// Tool schemas and most protocol text are ASCII. Keep their common path
+	// on the standard rune counter without another classification pass.
+	if latin != len(text) {
+		for _, character := range text {
+			if character >= 0x1100 && unicode.In(character, unicode.Han, unicode.Hiragana, unicode.Katakana, unicode.Hangul) {
+				cjk++
+				latin--
+			}
+		}
+	}
+	charEstimate := latin/4 + cjk
 	if charEstimate == 0 {
 		charEstimate = 1
 	}

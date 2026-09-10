@@ -459,18 +459,6 @@ const bridge: AwakenBridge = {
       taskId,
       reason,
     }) as Promise<DesktopRequestResult<void>>,
-  messageSubagent: (
-    runId: string,
-    taskId: string,
-    content: string,
-    idempotencyKey?: string,
-  ) =>
-    ipcRenderer.invoke("awaken:message-subagent", {
-      runId,
-      taskId,
-      content,
-      idempotencyKey,
-    }) as Promise<DesktopRequestResult<void>>,
   answerUserQuestion: (runId: string, questionId: string, answer: string) =>
     ipcRenderer.invoke("awaken:answer-user-question", {
       runId,
@@ -512,10 +500,11 @@ const bridge: AwakenBridge = {
       reviewId,
       decision,
     }) as Promise<void>,
-  computerSessionControl: (runId: string, action: "takeover" | "return" | "pause" | "terminate") =>
+  computerSessionControl: (runId: string, action: "takeover" | "return" | "pause" | "terminate", sessionId?: string) =>
     ipcRenderer.invoke("awaken:computer-session-control", {
       runId,
       action,
+      sessionId,
     }) as Promise<void>,
   getComputerHostStatus: () =>
     ipcRenderer.invoke("awaken:get-computer-host-status") as Promise<ComputerHostStatus>,
@@ -546,6 +535,16 @@ const bridge: AwakenBridge = {
       throw error;
     }
   },
+  subscribeThreadActivity: async (threadId: string, handlers: RunStreamHandlers, afterCursor?: number) => {
+    const subscriptionId = crypto.randomUUID();
+    subscriptions.set(subscriptionId, handlers);
+    try {
+      const result = await ipcRenderer.invoke("awaken:subscribe-thread-activity", { threadId, subscriptionId, afterCursor }) as DesktopRequestResult<string>;
+      if (!result.ok) subscriptions.delete(subscriptionId);
+      return result;
+    } catch (error) { subscriptions.delete(subscriptionId); throw error; }
+  },
+  stopThreadAgents: (threadId: string) => ipcRenderer.invoke("awaken:stop-thread-agents", { threadId }) as Promise<DesktopRequestResult<void>>,
   unsubscribeRun: (subscriptionId: string) => {
     subscriptions.delete(subscriptionId);
     ipcRenderer.send("awaken:unsubscribe-run", subscriptionId);

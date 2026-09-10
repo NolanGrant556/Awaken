@@ -2,6 +2,7 @@ package subagentruntime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -73,6 +74,14 @@ func ErrorCode(err error) string {
 }
 
 type SpawnRequest struct {
+	RoleSnapshot *Role `json:"-"`
+	// Legacy input only; new assignments always use the parent execution lifetime.
+	Background       bool   `json:"background,omitempty"`
+	ContinuesFrom    string `json:"-"`
+	ContextMode      string `json:"context_mode,omitempty"`
+	RecentTurns      int    `json:"recent_turns,omitempty"`
+	ReasoningEffort  string `json:"reasoning_effort,omitempty"`
+	reuseAgentID     string
 	Description      string            `json:"description"`
 	Prompt           string            `json:"prompt"`
 	AgentType        string            `json:"agent_type"`
@@ -83,14 +92,18 @@ type SpawnRequest struct {
 	ThreadID         string            `json:"-"`
 	RunID            string            `json:"-"`
 	TurnID           string            `json:"-"`
-	WritableRoots    []string          `json:"-"`
 	Host             *HostSpawnOptions `json:"-"`
 }
 
 type WaitRequest struct {
-	TaskIDs    []string
-	ReturnWhen string
-	Timeout    time.Duration
+	// DeferAcknowledgement lets the Runner acknowledge only after its result
+	// and delivery receipt have committed together to the journal.
+	DeferAcknowledgement bool
+	// EventDriven keeps Host waits suspended until a result or cancellation.
+	EventDriven bool
+	TaskIDs     []string
+	ReturnWhen  string
+	Timeout     time.Duration
 }
 
 const (
@@ -114,32 +127,48 @@ type MessageReceipt struct {
 }
 
 type TaskSnapshot struct {
-	TaskID           string           `json:"task_id"`
-	AgentID          string           `json:"agent_id"`
-	ParentAgentID    string           `json:"parent_agent_id"`
-	ParentToolCallID string           `json:"parent_tool_call_id,omitempty"`
-	ThreadID         string           `json:"thread_id"`
-	RunID            string           `json:"run_id"`
-	TurnID           string           `json:"turn_id,omitempty"`
-	Description      string           `json:"description"`
-	AgentType        string           `json:"agent_type"`
-	WorkspaceMode    string           `json:"workspace_mode"`
-	ModelProfileID   string           `json:"model_profile_id,omitempty"`
-	Status           TaskStatus       `json:"status"`
-	CurrentActivity  string           `json:"current_activity,omitempty"`
-	ToolUseCount     int              `json:"tool_use_count"`
-	EstimatedTokens  int              `json:"estimated_tokens,omitempty"`
-	InputTokens      int              `json:"input_tokens,omitempty"`
-	OutputTokens     int              `json:"output_tokens,omitempty"`
-	TotalTokens      int              `json:"total_tokens,omitempty"`
-	ResultPreview    string           `json:"result_preview,omitempty"`
-	ErrorCode        string           `json:"error_code,omitempty"`
-	ErrorMessage     string           `json:"error_message,omitempty"`
-	SideEffectState  string           `json:"side_effect_state,omitempty"`
-	Worktree         *WorktreeReceipt `json:"worktree,omitempty"`
-	CreatedAt        time.Time        `json:"created_at"`
-	StartedAt        *time.Time       `json:"started_at,omitempty"`
-	FinishedAt       *time.Time       `json:"finished_at,omitempty"`
+	ScopeDigest   string `json:"scope_digest,omitempty"`
+	RoleDigest    string `json:"role_digest,omitempty"`
+	Workflow      string `json:"workflow,omitempty"`
+	Background    bool   `json:"background,omitempty"`
+	ContinuesFrom string `json:"continues_from,omitempty"`
+	ContextMode   string `json:"context_mode,omitempty"`
+	RecentTurns   int    `json:"recent_turns,omitempty"`
+	AttemptID     string `json:"attempt_id,omitempty"`
+	AgentClosed   bool   `json:"agent_closed,omitempty"`
+	// ResultContent is the full Host result. Preview never serves as typed JSON authority.
+	ResultContent          string           `json:"-"`
+	ResultDigest           string           `json:"result_digest,omitempty"`
+	ModelID                string           `json:"model_id,omitempty"`
+	ReasoningEffort        string           `json:"reasoning_effort,omitempty"`
+	ModelBindingSource     string           `json:"model_binding_source,omitempty"`
+	ConfigSnapshotRevision string           `json:"config_snapshot_revision,omitempty"`
+	TaskID                 string           `json:"task_id"`
+	AgentID                string           `json:"agent_id"`
+	ParentAgentID          string           `json:"parent_agent_id"`
+	ParentToolCallID       string           `json:"parent_tool_call_id,omitempty"`
+	ThreadID               string           `json:"thread_id"`
+	RunID                  string           `json:"run_id"`
+	TurnID                 string           `json:"turn_id,omitempty"`
+	Description            string           `json:"description"`
+	AgentType              string           `json:"agent_type"`
+	WorkspaceMode          string           `json:"workspace_mode"`
+	ModelProfileID         string           `json:"model_profile_id,omitempty"`
+	Status                 TaskStatus       `json:"status"`
+	CurrentActivity        string           `json:"current_activity,omitempty"`
+	ToolUseCount           int              `json:"tool_use_count"`
+	EstimatedTokens        int              `json:"estimated_tokens,omitempty"`
+	InputTokens            int              `json:"input_tokens,omitempty"`
+	OutputTokens           int              `json:"output_tokens,omitempty"`
+	TotalTokens            int              `json:"total_tokens,omitempty"`
+	ResultPreview          string           `json:"result_preview,omitempty"`
+	ErrorCode              string           `json:"error_code,omitempty"`
+	ErrorMessage           string           `json:"error_message,omitempty"`
+	SideEffectState        string           `json:"side_effect_state,omitempty"`
+	Worktree               *WorktreeReceipt `json:"worktree,omitempty"`
+	CreatedAt              time.Time        `json:"created_at"`
+	StartedAt              *time.Time       `json:"started_at,omitempty"`
+	FinishedAt             *time.Time       `json:"finished_at,omitempty"`
 	// HostToolReceipts are host-only, successful read receipts used to ground
 	// Deep Research evidence. They are intentionally excluded from the public
 	// subagent snapshot and are persisted by the research journal instead.
@@ -147,6 +176,9 @@ type TaskSnapshot struct {
 }
 
 type HostToolReceipt struct {
+	AgentID    string
+	TaskID     string
+	AttemptID  string
 	ToolCallID string
 	ToolName   string
 	Details    map[string]any
@@ -181,23 +213,35 @@ func (s TaskSnapshot) Terminal() bool {
 }
 
 type StartRequest struct {
-	Task           TaskSnapshot
-	Prompt         string
-	Host           *HostSpawnOptions
-	ReportProgress ProgressReporter
-	DrainMessages  func() []QueuedMessage
-	AttachWorktree func(*WorktreeReceipt)
+	RoleSnapshot        *Role
+	IncorporateMessages func([]string)
+	ContextSeed         json.RawMessage
+	Task                TaskSnapshot
+	Prompt              string
+	Host                *HostSpawnOptions
+	ReportProgress      ProgressReporter
+	DrainMessages       func() []QueuedMessage
+	AttachWorktree      func(*WorktreeReceipt)
 }
 
 // HostSpawnOptions are host-only child constraints. They never enter the
 // model-visible subagent tool schema.
 type HostSpawnOptions struct {
+	Skill             *HostSkillContext
 	ToolAllowlist     []string
 	ExtraHidden       []string
 	MaxThoughts       int
 	MaxToolExecutions int
 	SkipMemory        bool
 	SystemPrompt      string
+}
+
+type HostSkillContext struct {
+	ID     string
+	Path   string
+	Body   string
+	Model  string
+	Effort string
 }
 
 // ProgressUpdate is emitted only after the corresponding child tool_call or
@@ -222,9 +266,35 @@ type ProgressReporter func(context.Context, ProgressUpdate) error
 type Starter func(context.Context, StartRequest) (string, error)
 
 type PersistEvent struct {
-	Kind     string
-	Snapshot TaskSnapshot
-	Message  *QueuedMessage
+	Prompt      string
+	ContextSeed json.RawMessage
+	Kind        string
+	Snapshot    TaskSnapshot
+	Message     *QueuedMessage
+}
+
+// SpawnPreparation is created by the Host at the creator's safe boundary.
+// ContextSeed is provider-neutral and durable. Credentials live only inside
+// the immutable Starter closure and never in this public model binding.
+type SpawnPreparation struct {
+	Starter     Starter
+	ContextSeed json.RawMessage
+	Model       ModelBinding
+}
+
+type ModelBinding struct {
+	ProfileID       string `json:"profile_id"`
+	ModelID         string `json:"model_id"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	Source          string `json:"source"`
+	Revision        string `json:"revision,omitempty"`
+}
+
+type ModelOption struct {
+	ProfileID string   `json:"profile_id"`
+	Name      string   `json:"name"`
+	ModelID   string   `json:"model_id"`
+	Efforts   []string `json:"efforts,omitempty"`
 }
 
 type Persister func(context.Context, PersistEvent) error

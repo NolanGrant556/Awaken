@@ -154,6 +154,7 @@ export class RuntimeControlClient {
   async computerSessionControl(
     runId: string,
     action: "takeover" | "return" | "pause" | "terminate",
+    sessionId?: string,
   ): Promise<void> {
     const resp = await fetch(
       `${this.baseUrl}/v1/control/computer/sessions/${encodeURIComponent(runId)}/${action}`,
@@ -161,7 +162,9 @@ export class RuntimeControlClient {
         method: "POST",
         headers: {
           Authorization: `Bearer ${this.token}`,
+          "Content-Type": "application/json",
         },
+        body: JSON.stringify({ session_id: sessionId }),
       },
     );
     if (!resp.ok) {

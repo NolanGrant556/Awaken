@@ -3,28 +3,21 @@ import type { AwakenMediaMetadata } from "@awaken/design-system";
 import type { ArtifactOpenRequest } from "../shared/runtime";
 import type { RunPlanView } from "./runtime/reducer";
 import {
-  AwakenAssistantMessage as AssistantMessage,
   AwakenIcon,
   AwakenContextUsagePanel as ContextUsagePanel,
   AwakenMediaPreviewOverlay as MediaPreviewOverlay,
   AwakenRunPlanPanel as RunPlanPanel,
-  AwakenSubagentExecutionCard as SubagentExecutionCard,
 } from "@awaken/design-system";
 import { shouldShowRunPlanSurface } from "./WorkbenchSurfacePolicy";
 import { contextUsagePanelData } from "./contextUsagePresentation";
-import type { RunNarrativeItem } from "./run-narrative";
-import { type SubagentTaskView } from "./runtime/reducer";
-import { subagentAgentTypeLabel } from "./subagentPresentation";
 import { useArtifactMediaSources } from "./useArtifactMediaSources";
 import { useFileWorkspaceSession } from "./useFileWorkspaceSession";
-import { useNarrativeRenderer } from "./useNarrativeRenderer";
 import { useRunPlanEntry } from "./useRunPlanEntry";
 import { useRunStageScrollController } from "./useRunStageScrollController";
 import { useWorkbenchPanels } from "./useWorkbenchPanels";
 import {
   contextUsagePanelBottomOffset,
   runPlanPanelBottomOffset,
-  subagentDetailPanelBottomOffset,
 } from "./workbenchPresentation";
 
 type Props = {
@@ -34,7 +27,6 @@ type Props = {
     | "contextUsagePanelRef"
     | "mediaPreview"
     | "setMediaPreview"
-    | "setOpenSubagentTaskId"
     | "closeContextUsagePanel"
   >;
   artifactMedia: Pick<
@@ -44,10 +36,6 @@ type Props = {
     | "refreshArtifactMediaSource"
     | "openArtifactExternally"
     | "revealArtifact"
-  >;
-  narrativeRenderer: Pick<
-    ReturnType<typeof useNarrativeRenderer>,
-    "renderNarrativeActivityItems"
   >;
   fileWorkspace: Pick<
     ReturnType<typeof useFileWorkspaceSession>,
@@ -91,12 +79,6 @@ type Props = {
     status: "completed" | "pending" | "in_progress";
   }[];
   runPlanPaused: boolean;
-  openSubagent: SubagentTaskView | undefined;
-  openSubagentMetrics: string[];
-  handleCancelSubagent: (taskId: string) => Promise<void>;
-  cancellingSubagentTaskId: string | undefined;
-  openSubagentNarrativeItems: RunNarrativeItem[];
-  openSubagentHasAnswer: boolean;
   activeMediaPreviewIndex: number;
   activeMediaPreviewSourceState: string | null | undefined;
   mediaRevealLabel: string;
@@ -104,7 +86,6 @@ type Props = {
 export function WorkbenchOverlays({
   workbenchPanels,
   artifactMedia,
-  narrativeRenderer,
   fileWorkspace,
   scrollController,
   renderNoticeToast,
@@ -118,12 +99,6 @@ export function WorkbenchOverlays({
   runPlanPanelId,
   activeRunPlanItems,
   runPlanPaused,
-  openSubagent,
-  openSubagentMetrics,
-  handleCancelSubagent,
-  cancellingSubagentTaskId,
-  openSubagentNarrativeItems,
-  openSubagentHasAnswer,
   activeMediaPreviewIndex,
   activeMediaPreviewSourceState,
   mediaRevealLabel,
@@ -133,7 +108,6 @@ export function WorkbenchOverlays({
     contextUsagePanelRef,
     mediaPreview,
     setMediaPreview,
-    setOpenSubagentTaskId,
     closeContextUsagePanel,
   } = workbenchPanels;
   const {
@@ -143,7 +117,6 @@ export function WorkbenchOverlays({
     openArtifactExternally,
     revealArtifact,
   } = artifactMedia;
-  const { renderNarrativeActivityItems } = narrativeRenderer;
   const { fileWorkspaceSurfaceActive } = fileWorkspace;
   const {
     activeWorkbenchTurnId,
@@ -244,59 +217,6 @@ export function WorkbenchOverlays({
             paused={runPlanPaused}
             onClose={() => runPlanEntry.closePanel(true)}
           />
-        </div>
-      ) : null}
-      {!fileWorkspaceSurfaceActive &&
-      !activeMediaPreviewItem &&
-      openSubagent ? (
-        <div
-          className="subagent-detail-overlay"
-          style={{
-            bottom: subagentDetailPanelBottomOffset({
-              composerContentInset: composerContentInsetPx,
-            }),
-          }}
-        >
-          <SubagentExecutionCard
-            title={openSubagent.description}
-            agentLabel={subagentAgentTypeLabel(openSubagent.agentType)}
-            status={openSubagent.status}
-            activity={openSubagent.activity}
-            metrics={openSubagentMetrics}
-            onClose={() => setOpenSubagentTaskId(undefined)}
-            onCancel={
-              ["queued", "running", "cancelling"].includes(openSubagent.status)
-                ? () => void handleCancelSubagent(openSubagent.taskId)
-                : undefined
-            }
-            cancelDisabled={
-              openSubagent.status === "cancelling" ||
-              cancellingSubagentTaskId === openSubagent.taskId
-            }
-          >
-            {openSubagentNarrativeItems.length > 0 ? (
-              renderNarrativeActivityItems(
-                `subagent:${openSubagent.taskId}`,
-                openSubagentNarrativeItems,
-                false,
-              )
-            ) : (
-              <p className="subagent-execution-empty">等待子任务执行记录…</p>
-            )}
-            {!openSubagentHasAnswer && openSubagent.resultPreview ? (
-              <AssistantMessage
-                markdown={openSubagent.resultPreview}
-                status={openSubagent.status === "failed" ? "error" : "done"}
-                showFooter={false}
-              />
-            ) : null}
-            {openSubagent.errorMessage ? (
-              <div className="subagent-execution-error" role="alert">
-                <strong>{openSubagent.errorCode || "子任务失败"}</strong>
-                <p>{openSubagent.errorMessage}</p>
-              </div>
-            ) : null}
-          </SubagentExecutionCard>
         </div>
       ) : null}
       {activeMediaPreviewItem && mediaPreview ? (

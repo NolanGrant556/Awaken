@@ -52,7 +52,7 @@ func (s *RunService) RefreshThreadContextSnapshot(ctx context.Context, threadID 
 	}
 	s.mu.RUnlock()
 
-	meta, restored, err := s.threadStore.RestoreThread(threadID)
+	meta, restored, err := s.restoreOwnedThread(threadID)
 	if err != nil {
 		return ContextSnapshotRefreshResult{}, err
 	}

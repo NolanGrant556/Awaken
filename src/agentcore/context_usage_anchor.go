@@ -3,6 +3,7 @@ package agentcore
 import "strings"
 
 type ContextWindowUsageAnchor struct {
+	EstimatorID              string `json:"estimator_id,omitempty"`
 	ProviderID               string `json:"provider_id,omitempty"`
 	ProfileID                string `json:"profile_id,omitempty"`
 	CredentialRevision       uint64 `json:"credential_revision,omitempty"`
@@ -25,7 +26,7 @@ func CloneContextWindowUsageAnchor(anchor *ContextWindowUsageAnchor) *ContextWin
 }
 
 func ContextWindowUsageAnchorFromModelUsage(usage ModelUsageRecord) *ContextWindowUsageAnchor {
-	if strings.TrimSpace(usage.Purpose) != "agent_turn" || usage.Status != ModelUsageSucceeded || !usage.UsageComplete {
+	if (strings.TrimSpace(usage.Purpose) != "agent_turn" && strings.TrimSpace(usage.Purpose) != "subagent" && strings.TrimSpace(usage.Purpose) != "scheduled_task") || usage.Status != ModelUsageSucceeded || !usage.UsageComplete {
 		return nil
 	}
 	usageTokens := 0
@@ -55,6 +56,7 @@ func ContextWindowUsageAnchorFromModelUsage(usage ModelUsageRecord) *ContextWind
 		reasoningPolicy = "provider_default"
 	}
 	return &ContextWindowUsageAnchor{
+		EstimatorID:              usage.InputEstimatorID,
 		ProviderID:               strings.TrimSpace(usage.ProviderID),
 		ProfileID:                strings.TrimSpace(usage.ProfileID),
 		CredentialRevision:       credentialRevision,
@@ -91,6 +93,7 @@ func ContextWindowUsageAnchorFromModelConfig(config ModelConfig, usageTokens, se
 		reasoningPolicy = "provider_default"
 	}
 	return &ContextWindowUsageAnchor{
+		EstimatorID:              contextEstimatorID,
 		ProviderID:               strings.TrimSpace(config.ProviderID),
 		ProfileID:                strings.TrimSpace(config.ProfileID),
 		CredentialRevision:       credentialRevision,

@@ -1,12 +1,5 @@
 import type { SubagentNarrativeTask } from "./run-narrative";
 
-export function nextSubagentInspectorTaskId(
-  currentTaskId: string | undefined,
-  fallbackTaskId: string | undefined,
-): string | undefined {
-  return currentTaskId ? undefined : fallbackTaskId;
-}
-
 export function subagentElapsedMs(
   task: Pick<SubagentNarrativeTask, "startedAt" | "finishedAt">,
   nowMs: number,

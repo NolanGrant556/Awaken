@@ -425,8 +425,9 @@ func TestCompactConversationLowInformationSemanticSummaryUsesFallback(t *testing
 	}
 }
 
-func TestCompactConversationMalformedSemanticSummaryRecordsParserDiagnostics(t *testing.T) {
+func TestCompactConversationMalformedSemanticSummaryKeepsNarrative(t *testing.T) {
 	userAsk := "audit compact parser behavior"
+	prose := "I cannot determine anything useful from this request, but the earlier audit of compact parser behavior must continue."
 	messages := []convcontext.Message{
 		{Role: convcontext.RoleUser, Content: userAsk},
 		{Role: convcontext.RoleAssistant, Content: "I will inspect compact parsing."},
@@ -439,14 +440,14 @@ func TestCompactConversationMalformedSemanticSummaryRecordsParserDiagnostics(t *
 		Envelope:     ContextEnvelope{Messages: messages, Model: "test-model"},
 		TargetTokens: 1,
 		summaryInvoker: func(_ stdcontext.Context, _ llm.Config, _ llm.Request) (string, error) {
-			return "I cannot determine anything useful from this request.", nil
+			return prose, nil
 		},
 	})
 	if err != nil {
 		t.Fatalf("CompactConversationWithRequest returned error: %v", err)
 	}
-	if !result.Fallback.Used {
-		t.Fatalf("expected malformed low-information summary to use fallback, got %+v", result)
+	if result.Fallback.Used {
+		t.Fatalf("expected unstructured prose to install without fallback, got %+v", result)
 	}
 	if result.SummaryRawChars == 0 ||
 		result.SummaryParsedSections != 0 ||
@@ -456,8 +457,8 @@ func TestCompactConversationMalformedSemanticSummaryRecordsParserDiagnostics(t *
 		!result.SummaryLatestUserPinned {
 		t.Fatalf("expected parser diagnostics to distinguish malformed raw summary, got %+v", result)
 	}
-	if !strings.Contains(result.SummaryMessage.Content, userAsk) {
-		t.Fatalf("expected fallback to preserve user ask, got %q", result.SummaryMessage.Content)
+	if !strings.Contains(result.SummaryMessage.Content, prose) {
+		t.Fatalf("expected installed summary to keep the raw narrative, got %q", result.SummaryMessage.Content)
 	}
 }
 

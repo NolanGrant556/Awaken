@@ -32,15 +32,15 @@ func compactSummarySystemPrompt() string {
 	return strings.Join([]string{
 		"You are compacting older Awaken conversation history into a handoff summary.",
 		"The compressed conversation will replace the older raw messages, so fidelity matters more than brevity.",
-		"Start the response with <summary> immediately and end with </summary>.",
+		"Start the response with <summary> immediately and end with </summary> when possible.",
 		"Do not output analysis, reasoning, a preamble, JSON, or code fences; only the final summary is retained.",
-		"Use exactly these section headings, in this exact order, once each:",
+		"Prefer these section headings, in this order, once each:",
 		strings.Join(compactSummarySections, " | "),
 		"Rules:",
 		"- Every explicit user fact, preference, constraint, correction, and pending request from the shown history must appear in the summary or be marked unknown.",
 		"- Preserve important tool findings, file paths, errors, key values, decisions, unresolved asks, and current working state.",
 		"- Preserve enough detail for another agent to continue the task without reading the raw history.",
-		"- Prefer concise factual bullets beginning with '- '. Complete all 13 headings before adding a second bullet to any section.",
+		"- Prefer concise factual bullets beginning with '- '. If using the section headings, complete all 13 headings before adding a second bullet to any section.",
 		"- If an item appears in [STRUCTURAL_COMPACTION] or [PRUNED_SAFE_GROUP_DIGEST], treat it as source evidence, not metadata to ignore.",
 		"- If the shown older history contains any user request, Active Task or Pending User Asks must preserve that request; do not write '- None.' for both.",
 		"- If tool results or file paths appear in the shown older history, Critical Context, Completed Actions, or Relevant Files must preserve the important findings.",
@@ -62,7 +62,7 @@ func compactSummaryUserInstruction(boundaryID string, envelope ContextEnvelope, 
 		}
 		parts = append(parts,
 			fmt.Sprintf("Hard output budget: at most %d tokens for the complete response and about %d tokens for summary facts.", maxTokens, bodyBudget),
-			"Fit all 13 headings and </summary> before the limit. Under a tight budget, use one short bullet per heading, put continuity-critical facts first, and use '- None.' immediately when no fact is needed.",
+			"Fit continuity-critical facts and </summary> before the limit. If using the 13 headings, finish every heading first, use one short bullet per heading under a tight budget, put continuity-critical facts first, and use '- None.' immediately when no fact is needed.",
 		)
 	}
 	if envelope.RuntimeSnapshot.WorkspaceRoot != "" {
@@ -173,6 +173,60 @@ func boundCompactSummaryToBudget(summary string, maxTokens int) string {
 	return renderCompactSummarySections(selected)
 }
 
+// resolveCompactSummaryText chooses the installable narrative:
+// structured headings with at least one meaningful bullet stay normalized;
+// heading-only / all-None shells yield fallback; other non-empty prose is
+// kept as-is after stripping analysis wrappers.
+func resolveCompactSummaryText(rawSummary string, maxTokens int) (text string, structuredEmpty bool) {
+	payload := compactSummaryPayload(rawSummary)
+	if strings.TrimSpace(payload) == "" {
+		return "", true
+	}
+	parsed := parseCompactSummarySections(payload)
+	_, meaningful := compactSummarySectionStats(parsed)
+	if meaningful > 0 {
+		return boundCompactSummaryToBudget(normalizeCompactSummary(rawSummary), maxTokens), false
+	}
+	if parsedCount, _ := compactSummarySectionStats(parsed); parsedCount > 0 {
+		return "", true
+	}
+	return boundCompactNarrativeToBudget(payload, maxTokens), false
+}
+
+func boundCompactNarrativeToBudget(summary string, maxTokens int) string {
+	summary = strings.TrimSpace(summary)
+	if maxTokens <= 0 {
+		return summary
+	}
+	bodyBudget := maxTokens - compactSummaryHostHeaderReserveTokens
+	if bodyBudget < 256 {
+		bodyBudget = 256
+	}
+	if convcontext.EstimateTokens(summary) <= bodyBudget {
+		return summary
+	}
+	runes := []rune(summary)
+	low, high := 0, len(runes)
+	best := ""
+	for low <= high {
+		mid := low + (high-low)/2
+		fragment := ""
+		if mid > 0 {
+			fragment = strings.TrimSpace(string(runes[:mid]))
+			if mid < len(runes) {
+				fragment += "…"
+			}
+		}
+		if fragment != "" && convcontext.EstimateTokens(fragment) <= bodyBudget {
+			best = fragment
+			low = mid + 1
+		} else {
+			high = mid - 1
+		}
+	}
+	return best
+}
+
 func cloneCompactSummarySections(input map[string][]string) map[string][]string {
 	output := make(map[string][]string, len(input))
 	for section, lines := range input {
@@ -220,12 +274,35 @@ func fitCompactSummaryLine(selected map[string][]string, section string, line st
 	return best
 }
 
+func canonicalCompactSummarySection(title string) string {
+	lower := strings.ToLower(strings.TrimSpace(title))
+	if lower == "" {
+		return ""
+	}
+	for _, section := range compactSummarySections {
+		if strings.ToLower(section) == lower {
+			return section
+		}
+	}
+	return ""
+}
+
+func compactSummarySectionStats(sections map[string][]string) (parsed int, meaningful int) {
+	for _, section := range compactSummarySections {
+		lines, ok := sections[section]
+		if !ok {
+			continue
+		}
+		parsed++
+		if compactSummarySectionHasMeaning(lines) {
+			meaningful++
+		}
+	}
+	return parsed, meaningful
+}
+
 func parseCompactSummarySections(raw string) map[string][]string {
 	result := make(map[string][]string, len(compactSummarySections))
-	valid := make(map[string]struct{}, len(compactSummarySections))
-	for _, section := range compactSummarySections {
-		valid[strings.ToLower(section)] = struct{}{}
-	}
 
 	current := ""
 	for _, line := range strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n") {
@@ -236,8 +313,8 @@ func parseCompactSummarySections(raw string) map[string][]string {
 		matches := compactSummaryHeadingPattern.FindStringSubmatch(trimmed)
 		if len(matches) > 3 {
 			title := strings.TrimSpace(matches[2])
-			if _, ok := valid[strings.ToLower(title)]; ok {
-				current = title
+			if canonical := canonicalCompactSummarySection(title); canonical != "" {
+				current = canonical
 				if _, exists := result[current]; !exists {
 					result[current] = nil
 				}

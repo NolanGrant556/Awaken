@@ -420,19 +420,18 @@ func buildSemanticCompactSummary(ctx stdcontext.Context, req CompactRequest, bou
 				}
 				return compactFallbackBuildResult(fallback, currentGroups, prunedDigestMessages, tailMessages, req.Envelope, toolResultsPruned, prunedGroups, prunedMessages, summaryMaxTokens, attempt)
 			}
-			normalizedSummary := normalizeCompactSummary(rawSummary)
-			normalizedSummary = boundCompactSummaryToBudget(normalizedSummary, summaryMaxTokens)
-			diagnostics := compactSummaryDiagnosticsFor(rawSummary, normalizedSummary, messages, userInstruction.Content)
-			if diagnostics.QualityIssue != "" {
+			installedSummary, structuredEmpty := resolveCompactSummaryText(rawSummary, summaryMaxTokens)
+			diagnostics := compactSummaryDiagnosticsFor(rawSummary, installedSummary, messages, userInstruction.Content)
+			if structuredEmpty || strings.TrimSpace(installedSummary) == "" {
 				fallback := CompactFallback{
 					Used:   true,
 					Marker: "[COMPACT_FALLBACK:low_information_summary]",
-					Reason: diagnostics.QualityIssue,
+					Reason: firstNonEmptyCompactValue(diagnostics.QualityIssue, "semantic compact summary contained no meaningful section content despite non-empty source history"),
 				}
 				return compactFallbackBuildResult(fallback, currentGroups, prunedDigestMessages, tailMessages, req.Envelope, toolResultsPruned, prunedGroups, prunedMessages, summaryMaxTokens, attempt, diagnostics)
 			}
 			return compactSummaryBuildResult{
-				Text:                 normalizedSummary,
+				Text:                 installedSummary,
 				LatestProgressMarker: compactSummaryLatestProgress(messages),
 				ToolResultsPruned:    toolResultsPruned,
 				PrunedGroups:         prunedGroups,
@@ -821,18 +820,7 @@ func compactSummaryMaxTokensForRequest(req CompactRequest) int {
 
 func compactSummaryDiagnosticsFor(rawSummary string, normalizedSummary string, sourceMessages []convcontext.Message, userInstruction string) compactSummaryDiagnostics {
 	rawSections := parseCompactSummarySections(compactSummaryPayload(rawSummary))
-	parsedSections := 0
-	meaningfulSections := 0
-	for _, section := range compactSummarySections {
-		lines, ok := rawSections[section]
-		if !ok {
-			continue
-		}
-		parsedSections++
-		if compactSummarySectionHasMeaning(lines) {
-			meaningfulSections++
-		}
-	}
+	parsedSections, meaningfulSections := compactSummarySectionStats(rawSections)
 
 	latestUser := latestMessageContent(sourceMessages, convcontext.RoleUser)
 	sourceHadUser := latestUser != ""

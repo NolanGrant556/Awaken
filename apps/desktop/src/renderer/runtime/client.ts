@@ -1,4 +1,6 @@
 import { runtimeRequestIssue, unwrapRuntimeRequest } from "../../shared/runtime-request";
+import { reconnectingSubscription } from "./reconnecting-subscription";
+import { threadActivitySubscriber } from "./activity-client";
 import type { DesktopUpdateSnapshot } from "../../shared/desktop-update";
 import type {
   PetActivitySnapshot,
@@ -459,12 +461,6 @@ export type RuntimeClient = {
   startRun: (request: StartRunRequest) => Promise<RuntimeRun>;
   cancelRun: (runId: string) => Promise<RuntimeRun>;
   cancelSubagent: (runId: string, taskId: string, reason?: string) => Promise<void>;
-  messageSubagent: (
-    runId: string,
-    taskId: string,
-    content: string,
-    idempotencyKey?: string,
-  ) => Promise<void>;
   answerUserQuestion: (runId: string, questionId: string, answer: string) => Promise<void>;
   cancelUserQuestion: (runId: string, questionId: string) => Promise<void>;
   resolveExternalInteraction: (
@@ -487,6 +483,7 @@ export type RuntimeClient = {
   computerSessionControl: (
     runId: string,
     action: "takeover" | "return" | "pause" | "terminate",
+    sessionId?: string,
   ) => Promise<void>;
   getComputerHostStatus: () => Promise<ComputerHostStatus>;
   getComputerSettings: () => Promise<ComputerSettingsDocument>;
@@ -522,6 +519,8 @@ export type RuntimeClient = {
     handlers: SubscribeHandlers,
     afterSeq?: number,
   ) => Promise<() => void>;
+  subscribeThreadActivity?: (threadId: string, handlers: SubscribeHandlers, afterCursor?: number) => Promise<() => void>;
+  stopThreadAgents?: (threadId: string) => Promise<void>;
   pickAttachments: (defaultPath?: string) => Promise<AttachmentPickResult>;
   pickDirectory: (defaultPath?: string) => Promise<WorkspacePickResult>;
   pickPluginSource: (defaultPath?: string) => Promise<WorkspacePickResult>;
@@ -567,10 +566,6 @@ export type RuntimeClient = {
   openCodexPetsDirectory: () => Promise<void>;
 };
 
-function reconnectDelay(retryCount: number): number {
-  return Math.min(1000 * Math.pow(2, retryCount), 10000);
-}
-
 function isTerminalEvent(event: AguiEvent): boolean {
   return event.type === "RUN_FINISHED" || event.type === "RUN_ERROR"
     || (event.type === "RUN_STATUS_CHANGED" && (event.status === "cancelled" || event.status === "finished" || event.status === "error"));
@@ -578,6 +573,8 @@ function isTerminalEvent(event: AguiEvent): boolean {
 
 function createElectronClient(bridge: AwakenBridge): RuntimeClient {
   return {
+    subscribeThreadActivity: threadActivitySubscriber(bridge),
+    stopThreadAgents: bridge.stopThreadAgents ? (threadId) => unwrapRuntimeRequest(bridge.stopThreadAgents!(threadId)) : undefined,
     source: "electron",
     platform: bridge.platform,
     relaunchDesktop: () => bridge.relaunchDesktop(),
@@ -735,8 +732,6 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     startRun: (request) => unwrapDesktopOperation(bridge.startRun(request)),
     cancelRun: (...args) => unwrapRuntimeRequest(bridge.cancelRun(...args)),
     cancelSubagent: (runId, taskId, reason) => unwrapRuntimeRequest(bridge.cancelSubagent(runId, taskId, reason)),
-    messageSubagent: (runId, taskId, content, idempotencyKey) =>
-          unwrapRuntimeRequest(bridge.messageSubagent(runId, taskId, content, idempotencyKey)),
     answerUserQuestion: (...args) => unwrapRuntimeRequest(bridge.answerUserQuestion(...args)),
     cancelUserQuestion: (...args) => unwrapRuntimeRequest(bridge.cancelUserQuestion(...args)),
     resolveExternalInteraction: (...args) => unwrapRuntimeRequest(bridge.resolveExternalInteraction(...args)),
@@ -766,100 +761,20 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     listMemoryDreams: (projectId, limit) => bridge.listMemoryDreams(projectId, limit),
     cancelMemoryDream: (taskId) => bridge.cancelMemoryDream(taskId),
     onMemoryDreamReceipt: (handler) => bridge.onMemoryDreamReceipt(handler),
-    subscribeRun: async (runId, handlers, afterCursor) => {
-      let lastCursor = afterCursor ?? 0;
-      let terminalSeen = false;
-      let retryCount = 0;
-      let currentSubscriptionId: string | null = null;
-      let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-      let disposed = false;
-
-      const wrappedHandlers = {
-        onEvent: (event: AguiEvent) => {
-          if (disposed) return;
-          const cursor = event.streamCursor ?? event.seq;
-          if (cursor !== undefined && cursor > lastCursor) {
-            lastCursor = cursor;
-          }
-          if (isTerminalEvent(event)) {
-            terminalSeen = true;
-          }
-          handlers.onEvent(event);
-        },
-        onError: (message: string) => {
-          if (disposed || terminalSeen) return;
-          attemptReconnect(message);
-        },
-        onClose: () => {
-          if (disposed) return;
-          if (terminalSeen) {
-            handlers.onClose?.();
-            return;
-          }
-          attemptReconnect("Runtime stream closed before a terminal event");
-        },
-      };
-
-      function attemptReconnect(error: unknown): void {
-        if (disposed || terminalSeen) return;
-        // Reentrancy guard: if a reconnect is already pending, ignore
-        // additional onError/onClose triggers that fire in the same window.
-        if (reconnectTimer) return;
+    subscribeRun: (runId, handlers, afterCursor) => reconnectingSubscription({
+      connect: (callbacks, cursor) => unwrapRuntimeRequest(bridge.subscribeRun(runId, callbacks, cursor)),
+      disconnect: id => bridge.unsubscribeRun(id),
+      handlers,
+      cursor: afterCursor,
+      eventCursor: event => event.streamCursor ?? event.seq,
+      terminalEvent: isTerminalEvent,
+      terminalError: error => {
         const issue = runtimeRequestIssue(error);
-        if (issue.code === "RUN_NOT_FOUND") {
-          handlers.onError?.(
-            `Run session was not found on the server (it may have been lost after restart): ${issue.message}`,
-          );
-          return;
-        }
-
-        handlers.onReconnect?.();
-        const delay = reconnectDelay(retryCount);
-        retryCount += 1;
-
-        if (currentSubscriptionId) {
-          bridge.unsubscribeRun(currentSubscriptionId);
-          currentSubscriptionId = null;
-        }
-
-        reconnectTimer = setTimeout(() => {
-          reconnectTimer = null;
-          if (disposed || terminalSeen) return;
-          void resubscribe();
-        }, delay);
-      }
-
-      async function resubscribe(): Promise<void> {
-        if (disposed || terminalSeen) return;
-        try {
-          const subscriptionId = await unwrapRuntimeRequest(bridge.subscribeRun(runId, wrappedHandlers, lastCursor));
-          if (disposed || terminalSeen) bridge.unsubscribeRun(subscriptionId);
-          else currentSubscriptionId = subscriptionId;
-        } catch (error) {
-          if (disposed || terminalSeen) return;
-          attemptReconnect(error);
-        }
-      }
-
-      try {
-        currentSubscriptionId = await unwrapRuntimeRequest(bridge.subscribeRun(runId, wrappedHandlers, lastCursor));
-      } catch (error) {
-        if (disposed) throw error;
-        attemptReconnect(error);
-      }
-
-      return () => {
-        disposed = true;
-        if (reconnectTimer) {
-          clearTimeout(reconnectTimer);
-          reconnectTimer = null;
-        }
-        if (currentSubscriptionId) {
-          bridge.unsubscribeRun(currentSubscriptionId);
-          currentSubscriptionId = null;
-        }
-      };
-    },
+        return issue.code === "RUN_NOT_FOUND"
+          ? `Run session was not found on the server (it may have been lost after restart): ${issue.message}`
+          : undefined;
+      },
+    }),
     pickAttachments: (defaultPath) => bridge.pickAttachments(defaultPath),
     pickDirectory: (defaultPath) => bridge.pickDirectory(defaultPath),
     pickPluginSource: (defaultPath) => unwrapRuntimeRequest(bridge.pickPluginSource(defaultPath)),

@@ -29,6 +29,7 @@ import { ComputerHandoffIndicator } from "./ComputerHandoffIndicator";
 import { ComputerReviewGate } from "./ComputerReviewGate";
 import { DesktopExecutionFeed } from "./DesktopExecutionFeed";
 import { DesktopInspectorRail } from "./DesktopInspectorRail";
+import { SubagentPanel } from "./SubagentPanel";
 import { DesktopSidebar } from "./DesktopSidebar";
 import { DesktopStartupStatus } from "./DesktopStartupStatus";
 import { DesktopUpdateDialog } from "./DesktopUpdateDialog";
@@ -117,11 +118,6 @@ import {
   type ThreadItem,
 } from "./runtime/reducer";
 import { DesktopSettingsDialog } from "./settings/DesktopSettingsDialog";
-import {
-  formatSubagentElapsed,
-  nextSubagentInspectorTaskId,
-  subagentElapsedMs,
-} from "./subagentPresentation";
 import { useArtifactMediaSources } from "./useArtifactMediaSources";
 import { useComposerInput } from "./useComposerInput";
 import { useComposerLifecycle } from "./useComposerLifecycle";
@@ -454,7 +450,6 @@ export function App() {
   const workbenchPanels = useWorkbenchPanels(
     runtimeState.activeThreadId,
     runPlanEntry,
-    () => subagentTasks[0]?.taskId,
     () => setCancellingSubagentTaskId(undefined),
   );
   const {
@@ -462,12 +457,11 @@ export function App() {
     setContextUsagePanelOpen,
     contextUsageTriggerRef,
     mediaPreview,
-    selectedSubagentTaskId,
-    setSelectedSubagentTaskId,
+    subagentTabs,
+    resetSubagentTabs,
     openSubagentTaskId,
-    setOpenSubagentTaskId,
     openMediaPreview,
-    handleOpenSubagent,
+    openSubagentTab,
   } = workbenchPanels;
 
   const subagentTasks = useMemo<SubagentTaskView[]>(
@@ -475,46 +469,16 @@ export function App() {
       runtimeState.subagentOrder.flatMap((taskId) => {
         const task = runtimeState.subagentsById[taskId];
         return task ? [task] : [];
-      }),
+      }).sort((a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? "") || a.taskId.localeCompare(b.taskId)),
     [runtimeState.subagentOrder, runtimeState.subagentsById],
   );
-  const selectedSubagent =
-    subagentTasks.find((task) => task.taskId === selectedSubagentTaskId) ??
-    (selectedSubagentTaskId
-      ? undefined
-      : subagentTasks[subagentTasks.length - 1]);
   const openSubagent = openSubagentTaskId
     ? runtimeState.subagentsById[openSubagentTaskId]
     : undefined;
-  const openSubagentNarrativeItems = openSubagent
-    ? projectVisibleNarrativeItems({
-        items: [
-          ...openSubagent.narrative.committedItems,
-          ...(openSubagent.narrative.activeItem
-            ? [openSubagent.narrative.activeItem]
-            : []),
-        ],
-        isBusy: ["queued", "running", "cancelling"].includes(
-          openSubagent.status,
-        ),
-      })
-    : [];
-  const openSubagentHasAnswer = openSubagentNarrativeItems.some(
-    (candidate) => candidate.kind === "answer",
-  );
-  const openSubagentMetrics = openSubagent
-    ? [
-        openSubagent.toolUseCount > 0
-          ? `${openSubagent.toolUseCount} 次工具`
-          : undefined,
-        (openSubagent.totalTokens ?? openSubagent.estimatedTokens)
-          ? `${new Intl.NumberFormat("zh-CN").format(
-              openSubagent.totalTokens ?? openSubagent.estimatedTokens ?? 0,
-            )} tokens`
-          : undefined,
-        formatSubagentElapsed(subagentElapsedMs(openSubagent, subagentNowMs)),
-      ].filter((value): value is string => Boolean(value))
-    : [];
+  const openSubagentTabs = subagentTabs.taskIds.flatMap(taskId => {
+    const task = runtimeState.subagentsById[taskId];
+    return task ? [task] : [];
+  });
   const runningSubagentCount = subagentTasks.filter((task) =>
     ["queued", "running", "cancelling"].includes(task.status),
   ).length;
@@ -875,7 +839,6 @@ export function App() {
             id: "context",
             ...contextMeta,
             onClick: () => {
-              setOpenSubagentTaskId(undefined);
               runPlanEntry.closePanel(false);
               setContextUsagePanelOpen((current) => !current);
             },
@@ -904,8 +867,7 @@ export function App() {
     threadsForProject,
     onActiveThreadArchived: () => {
       handleCloseFileWorkspace();
-      setSelectedSubagentTaskId(undefined);
-      setOpenSubagentTaskId(undefined);
+      resetSubagentTabs();
     },
   });
   const { threadItemsForProject, exitConversationBatchMode } = threadNavigation;
@@ -1017,6 +979,7 @@ export function App() {
     ? `thread:${runtimeState.activeThreadId}`
     : selectedProjectId;
   const fileWorkspace = useFileWorkspaceSession({
+    inspectorTabs: workbenchPanels.inspectorTabs,
     activeNavSection,
     runtimeState: {
       activeThreadId: runtimeState.activeThreadId,
@@ -1039,8 +1002,6 @@ export function App() {
     isBusy,
     requestComposerFocus,
     onBeforeFileOpen: () => {
-      setSelectedSubagentTaskId(undefined);
-      setOpenSubagentTaskId(undefined);
       runPlanEntry.closePanel(false);
     },
     onBeforeFileExpand: () => {
@@ -1057,7 +1018,6 @@ export function App() {
     setExpandedFileComposerTrackedRun,
     fileWorkspaceMode,
     setFileWorkspaceMode,
-    dispatchArtifactPreviewTabs,
     deliverablePreview,
     fileWorkspaceExpandedActive,
     fileWorkspaceSurfaceActive,
@@ -1077,7 +1037,6 @@ export function App() {
     handleInspectorResizeStart,
     handleSidebarResizeKeyDown,
     handleInspectorResizeKeyDown,
-    handleOpenFileWorkspace,
     handleShowExpandedFileComposerFull,
     handleExpandedFilePreviewPrimaryClick,
     handleCloseFileWorkspace,
@@ -1487,7 +1446,7 @@ export function App() {
     setResolvingUserQuestionId(activeUserQuestion.id);
     try {
       await runtimeClient.answerUserQuestion(
-        runtimeState.runId,
+        activeUserQuestion.runId ?? runtimeState.runId,
         activeUserQuestion.id,
         trimmed,
       );
@@ -1514,7 +1473,7 @@ export function App() {
     setResolvingUserQuestionId(activeUserQuestion.id);
     try {
       await runtimeClient.cancelUserQuestion(
-        runtimeState.runId,
+        activeUserQuestion.runId ?? runtimeState.runId,
         activeUserQuestion.id,
       );
     } catch (error) {
@@ -1564,16 +1523,10 @@ export function App() {
     setActiveNavId(id);
   }
 
-  function handleToggleSubagentInspector(): void {
-    if (fileWorkspaceOpen) {
-      handleCloseFileWorkspace();
-    }
-    setSelectedSubagentTaskId((currentTaskId) =>
-      nextSubagentInspectorTaskId(
-        currentTaskId,
-        selectedSubagent?.taskId ?? subagentTasks[0]?.taskId,
-      ),
-    );
+  function handleOpenSubagent(taskId?: string): void {
+    const id = taskId ?? subagentTasks.at(-1)?.taskId;
+    if (!id || !runtimeState.subagentsById[id]) return;
+    openSubagentTab(id);
     setInspectorCollapsed(false);
     if (inspectorCollapsedBeforeResponsiveRef.current !== null) {
       inspectorCollapsedBeforeResponsiveRef.current = false;
@@ -1581,12 +1534,13 @@ export function App() {
   }
 
   async function handleCancelSubagent(taskId: string): Promise<void> {
-    if (!(runtimeState.runId)) return;
+    const ownerRunId = runtimeState.subagentsById[taskId]?.runId;
+    if (!ownerRunId) return;
     setCancellingSubagentTaskId(taskId);
     setNotice(null);
     try {
       await runtimeClient.cancelSubagent(
-        runtimeState.runId,
+        ownerRunId,
         taskId,
         "desktop_user",
       );
@@ -1595,6 +1549,13 @@ export function App() {
     } finally {
       setCancellingSubagentTaskId(undefined);
     }
+  }
+
+  async function handleStopAllAgents(): Promise<void> {
+    const threadId = runtimeState.activeThreadId;
+    if (!threadId || !runtimeClient.stopThreadAgents) return;
+    try { await runtimeClient.stopThreadAgents(threadId); }
+    catch (error) { setNotice(error instanceof Error ? error.message : "停止全部 Agent 失败"); }
   }
 
   const platform = runtimeClient.platform as PlatformKind;
@@ -1809,6 +1770,9 @@ export function App() {
           chrome={
             <DesktopWorkbenchChrome
               fileWorkspace={fileWorkspace}
+              subagentTabs={openSubagentTabs}
+              onOpenSubagent={handleOpenSubagent}
+              onStopAllAgents={runningSubagentCount > 0 ? handleStopAllAgents : undefined}
               platform={platform}
               handleNewTask={handleNewTask}
               currentConversationLabel={currentConversationLabel}
@@ -1867,6 +1831,7 @@ export function App() {
                 <WorkbenchShell
                   inspectorCollapsed={inspectorCollapsed}
                   inspectorExpanded={fileWorkspaceExpandedActive}
+                  inspectorNarrowLayout={openSubagent ? "split" : "overlay"}
                   inspectorSurfaceActive={
                     !fileWorkspaceExpandedActive || fileWorkspaceSurfaceActive
                   }
@@ -1888,7 +1853,6 @@ export function App() {
                         <WorkbenchOverlays
                           workbenchPanels={workbenchPanels}
                           artifactMedia={artifactMedia}
-                          narrativeRenderer={narrativeRenderer}
                           fileWorkspace={fileWorkspace}
                           scrollController={scrollController}
                           renderNoticeToast={renderNoticeToast}
@@ -1902,14 +1866,6 @@ export function App() {
                           runPlanPanelId={runPlanPanelId}
                           activeRunPlanItems={activeRunPlanItems}
                           runPlanPaused={runPlanPaused}
-                          openSubagent={openSubagent}
-                          openSubagentMetrics={openSubagentMetrics}
-                          handleCancelSubagent={handleCancelSubagent}
-                          cancellingSubagentTaskId={cancellingSubagentTaskId}
-                          openSubagentNarrativeItems={
-                            openSubagentNarrativeItems
-                          }
-                          openSubagentHasAnswer={openSubagentHasAnswer}
                           activeMediaPreviewIndex={activeMediaPreviewIndex}
                           activeMediaPreviewSourceState={
                             activeMediaPreviewSourceState
@@ -1960,8 +1916,7 @@ export function App() {
                                   onToggle={() => {
                                     if (!runPlanEntry.panelOpen) {
                                       setContextUsagePanelOpen(false);
-                                      setOpenSubagentTaskId(undefined);
-                                    }
+                                                            }
                                     runPlanEntry.togglePanel();
                                   }}
                                 />
@@ -2047,7 +2002,8 @@ export function App() {
                     </RunStage>
                   }
                   inspector={
-                    fileWorkspaceOpen ? (
+                    <div className="inspector-surfaces">
+                    {fileWorkspaceOpen ? <div className="inspector-surface" hidden={Boolean(openSubagent) || fileWorkspace.inspectorChooserActive}>
                       <ProjectFilesWorkspace
                         key={fileWorkspaceProjectId ?? "no-project"}
                         runtimeClient={runtimeClient}
@@ -2086,9 +2042,6 @@ export function App() {
                         }
                         onWorkspaceModeChange={(mode) => {
                           setFileWorkspaceMode(mode);
-                          if (mode === "browser") {
-                            dispatchArtifactPreviewTabs({ type: "deactivate" });
-                          }
                         }}
                         onOpenTab={handleOpenProjectFileTab}
                         onPreviewPrimaryClick={
@@ -2101,21 +2054,18 @@ export function App() {
                         onDeleteFileComment={handleRemoveFileLineComment}
                         onAddTaskContext={handleAddProjectEntryToTask}
                       />
-                    ) : (
-                      <DesktopInspectorRail
-                        workbenchPanels={workbenchPanels}
-                        subagentTasks={subagentTasks}
-                        runningSubagentCount={runningSubagentCount}
-                        handleOpenFileWorkspace={handleOpenFileWorkspace}
-                        handleToggleSubagentInspector={
-                          handleToggleSubagentInspector
-                        }
-                        selectedSubagent={selectedSubagent}
-                        subagentNowMs={subagentNowMs}
-                        cancellingSubagentTaskId={cancellingSubagentTaskId}
-                        handleCancelSubagent={handleCancelSubagent}
-                      />
-                    )
+                    </div> : null}
+                    {openSubagent ? <SubagentPanel
+                      key={openSubagent.taskId}
+                      task={openSubagent}
+                      nowMs={subagentNowMs}
+                      cancelling={cancellingSubagentTaskId === openSubagent.taskId}
+                      onCancel={() => void handleCancelSubagent(openSubagent.taskId)}
+                      renderActivity={narrativeRenderer.renderNarrativeActivityItems}
+                    /> : !fileWorkspaceOpen || fileWorkspace.inspectorChooserActive ? <div className="inspector-entry-page"><DesktopInspectorRail
+                      handleOpenFileWorkspace={fileWorkspace.handleChooseInspectorEntry}
+                    /></div> : null}
+                    </div>
                   }
                 />
               )}

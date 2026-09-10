@@ -574,6 +574,21 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
   .aw-workbench-inspector-resize-handle {
     display: none;
   }
+
+  /* A reading panel can remain beside the task in a narrow desktop window.
+     The host owns when to select this layout; the shell only places slots. */
+  .aw-workbench-shell-inspector-split:not(.aw-workbench-shell-inspector-collapsed):not(.aw-workbench-shell-inspector-expanded) {
+    grid-template-columns: minmax(0, 1fr) var(--aw-inspector-width, 300px);
+  }
+
+  .aw-workbench-shell-inspector-split:not(.aw-workbench-shell-inspector-collapsed):not(.aw-workbench-shell-inspector-expanded) > .aw-workbench-inspector {
+    position: relative;
+    inset: auto;
+    width: auto;
+    min-height: 0;
+    overflow: hidden;
+    box-shadow: none;
+  }
 }
 
 @media (max-width: 640px) {

@@ -56,7 +56,7 @@ func (codexAdapter) Parse(root string, candidate ir.ManifestCandidate, options P
 			skillPaths[i] = clean
 		}
 	}
-	components, diagnostics := parseSkillComponents(root, skillPaths, ir.DialectCodex, manifestPath, ir.MappingAdapted)
+	components, diagnostics := parseSkillComponents(root, identity.Name, skillPaths, ir.DialectCodex, manifestPath, ir.MappingAdapted)
 	plugin.Components = append(plugin.Components, components...)
 	plugin.Diagnostics = append(plugin.Diagnostics, diagnostics...)
 

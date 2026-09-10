@@ -1,6 +1,7 @@
 package computer
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -11,27 +12,61 @@ import (
 // src/runtime/lease.go because the resource key, fencing semantics and lifetime
 // differ.
 type ResourceLease struct {
-	ResourceKey  string       `json:"resource_key"`
-	BindingID    BindingID    `json:"binding_id"`
-	SessionID    SessionID    `json:"session_id"`
-	FenceToken   FenceToken   `json:"fence_token"`
-	IssuedAt     time.Time    `json:"issued_at"`
-	ExpiresAt    time.Time    `json:"expires_at"`
-	ControllerID string       `json:"controller_id"`
+	ResourceKey  string     `json:"resource_key"`
+	BindingID    BindingID  `json:"binding_id"`
+	SessionID    SessionID  `json:"session_id"`
+	FenceToken   FenceToken `json:"fence_token"`
+	IssuedAt     time.Time  `json:"issued_at"`
+	ExpiresAt    time.Time  `json:"expires_at"`
+	ControllerID string     `json:"controller_id"`
 }
 
 // LeaseManager tracks active leases and enforces monotonic fences.
 type LeaseManager struct {
-	mu     sync.RWMutex
-	leases map[string]ResourceLease
-	fences map[string]FenceToken
+	changed chan struct{}
+	mu      sync.RWMutex
+	leases  map[string]ResourceLease
+	fences  map[string]FenceToken
 }
 
 // NewLeaseManager creates an empty lease manager.
 func NewLeaseManager() *LeaseManager {
 	return &LeaseManager{
-		leases: make(map[string]ResourceLease),
-		fences: make(map[string]FenceToken),
+		changed: make(chan struct{}),
+		leases:  make(map[string]ResourceLease),
+		fences:  make(map[string]FenceToken),
+	}
+}
+
+// Child controllers wait on resource ownership, never on model polling. A
+// cancellation releases the waiter immediately and does not acquire a lease.
+func (m *LeaseManager) AcquireContext(ctx context.Context, key string, bind Binding, sessionID SessionID, controllerID string, ttl time.Duration) (ResourceLease, error) {
+	if key == "" {
+		return ResourceLease{}, fmt.Errorf("resource_key is required")
+	}
+	for {
+		if err := ctx.Err(); err != nil {
+			return ResourceLease{}, err
+		}
+		m.mu.Lock()
+		if m.changed == nil {
+			m.changed = make(chan struct{})
+		}
+		changed := m.changed
+		m.mu.Unlock()
+		lease, err := m.Acquire(key, bind, sessionID, controllerID, ttl)
+		if err == nil {
+			if err := ctx.Err(); err != nil {
+				_ = m.Release(key, bind.BindingID)
+				return ResourceLease{}, err
+			}
+			return lease, nil
+		}
+		select {
+		case <-ctx.Done():
+			return ResourceLease{}, ctx.Err()
+		case <-changed:
+		}
 	}
 }
 
@@ -76,6 +111,10 @@ func (m *LeaseManager) Release(resourceKey string, bindingID BindingID) error {
 		return fmt.Errorf("binding %s does not hold lease for %s", bindingID, resourceKey)
 	}
 	delete(m.leases, resourceKey)
+	if m.changed != nil {
+		close(m.changed)
+	}
+	m.changed = make(chan struct{})
 	return nil
 }
 

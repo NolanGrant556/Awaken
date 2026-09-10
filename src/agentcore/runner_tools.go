@@ -74,6 +74,7 @@ func toolRuntimeConfigFromAgentConfig(config AgentConfig) ToolRuntimeConfig {
 		ToolSessionState:             config.ToolSessionState,
 		ModelContentStore:            config.ModelContentStore,
 		ArchivedHistoryService:       config.ArchivedHistoryService,
+		HistoryAncestors:             config.HistoryAncestors,
 	}
 	if config.ComputerRuntime != nil {
 		cfg.ComputerExecutor = executors.NewComputerExecutor(config.ComputerRuntime)
@@ -109,67 +110,29 @@ func (r *Runner) handleXMLFallback(ctx stdcontext.Context, response string, even
 }
 
 func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.ToolCall, events *runEventEmitter) []ToolExecutionResult {
+	if r.canExecuteParallelReads(toolCalls) {
+		return r.executeParallelReads(ctx, toolCalls, events)
+	}
 	results := make([]ToolExecutionResult, 0, len(toolCalls))
 	runCtx, cancel := stdcontext.WithCancel(ctx)
 	defer cancel()
 	var terminateReason TerminalReason
 	for _, call := range toolCalls {
-		if events != nil {
-			if err := events.persistenceFailure(); err != nil {
-				results = append(results, syntheticPersistenceFailureResult(call, err))
-				terminateReason = TerminalReasonPersistenceError
-				cancel()
-				continue
-			}
-		}
-		if runCtx.Err() != nil {
-			results = append(results, syntheticCancelledToolResult(call))
-			continue
-		}
-		if terminateReason != "" {
-			results = append(results, syntheticCancelledToolResult(call))
-			continue
-		}
-
-		before := BeforeCallDecision{Action: CallExecute}
-		if r.failureSupervisor != nil {
-			before = r.failureSupervisor.BeforeCall(call)
-		}
-		if before.Action != CallExecute {
-			result := SyntheticBlockedResult(call, before)
-			if events != nil {
-				if err := events.emitToolCall(runCtx, call); err != nil {
-					cancel()
-					results = append(results, syntheticPersistenceFailureResult(call, err))
-					terminateReason = TerminalReasonPersistenceError
-					continue
-				}
-				// Persist and canonically project the blocked recovery decision before
-				// its synthetic result, matching causal live/replay order.
-				events.emitRecoveryDecision(call, before.RecoveryOptions, before.ErrorCode, true)
-				if err := events.emitToolResultBatch(runCtx, result, nil, nil); err != nil {
-					cancel()
-					terminateReason = TerminalReasonPersistenceError
+		prepared := r.prepareToolCall(runCtx, call, events)
+		before := prepared.before
+		if prepared.result != nil {
+			reason := prepared.stopReason
+			if prepared.started {
+				if err := r.commitToolOutcome(runCtx, call, *prepared.result, AfterOutcomeDecision{}, nil, events); err != nil {
+					reason = TerminalReasonPersistenceError
 				}
 			}
-			results = append(results, result)
-			if before.Action == CallStopRun {
-				terminateReason = before.TerminalReason
-				if terminateReason == "" {
-					terminateReason = TerminalReasonRepeatedToolFailure
-				}
+			results = append(results, *prepared.result)
+			if reason != "" {
+				terminateReason = reason
 				cancel()
 			}
 			continue
-		}
-
-		if events != nil {
-			if err := events.emitToolCall(runCtx, call); err != nil {
-				cancel()
-				results = append(results, syntheticPersistenceFailureResult(call, err))
-				terminateReason = TerminalReasonPersistenceError
-				continue
-			}
 		}
 		hookCall := call
 		preSubject := hookToolSubject(hookCall, nil)
@@ -221,23 +184,9 @@ func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.To
 			r.toolRuntime.sink = buffer
 		}
 		executionCtx := runCtx
-		agentID := "root"
-		if r.config.SubagentOrigin != nil && strings.TrimSpace(r.config.SubagentOrigin.AgentID) != "" {
-			agentID = strings.TrimSpace(r.config.SubagentOrigin.AgentID)
-		}
-		identity := tool.ToolExecutionIdentity{
-			RunID:          r.runID,
-			AgentID:        agentID,
-			SubagentTaskID: strings.TrimSpace(r.config.SubagentTaskID),
-			ModelProfileID: strings.TrimSpace(r.config.ModelConfig.ProfileID),
-			ToolCallID:     call.ID,
-			ToolName:       call.Function.Name,
-		}
-		if events != nil {
-			identity.TurnID = events.turnID()
-		}
+		identity := r.toolExecutionIdentity(call, events)
 		executionCtx = tool.ContextWithToolExecutionIdentity(executionCtx, identity)
-		if r.subagentController != nil && r.config.SubagentOrigin == nil {
+		if r.subagentController != nil {
 			executionCtx = subagentruntime.WithController(executionCtx, r.subagentController)
 		}
 		var activationPlan *skillruntime.SkillActivationPlan
@@ -275,64 +224,47 @@ func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.To
 					return nil
 				})
 		}
-		result := r.toolRuntime.Execute(executionCtx, hookCall)
-		if offloadErr := r.offloadLargeToolResult(runCtx, &result); offloadErr != nil {
-			cancel()
-			result = syntheticPersistenceFailureResult(call, fmt.Errorf("tool result offload: %w", offloadErr))
-			terminateReason = TerminalReasonPersistenceError
+		var waitIntent struct {
+			Action  string   `json:"action"`
+			TaskIDs []string `json:"task_ids"`
 		}
-		if events != nil {
-			r.toolRuntime.sink = events.scopedSink()
-			if persistErr := events.persistenceFailure(); persistErr != nil {
+		waitingForChildren := hookCall.Function.Name == "subagent" && json.Unmarshal([]byte(hookCall.Function.Arguments), &waitIntent) == nil && waitIntent.Action == "wait"
+		if waitingForChildren {
+			if err := r.persistAgentPhase(runCtx, events, "waiting_children", waitIntent.TaskIDs); err != nil {
+				results = append(results, syntheticPersistenceFailureResult(call, err))
 				cancel()
-				results = append(results, syntheticPersistenceFailureResult(call, persistErr))
 				terminateReason = TerminalReasonPersistenceError
 				continue
 			}
+			if r.config.ComputerRuntime != nil {
+				_ = r.config.ComputerRuntime.Close(runCtx, "waiting_for_delegated_work")
+			}
 		}
-
-		var recoveryRequired bool
-		var recoveryOptions []string
-		var recoveryErrorCode string
-		if r.failureSupervisor != nil {
-			after := r.failureSupervisor.AfterOutcome(call, result.Outcome)
-			if len(after.RecoveryOptions) > 0 || after.RecoveryRequired {
-				result.Outcome = ApplyRecoveryToOutcome(result.Outcome, after.RecoveryOptions, after.RecoveryRequired)
-				result.IsError = result.Outcome.IsError()
+		result := r.toolRuntime.Execute(executionCtx, hookCall)
+		result.terminalSubagentTaskIDs = r.retrievedSubagentTerminals(result)
+		if waitingForChildren && runCtx.Err() == nil {
+			if err := r.persistAgentPhase(runCtx, events, "running", nil); err != nil {
+				cancel()
+				terminateReason = TerminalReasonPersistenceError
 			}
-			if after.RecoveryRequired {
-				recoveryRequired = true
-				recoveryOptions = append([]string(nil), after.RecoveryOptions...)
-				recoveryErrorCode = result.Outcome.ErrorCode
-			}
-
+		}
+		if events != nil {
+			r.toolRuntime.sink = events.scopedSink()
+		}
+		result, recovery, outcomeErr := r.finishToolOutcome(runCtx, call, result, events)
+		if outcomeErr != nil {
+			cancel()
+			terminateReason = TerminalReasonPersistenceError
+			results = append(results, result)
+			continue
 		}
 
 		r.applyImplicitSkillActivation(call.Function.Name, result, activationPlan)
 		r.applyDeferredToolActivation(runCtx, events, call, deferredToolsLoadedByFind)
 		results = append(results, result)
-		if events != nil {
-			artifacts := []AwakenEvent{}
-			if buffer != nil {
-				artifacts = buffer.artifacts
-			}
-			if toolResultAppliedMutation(result) &&
-				(len(result.AffectedPaths) > 0 || len(result.TrashedPaths) > 0 || len(artifacts) > 0) {
-				events.markMutation()
-			}
-			var semanticFacts []AwakenEvent
-			if buffer != nil {
-				semanticFacts = buffer.semanticFacts
-			}
-			if err := events.emitToolResultBatch(runCtx, result, artifacts, semanticFacts); err != nil {
-				cancel()
-				terminateReason = TerminalReasonPersistenceError
-			} else if recoveryRequired {
-				// A real execution result is the cause; publish it durably before the
-				// recovery directive so live and replay never ask for recovery before
-				// showing the failure that requires it.
-				events.emitRecoveryDecision(call, recoveryOptions, recoveryErrorCode, false)
-			}
+		if err := r.commitToolOutcome(runCtx, call, result, recovery, buffer, events); err != nil {
+			cancel()
+			terminateReason = TerminalReasonPersistenceError
 		}
 		if terminateReason == "" {
 			postEvent := hookruntime.EventPostToolUse
@@ -359,6 +291,9 @@ func (r *Runner) offloadLargeToolResult(ctx stdcontext.Context, result *ToolExec
 	if result.Outcome.Status != "" && len(result.Outcome.Content) > len(content) {
 		content = result.Outcome.Content
 	}
+	if len(result.fullContent) > len(content) {
+		content = result.fullContent
+	}
 	if len([]byte(content)) <= toolResultOffloadThresholdBytes {
 		return nil
 	}
@@ -380,8 +315,9 @@ func (r *Runner) offloadLargeToolResult(ctx stdcontext.Context, result *ToolExec
 	if err != nil {
 		return err
 	}
+	result.fullContent = ""
 	projection := fmt.Sprintf(
-		"[TOOL_RESULT_OFFLOADED]\nstorage_key=%s\nsha256=%s\nbytes=%d\npreview=%s",
+		"[TOOL_RESULT_OFFLOADED]\nUse tool_find to load tool_result_read, then read pages using storage_key and next_offset.\nstorage_key=%s\nsha256=%s\nbytes=%d\npreview=%s",
 		receipt.StorageKey, receipt.Digest, receipt.ByteSize, receipt.Preview,
 	)
 	result.Content = projection

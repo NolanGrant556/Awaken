@@ -1,0 +1,60 @@
+{
+  "verified_at": "2026-09-10T09:14:09.771045+08:00",
+  "thread_id": "thread_1789000770228642000_2",
+  "binary_sha256": "74e56076920573d924e16b246e519633e8aaba43adfc7cdd64378344f1645523",
+  "platform": "macOS26.6.2 arm64",
+  "before_seq": 167,
+  "signal": "SIGKILL",
+  "target_core_pid": 16004,
+  "owned_worker_pids": [
+    22665,
+    22661
+  ],
+  "owned_process_groups": [
+    22662,
+    22658
+  ],
+  "group_cleanup_seconds": 0.19409150001592934,
+  "all_owned_group_members_exited": true,
+  "post_restart_tool_calls": 0,
+  "post_restart_model_requests": 0,
+  "restored_statuses": [
+    "interrupted",
+    "interrupted",
+    "interrupted"
+  ],
+  "paused_plan": "step4/5,3completed",
+  "followups": [
+    {
+      "agent_id": "subagent_d5c156ef45c77562ae1a3fca",
+      "old_task_id": "subtask_cbfeff1703b1320ddaaab346",
+      "new_task_id": "subtask_4a933b4a9899a2e847d81118",
+      "old_attempt_id": "attempt_2cb99f6f247150345fa88892",
+      "new_attempt_id": "attempt_5f2aeab9dff5be9f96bf70ff",
+      "spawn_seq": 199,
+      "terminal_seq": 330,
+      "terminal_status": "completed",
+      "new_identity": true,
+      "report_identity_matches": true
+    },
+    {
+      "agent_id": "subagent_366998de4a8668e9ce56285c",
+      "old_task_id": "subtask_06e951c628550f091b78d230",
+      "new_task_id": "subtask_d4c8342fedc825ec566edb15",
+      "old_attempt_id": "attempt_b4803bf2a8fc5bc3b38860f5",
+      "new_attempt_id": "attempt_4ea348192fb6142d2bc8a208",
+      "spawn_seq": 205,
+      "terminal_seq": 336,
+      "terminal_status": "completed",
+      "new_identity": true,
+      "report_identity_matches": true
+    }
+  ],
+  "logs_unchanged_beyond_original_480s_deadline": true,
+  "scope_pass": true,
+  "limitations": [
+    "Only the two controlled foreground/background Unix process groups; no rollback or detached-daemon claim.",
+    "Recovered history reader separately exposed BUG-009; this process-cleanup proof does not mark all recovery cases passed.",
+    "B child report confused a background Bash task ID with a subagent task ID; root final receipt used canonical IDs correctly."
+  ]
+}

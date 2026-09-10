@@ -544,25 +544,10 @@ export function contextUsagePanelBottomOffset({
   );
 }
 
-export function subagentDetailPanelBottomOffset({
-  composerContentInset,
-  gap = 12,
-  minimum = 28,
-}: {
-  composerContentInset: number;
-  gap?: number;
-  minimum?: number;
-}): number {
-  return Math.max(
-    Math.max(0, minimum),
-    Math.max(0, composerContentInset) + Math.max(0, gap),
-  );
-}
-
 /**
  * Bottom offset of the run-plan overlay panel (contract 运行计划与任务进度
  * 设计契约 [展开面板](docs/02_主智能体闭环/运行计划/需求文档.md#展开面板)): the panel sits 12px above the measured composer content
- * inset, same rule as the subagent detail overlay.
+ * inset.
  */
 export function runPlanPanelBottomOffset({
   composerContentInset,

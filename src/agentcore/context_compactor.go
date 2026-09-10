@@ -207,13 +207,15 @@ func compactTailExceedsBudget(req CompactRequest, tail []convcontext.Message) (b
 	if len(tail) == 0 {
 		return false, 0
 	}
-	state := NewContextWindowStateWithConfig(req.Envelope, contextWindowConfigFromModelConfig(req.Envelope.CompactModelConfig))
+	execution := req.Envelope.ExecutionModelConfig
+	// Read compatibility for older standalone callers without an execution binding.
+	if execution.Model == "" && execution.ContextWindow == 0 && execution.MaxInputTokens == 0 {
+		execution = req.Envelope.CompactModelConfig
+	}
+	state := NewContextWindowStateWithConfig(req.Envelope, contextWindowConfigFromModelConfig(execution))
 	limit := req.TargetTokens
 	if limit <= 0 || (state.CompactTarget > 0 && state.CompactTarget < limit) {
 		limit = state.CompactTarget
-	}
-	if reserved := state.blockingThreshold() - compactSummaryDefaultMaxTokens; reserved > 0 && reserved < limit {
-		limit = reserved
 	}
 	if user := lastUserMessage(req.Messages); user != nil {
 		if userFloor := estimateMessageTokens(*user); userFloor > limit {
@@ -392,7 +394,7 @@ func buildSemanticCompactSummary(ctx stdcontext.Context, req CompactRequest, bou
 			return compactFallbackBuildResult(fallback, currentGroups, prunedDigestMessages, tailMessages, req.Envelope, toolResultsPruned, prunedGroups, prunedMessages, summaryMaxTokens, attempt)
 		}
 
-		rawSummary, err := req.summaryInvoker(ctx, cfg, llm.Request{
+		summaryRequest := llm.Request{
 			SystemPrompt:      compactSummarySystemPrompt(),
 			Messages:          summaryRequestMessages,
 			Model:             cfg.Model,
@@ -402,7 +404,13 @@ func buildSemanticCompactSummary(ctx stdcontext.Context, req CompactRequest, bou
 			StreamIdleTimeout: compactSummaryStreamIdleTimeout,
 			DisableReasoning:  true,
 			Purpose:           llm.RequestPurposeCompactSummary,
-		})
+		}
+		var rawSummary string
+		err := validateSummaryInputBudget(cfg, summaryRequest, req.Envelope.CompactModelConfig.MaxInputTokens)
+		if err == nil {
+			rawSummary, err = req.summaryInvoker(ctx, cfg, summaryRequest)
+		}
+
 		if err == nil {
 			if strings.TrimSpace(rawSummary) == "" {
 				fallback := CompactFallback{
@@ -476,18 +484,12 @@ func compactSummaryLLMCall(ctx stdcontext.Context, cfg llm.Config, req llm.Reque
 			retryReq.OmitTemperature = false
 			resp, retryErr := llm.StreamInvoke(ctx, cfg, retryReq, nil)
 			if retryErr == nil {
-				if resp == nil {
-					return "", nil
-				}
-				return resp.Content, nil
+				return finalCompactSummaryText(resp)
 			}
 		}
 		return "", err
 	}
-	if resp == nil {
-		return "", nil
-	}
-	return resp.Content, nil
+	return finalCompactSummaryText(resp)
 }
 
 func (e *runEventEmitter) invokeCompactSummary(ctx stdcontext.Context, cfg llm.Config, req llm.Request) (string, error) {
@@ -498,32 +500,38 @@ func (e *runEventEmitter) invokeCompactSummary(ctx stdcontext.Context, cfg llm.C
 	}
 	req.Purpose = llm.RequestPurposeCompactSummary
 	req.AffinityScopeID = e.threadID
+	if e.agentID != "" && e.agentID != "root" {
+		req.AffinityScopeID += ":agent:" + e.agentID
+	}
 	req.RequestID = ""
-	retryIndex := e.auxiliaryRequestIndex
-	e.auxiliaryRequestIndex++
-	resp, err := StreamRecordedModel(ctx, ModelCallAuthority{
+	authority := ModelCallAuthority{
 		ThreadID: e.threadID, RunID: e.runID, TurnID: e.turnID(), SessionID: e.sessionID,
 		Recorder: e.recorder, Sink: e.sink,
-	}, auxCfg, req, llm.StreamObserver{}, retryIndex, false)
+		AgentID: e.agentID, ParentAgentID: e.parentAgentID, SubagentTaskID: e.subagentTaskID,
+		AttemptID: e.attemptID, Progress: e.subagentProgress, LogicalCallID: newAwakenID("model_call"),
+	}
+	resp, err := StreamRecordedModel(ctx, authority, auxCfg, req, llm.StreamObserver{}, 0, false)
 	if err != nil {
 		if requiredTemperature, ok := llm.RequiredTemperatureFromError(err); ok {
 			retryReq := req
 			retryReq.RequestID = ""
 			retryReq.TemperatureOverride = &requiredTemperature
 			retryReq.OmitTemperature = false
-			retryIndex = e.auxiliaryRequestIndex
-			e.auxiliaryRequestIndex++
-			resp, err = StreamRecordedModel(ctx, ModelCallAuthority{
-				ThreadID: e.threadID, RunID: e.runID, TurnID: e.turnID(), SessionID: e.sessionID,
-				Recorder: e.recorder, Sink: e.sink,
-			}, auxCfg, retryReq, llm.StreamObserver{}, retryIndex, false)
+			resp, err = StreamRecordedModel(ctx, authority, auxCfg, retryReq, llm.StreamObserver{}, 1, false)
 		}
 	}
 	if err != nil {
 		return "", err
 	}
+	return finalCompactSummaryText(resp)
+}
+
+func finalCompactSummaryText(resp *llm.Response) (string, error) {
 	if resp == nil {
 		return "", nil
+	}
+	if strings.TrimSpace(resp.Content) == "" {
+		return "", fmt.Errorf("compact summary has no final text (stop_reason=%s, tool_calls=%d, reasoning=%t)", resp.StopReason, len(resp.ToolCalls), strings.TrimSpace(resp.Thinking) != "")
 	}
 	return resp.Content, nil
 }
@@ -787,6 +795,10 @@ func llmConfigForCompaction(envelope ContextEnvelope) llm.Config {
 		BaseURL:               modelCfg.BaseURL,
 		InferenceEndpoint:     modelCfg.InferenceEndpoint,
 		Model:                 model,
+		CapabilityModelID:     modelCfg.CapabilityModelID,
+		EndpointSelector:      modelCfg.EndpointSelector,
+		ModelSelectorKind:     modelCfg.ModelSelectorKind,
+		ReasoningEffort:       modelCfg.ReasoningEffort,
 		Protocol:              llm.Protocol(modelCfg.Protocol),
 		ProviderID:            modelCfg.ProviderID,
 		ProfileID:             modelCfg.ProfileID,
@@ -896,4 +908,28 @@ func firstNonEmptyCompactValue(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// Summary input has its own capacity. Reject before transport and let the
+// existing bounded safe-group pruning handle the context-too-long path.
+func validateSummaryInputBudget(cfg llm.Config, req llm.Request, maxInput int) error {
+	capacity := cfg.ContextWindow
+	if maxInput > 0 && (capacity <= 0 || maxInput < capacity) {
+		capacity = maxInput
+	}
+	if capacity <= 0 || cfg.Model == "" {
+		return nil
+	}
+	if cfg.APIKey == "" {
+		cfg.AuthScheme = "none"
+	}
+	prepared, err := llm.PrepareRequest(cfg, req, true)
+	if err != nil {
+		return err
+	}
+	tokens := convcontext.EstimateTokens(string(prepared.Body))
+	if tokens > capacity {
+		return fmt.Errorf("compact summary prompt too long: projected %d exceeds summary route input capacity %d", tokens, capacity)
+	}
+	return nil
 }

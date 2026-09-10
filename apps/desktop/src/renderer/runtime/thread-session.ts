@@ -7,7 +7,7 @@ import {
 } from "./thread-transcript";
 
 export type ThreadSessionOptions = {
-  client: Pick<RuntimeClient, "getThreadTranscript" | "subscribeRun">;
+  client: Pick<RuntimeClient, "getThreadTranscript" | "subscribeRun" | "subscribeThreadActivity">;
   dispatch: (action: RuntimeAction) => void;
   storage: Pick<Storage, "getItem" | "setItem" | "removeItem">;
   onTranscript: (
@@ -29,6 +29,8 @@ export function runNeedsSubscription(status: RuntimeRun["status"]): boolean {
 export class ThreadSession {
   private generation = 0;
   private unsubscribe: (() => void) | undefined;
+  private activityUnsubscribe: (() => void) | undefined;
+  private activityGeneration: number | undefined;
   private selectedThreadId: string | undefined;
   private selectedRunId: string | undefined;
 
@@ -46,6 +48,9 @@ export class ThreadSession {
     this.generation += 1;
     this.unsubscribe?.();
     this.unsubscribe = undefined;
+    this.activityUnsubscribe?.();
+    this.activityUnsubscribe = undefined;
+    this.activityGeneration = undefined;
   }
 
   begin(threadId?: string): number {
@@ -79,6 +84,7 @@ export class ThreadSession {
       actions: actionsForThreadTranscript(transcript),
     });
     this.options.onTranscript(transcript, () => this.isCurrent(generation));
+    if (this.options.client.subscribeThreadActivity) await this.subscribeActivity(threadId, generation, transcript.activityCursor);
     if (!latestRun || !runNeedsSubscription(latestRun.status)) {
       if (latestRun) this.clearStoredRun(latestRun.runId);
       return;
@@ -98,6 +104,8 @@ export class ThreadSession {
     if (!this.isCurrent(generation)) return;
     this.selectedThreadId = run.threadId;
     this.selectedRunId = run.runId;
+    if (this.options.client.subscribeThreadActivity) await this.subscribeActivity(run.threadId, generation);
+    if (!this.isCurrent(generation)) return;
     this.options.storage.setItem(RUN_STORAGE_KEY, run.runId);
     const isCurrent = () =>
       this.isCurrent(generation) &&
@@ -106,6 +114,7 @@ export class ThreadSession {
     let closed = false;
     const handlers: SubscribeHandlers = {
       onEvent: (event) => {
+        if (this.activityGeneration === generation && event.subagentTaskId) return;
         if (
           !isCurrent() ||
           (event.threadId && event.threadId !== run.threadId) ||
@@ -172,5 +181,21 @@ export class ThreadSession {
     );
     if (!isCurrent() || closed) unsubscribe();
     else this.unsubscribe = unsubscribe;
+  }
+
+  private async subscribeActivity(threadId: string, generation: number, afterCursor?: number): Promise<void> {
+    const subscribe = this.options.client.subscribeThreadActivity;
+    if (!subscribe || !this.isCurrent(generation) || this.activityGeneration === generation) return;
+    this.activityGeneration = generation;
+    const stop = await subscribe(threadId, {
+      onEvent: (event) => {
+        if (!this.isCurrent(generation) || this.selectedThreadId !== threadId || (event.threadId && event.threadId !== threadId)) return;
+        this.options.dispatch({ type: "run/event", event, receivedAtMs: Date.now() });
+      },
+      onError: (message) => {
+        if (this.isCurrent(generation) && message.includes("ACTIVITY_CURSOR_EXPIRED")) void this.replay(threadId);
+      },
+    }, afterCursor);
+    if (!this.isCurrent(generation)) stop(); else this.activityUnsubscribe = stop;
   }
 }

@@ -2,6 +2,7 @@ package agentcore
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,8 +44,8 @@ func TestRunnerHandsControlToDeepResearchWithoutRootLLM(t *testing.T) {
 		return nil, nil
 	}
 	manager := subagentruntime.NewManager(context.Background(), subagentruntime.Config{
-		MaxConcurrent: 4,
-		Persist:       func(context.Context, subagentruntime.PersistEvent) error { return nil },
+		Policy:  subagentruntime.Policy{MaxActiveAgents: 4},
+		Persist: func(context.Context, subagentruntime.PersistEvent) error { return nil },
 		Starter: func(_ context.Context, request subagentruntime.StartRequest) (string, error) {
 			switch request.Task.AgentType {
 			case subagentruntime.AgentTypeExplore:
@@ -110,5 +111,60 @@ func TestResearchReceiptDetailsExcludeFetchedBody(t *testing.T) {
 	}
 	if _, ok := details["redirects"]; ok {
 		t.Fatalf("redirect details entered host receipt: %+v", details)
+	}
+}
+
+func TestResearchPublisherCancellationFences(t *testing.T) {
+	for _, afterWrite := range []bool{false, true} {
+		name := "before_write"
+		if afterWrite {
+			name = "after_write_before_publish"
+		}
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			output := filepath.Join(root, "output")
+			if err := os.MkdirAll(output, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			cfg := AgentConfig{
+				Workspace:        WorkspaceConfig{Root: root, ReadableRoots: []string{root}, WritableRoots: []string{root}, OutputRoots: []string{output}},
+				ToolExposure:     tool.ToolExposurePolicy{Mode: tool.ExposureAll},
+				ToolSessionState: tool.NewToolSessionState(root),
+			}
+			runner := NewRunner(cfg, convcontext.NewConversation(nil), NewRequestBuilder(cfg))
+			runner.threadID, runner.runID = "cancel-thread", "cancel-run"
+			recorder := &forkCaptureRecorder{}
+			runner.recorder = recorder
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			writeReturned := false
+			events := newRunEventEmitter(runner.threadID, EventSinkFunc(func(event AwakenEvent) {
+				if afterWrite && event.Type == ToolResultEventType && event.ToolName == "Write" {
+					writeReturned = true
+					cancel()
+				}
+			}))
+			events.runID, events.recorder = runner.runID, recorder
+			if !afterWrite {
+				cancel()
+			}
+			_, artifactID, err := (&researchPublisher{runner: runner, events: events}).Publish(ctx, "# Retained report\n")
+			if !errors.Is(err, context.Canceled) || artifactID != "" {
+				t.Fatalf("cancelled publisher returned artifact=%q err=%v", artifactID, err)
+			}
+			data, readErr := os.ReadFile(filepath.Join(output, "research-cancel-run.md"))
+			if afterWrite {
+				if !writeReturned || readErr != nil || string(data) != "# Retained report\n" {
+					t.Fatalf("completed Write was not preserved: returned=%t data=%q err=%v", writeReturned, data, readErr)
+				}
+			} else if !errors.Is(readErr, os.ErrNotExist) {
+				t.Fatalf("cancelled before Write still created a file: %v", readErr)
+			}
+			for _, record := range recorder.snapshot() {
+				if record.Kind == SemanticKindToolCall && record.Payload["tool_name"] == "artifact_publish" {
+					t.Fatal("publish was dispatched after cancellation")
+				}
+			}
+		})
 	}
 }

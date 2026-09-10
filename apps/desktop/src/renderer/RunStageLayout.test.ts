@@ -174,19 +174,21 @@ describe("RunStage layout", () => {
     );
   });
 
-  it("keeps subagent detail in a pointer-through overlay above the composer", () => {
-    const workbenchStyles = readStyleSource(new URL("./styles/workbench.css", import.meta.url));
-    const overlay = cssRule(workbenchStyles, ".subagent-detail-overlay");
-    const card = cssRule(
-      workbenchStyles,
-      ".subagent-detail-overlay > .aw-subagent-execution-card",
-    );
-
-    expect(overlay).toContain("position: absolute;");
-    expect(overlay).toContain("pointer-events: none;");
-    expect(card).toContain("pointer-events: auto;");
-    expect(card).toContain("width: min(680px, 100%);");
-    expect(card).toContain("max-height: min(560px, 100%);");
+  it("bounds child details inside the inspector with an independent scroll body", () => {
+    const styles = readStyleSource(new URL("./styles.css", import.meta.url));
+    expect(cssRule(styles, ".subagent-panel")).toContain("overflow: hidden;");
+    expect(cssRule(styles, ".subagent-panel__body")).toContain("overflow: auto;");
+    expect(cssRule(styles, ".subagent-panel__body")).toContain("overscroll-behavior: contain;");
+    expect(styles).not.toContain(".subagent-detail-overlay");
+    const shell = readStyleSource(new URL("../../../../Awaken Design System/src/components/AwakenWorkbenchShell/AwakenWorkbenchShell.css", import.meta.url));
+    let narrowPosition: string | undefined;
+    postcss.parse(shell).walkAtRules("media", media => {
+      if (media.params !== "(max-width: 1180px)") return;
+      media.walkRules(".aw-workbench-shell-inspector-split:not(.aw-workbench-shell-inspector-collapsed):not(.aw-workbench-shell-inspector-expanded) > .aw-workbench-inspector", rule => {
+        rule.walkDecls("position", declaration => { narrowPosition = declaration.value; });
+      });
+    });
+    expect(narrowPosition).toBe("relative");
   });
 
   it("bounds the run-plan overlay between the stage top and measured composer", () => {
@@ -328,42 +330,6 @@ describe("RunStage layout", () => {
     );
   });
 
-  it("keeps subagent details themed and bounded", () => {
-
-    const cardStyles = readStyleSource(new URL(
-        "../../../../Awaken Design System/src/components/AwakenSubagentExecutionCard/AwakenSubagentExecutionCard.css",
-        import.meta.url,
-      ));
-    const card = cssRule(cardStyles, ".aw-subagent-execution-card");
-    const body = cssRule(cardStyles, ".aw-subagent-execution-card__body");
-
-    expect(card).toContain("background: var(--aw-surface-raised);");
-    expect(card).toContain("color: var(--aw-text-primary);");
-    expect(card).toContain("border: 1px solid var(--aw-border-main);");
-    expect(cardStyles).not.toContain("--aw-color-");
-    expect(cardStyles).not.toContain("background: #fff");
-    expect(body).not.toContain("scrollbar-gutter");
-    expect(body).toContain("scrollbar-width: thin;");
-    expect(cardStyles).toMatch(
-      /\.aw-subagent-execution-card__body::\-webkit-scrollbar-track,[\s\S]*?background:\s*transparent;/,
-    );
-  });
-
-
-  it("keeps the right-rail subagent status pill on one line", () => {
-    const appStyles = readStyleSource(new URL("./styles.css", import.meta.url));
-    const headerContent = cssRule(
-      appStyles,
-      ".subagent-inspector__header > div",
-    );
-
-    expect(headerContent).toContain("flex: 1;");
-    expect(headerContent).toContain("min-width: 0;");
-    expect(appStyles).toMatch(
-      /\.subagent-inspector__status\s*\{[^}]*flex:\s*0 0 auto;[^}]*white-space:\s*nowrap;/,
-    );
-  });
-
   it("fades collapsed prompt overflow instead of ellipsis, and keeps copy as a flat icon", () => {
     const designSystemStyles = readStyleSource(new URL(
         "../../../../Awaken Design System/src/tokens/components.css",
@@ -434,7 +400,7 @@ describe("RunStage layout", () => {
 
 // This is an ownership assertion: the actual panel actions are covered by
 // WorkbenchComposition.behavior.test.tsx.
-it("keeps Subagent details in the declared RunStage overlay owner", () => {
+it("keeps Subagent details in the inspector instead of the main narrative overlay", () => {
   const root = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
   const narrative = readFileSync(
     new URL("./useNarrativeRenderer.tsx", import.meta.url),
@@ -446,6 +412,6 @@ it("keeps Subagent details in the declared RunStage overlay owner", () => {
   );
   expect(narrative).not.toContain("SubagentExecutionCard");
   expect(root).toMatch(/overlay=\{\s*<WorkbenchOverlays/);
-  expect(overlay).toContain('className="subagent-detail-overlay"');
-  expect(overlay).toContain("<SubagentExecutionCard");
+  expect(overlay).not.toContain("Subagent");
+  expect(root.slice(root.indexOf("inspector={"))).toContain("<SubagentPanel");
 });

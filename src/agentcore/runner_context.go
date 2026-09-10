@@ -28,6 +28,7 @@ func usesLegacyContextCompactionRecorder(recorder SemanticRecorder) bool {
 // post-compact conversation. Attachment bytes never enter the journal; only
 // their identity and storage key are kept so replay can rehydrate owned blobs.
 type SemanticCompactedMessage struct {
+	OriginAgentID       string                              `json:"origin_agent_id,omitempty"`
 	Role                string                              `json:"role"`
 	Content             string                              `json:"content"`
 	ToolCalls           []context.ToolCall                  `json:"tool_calls,omitempty"`
@@ -47,6 +48,7 @@ func semanticCompactedMessages(messages []context.Message) []SemanticCompactedMe
 	out := make([]SemanticCompactedMessage, 0, len(messages))
 	for _, message := range messages {
 		out = append(out, SemanticCompactedMessage{
+			OriginAgentID:       message.OriginAgentID,
 			Role:                string(message.Role),
 			Content:             message.Content,
 			ToolCalls:           append([]context.ToolCall(nil), message.ToolCalls...),
@@ -89,6 +91,7 @@ func (r *Runner) persistContextCompactedV2(ctx stdcontext.Context, bundle PostCo
 	}
 	if r.config.SubagentOrigin != nil && strings.TrimSpace(r.config.SubagentOrigin.AgentID) != "" {
 		payload["agent_id"] = r.config.SubagentOrigin.AgentID
+		payload["parent_agent_id"], payload["subagent_task_id"], payload["attempt_id"] = r.config.SubagentOrigin.ParentAgentID, r.config.SubagentTaskID, r.config.AttemptID
 	}
 	record := NewSemanticRecord(SemanticKindContextCompactedV2, r.threadID, r.runID, "", "", r.sessionID, payload)
 	persistCtx, cancel := durablePersistenceContext(ctx)
@@ -274,7 +277,7 @@ func (r *Runner) prepareLLMRequest(ctx stdcontext.Context, events *runEventEmitt
 }
 
 func (r *Runner) applyContextEpoch(ctx stdcontext.Context, req LLMRequest, events *runEventEmitter) (LLMRequest, error) {
-	if r == nil || r.config.ContextEpochStore == nil || r.config.SubagentOrigin != nil {
+	if r == nil || r.config.ContextEpochStore == nil {
 		return req, nil
 	}
 	config := r.transportConfig(req)
@@ -282,6 +285,9 @@ func (r *Runner) applyContextEpoch(ctx stdcontext.Context, req LLMRequest, event
 		r.threadID, r.config.ModelConfig, req,
 		llm.EndpointContractIDForConfig(config), llm.NormalizeBaseURLForContract(config.BaseURL),
 	)
+	if r.config.SubagentOrigin != nil {
+		candidate.AgentID = r.config.SubagentOrigin.AgentID
+	}
 	projection, err := r.config.ContextEpochStore.Project(ctx, candidate)
 	if err != nil {
 		return LLMRequest{}, fmt.Errorf("%w: %w", ErrContextEpochProjection, err)

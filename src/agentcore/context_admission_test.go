@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	convcontext "awaken/src/context"
@@ -12,7 +13,7 @@ import (
 )
 
 type countingMediaReadTool struct {
-	executes *int
+	executes *int64
 }
 
 func (t countingMediaReadTool) Name() string { return read.ToolName }
@@ -39,7 +40,7 @@ func (t countingMediaReadTool) Execute(context.Context, string) (string, error) 
 }
 func (t countingMediaReadTool) ExecuteOutcome(context.Context, string, tool.ToolObserver) (tool.ExecutionOutcome, error) {
 	if t.executes != nil {
-		*t.executes++
+		atomic.AddInt64(t.executes, 1)
 	}
 	outcome := tool.SucceededOutcome("image result")
 	outcome.ModelContent = []tool.ModelContentPart{{
@@ -74,7 +75,7 @@ func TestExecuteToolCallsAdmitsOnlyFittingMediaReads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("original Read: %v", err)
 	}
-	var executes int
+	var executes int64
 	if err := tool.RegisterToolForce(countingMediaReadTool{executes: &executes}); err != nil {
 		t.Fatalf("register fake Read: %v", err)
 	}
@@ -111,7 +112,7 @@ func TestExecuteToolCallsAdmitsOnlyFittingMediaReads(t *testing.T) {
 		t.Fatalf("expected a prefix of media Reads to execute, got executes=%d", executes)
 	}
 	for i, result := range results {
-		if i < executes {
+		if int64(i) < executes {
 			if result.IsError || result.ErrorCode == ErrorCodeContextAdmissionExhausted {
 				t.Fatalf("result %d should have executed, got %+v", i, result)
 			}
@@ -134,7 +135,7 @@ func TestExecuteToolCallsDoesNotAdmitGateTextReads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("original Read: %v", err)
 	}
-	var executes int
+	var executes int64
 	if err := tool.RegisterToolForce(countingMediaReadTool{executes: &executes}); err != nil {
 		t.Fatalf("register fake Read: %v", err)
 	}

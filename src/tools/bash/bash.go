@@ -247,13 +247,19 @@ func runForeground(ctx context.Context, p params, cwd, shell string, args []stri
 	wrapped := wrapCommand(p.Command, markerPath, kind)
 	args = invocationArgs(shell, kind, wrapped)
 	command := exec.CommandContext(timeoutContext, shell, args...)
-	configureProcessTree(command)
+	result := result{Command: p.Command, Shell: shell, CWD: cwd, EnvironmentSnapshotID: environment.Snapshot.SnapshotID}
+	releaseProcessTree, setupErr := configureProcessTree(command)
+	if setupErr != nil {
+		result.Stderr = setupErr.Error()
+		result.DurationMS = time.Since(started).Milliseconds()
+		return result
+	}
+	defer releaseProcessTree()
 	command.Dir = cwd
 	command.Env = append(append([]string(nil), environment.Environment...), "AWAKEN_CWD_RESULT="+markerPath)
 	stdout := newLimitedWriter(maxOutputBytes, observer, "stdout")
 	stderr := newLimitedWriter(maxOutputBytes, observer, "stderr")
 	command.Stdout, command.Stderr = stdout, stderr
-	result := result{Command: p.Command, Shell: shell, CWD: cwd, EnvironmentSnapshotID: environment.Snapshot.SnapshotID}
 	err := command.Run()
 	result.DurationMS = time.Since(started).Milliseconds()
 	result.Stdout, result.Stderr = stdout.String(), stderr.String()
@@ -397,8 +403,10 @@ type backgroundStatus struct {
 }
 
 type backgroundTask struct {
-	threadID string
-	cancel   context.CancelFunc
+	threadID       string
+	subagentTaskID string
+	done           chan struct{}
+	cancel         context.CancelFunc
 }
 
 var taskRegistry = struct {
@@ -428,12 +436,18 @@ func startBackgroundTask(runContext context.Context, p params, cwd, shell string
 	args = invocationArgs(shell, kind, wrapped)
 	taskContext, cancel := context.WithTimeout(context.Background(), time.Duration(p.Timeout)*time.Millisecond)
 	command := exec.CommandContext(taskContext, shell, args...)
-	configureProcessTree(command)
+	releaseProcessTree, err := configureProcessTree(command)
+	if err != nil {
+		cancel()
+		_ = logFile.Close()
+		return result{}, err
+	}
 	command.Dir = cwd
 	command.Env = append(append([]string(nil), environment.Environment...), "AWAKEN_CWD_RESULT="+markerPath)
 	command.Stdout, command.Stderr = logFile, logFile
 	if err := command.Start(); err != nil {
 		cancel()
+		releaseProcessTree()
 		_ = logFile.Close()
 		return result{}, err
 	}
@@ -441,15 +455,19 @@ func startBackgroundTask(runContext context.Context, p params, cwd, shell string
 	if err := writeBackgroundStatus(statusPath, status); err != nil {
 		cancel()
 		_ = command.Wait()
+		releaseProcessTree()
 		_ = logFile.Close()
 		return result{}, err
 	}
-	task := &backgroundTask{threadID: threadID, cancel: cancel}
+	task := &backgroundTask{threadID: threadID, subagentTaskID: identity.SubagentTaskID, done: make(chan struct{}), cancel: cancel}
 	taskRegistry.Lock()
 	taskRegistry.tasks[taskID] = task
 	taskRegistry.Unlock()
 	go func() {
+		defer close(task.done)
+		defer cancel()
 		err := command.Wait()
+		releaseProcessTree()
 		_ = logFile.Sync()
 		_ = logFile.Close()
 		finished := time.Now().UTC()
@@ -514,6 +532,28 @@ func writeBackgroundStatus(path string, status backgroundStatus) error {
 		return err
 	}
 	return textfile.WriteAtomic(path, append(encoded, '\n'), 0o600)
+}
+
+// FinishSubagentTasks cancels and drains only processes started by this
+// assignment. A completed Agent must not leave its background tools running.
+func FinishSubagentTasks(taskID string) {
+	if taskID == "" {
+		return
+	}
+	taskRegistry.Lock()
+	var owned []*backgroundTask
+	for _, task := range taskRegistry.tasks {
+		if task.subagentTaskID == taskID {
+			owned = append(owned, task)
+		}
+	}
+	taskRegistry.Unlock()
+	for _, task := range owned {
+		task.cancel()
+	}
+	for _, task := range owned {
+		<-task.done
+	}
 }
 
 func CancelThreadTasks(threadID string) {

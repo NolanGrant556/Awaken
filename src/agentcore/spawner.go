@@ -94,9 +94,18 @@ func CreateSubagent(parent AgentConfig, spawn SpawnConfig) (AgentConfig, error) 
 
 	// Step 4: build the child AgentConfig.
 	child := AgentConfig{
+		NewChildComputerRuntime: parent.NewChildComputerRuntime,
+
+		LoadChildContext:    parent.LoadChildContext,
+		ChildSessions:       parent.ChildSessions,
+		ResolveModelBinding: parent.ResolveModelBinding,
+		ListModelBindings:   parent.ListModelBindings,
+		CollaborationPolicy: parent.CollaborationPolicy,
 		// Copy runnable fields from the parent so the child is immediately
 		// usable. The caller may override these.
 		SystemPrompt:                 parent.SystemPrompt,
+		ArchivedHistoryService:       parent.ArchivedHistoryService,
+		CompactedMemoryContext:       parent.CompactedMemoryContext,
 		MaxThoughts:                  parent.MaxThoughts,
 		MaxToolExecutions:            parent.MaxToolExecutions,
 		ModelConfig:                  parent.ModelConfig,
@@ -124,11 +133,17 @@ func CreateSubagent(parent AgentConfig, spawn SpawnConfig) (AgentConfig, error) 
 		ActivatedDeferredTools: append([]string(nil), parent.ActivatedDeferredTools...),
 		ToolSessionState:       tool.NewToolSessionState(parent.Workspace.Root),
 		ModelContentStore:      parent.ModelContentStore,
+		ContextEpochStore:      parent.ContextEpochStore,
 		ToolResultOffloadStore: parent.ToolResultOffloadStore,
 		SubagentBoundary:       &childBoundary,
 		SubagentOrigin:         childOrigin,
-		SubagentController:     nil,
+		SubagentController:     parent.SubagentController,
 		ResearchIntent:         nil,
+	}
+	child.ToolExposure.ExtraHidden = append([]string(nil), parent.ToolExposure.ExtraHidden...)
+	child.ToolExposure.ExtraVisible = append([]string(nil), parent.ToolExposure.ExtraVisible...)
+	if parent.SubagentModelConfig.Model != "" {
+		child.ModelConfig = parent.SubagentModelConfig
 	}
 	// Step 5: set the effective profile. Guardians are forced to
 	// GuardianReadOnly regardless of what the boundary resolution produced.

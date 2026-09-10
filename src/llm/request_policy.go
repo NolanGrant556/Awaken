@@ -98,7 +98,7 @@ func nativeReasoningEffort(cfg Config, req Request) string {
 }
 
 func isAgentExecutionPurpose(purpose RequestPurpose) bool {
-	return purpose == RequestPurposeAgentTurn || purpose == RequestPurposeSubagent || purpose == RequestPurposeScheduledTask || purpose == RequestPurposeHookAgent
+	return purpose == RequestPurposeAgentTurn || purpose == RequestPurposeSubagent || purpose == RequestPurposeScheduledTask || purpose == RequestPurposeHookAgent || purpose == RequestPurposeResearchSynthesis
 }
 
 func supportsAuxiliaryReasoningEffort(cfg Config, req Request) bool {

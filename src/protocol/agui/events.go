@@ -65,6 +65,7 @@ const (
 	EventAwakenInstructionSnapshot          EventType = "AWAKEN_INSTRUCTION_SNAPSHOT"
 	EventAwakenModelUsage                   EventType = "AWAKEN_MODEL_USAGE"
 	EventAwakenSubagentChanged              EventType = "AWAKEN_SUBAGENT_CHANGED"
+	EventAwakenAgentPhase                   EventType = "AWAKEN_AGENT_PHASE"
 	EventAwakenSubagentActivity             EventType = "AWAKEN_SUBAGENT_ACTIVITY"
 	EventAwakenSubagentMessageQueued        EventType = "AWAKEN_SUBAGENT_MESSAGE_QUEUED"
 	EventAwakenACPSessionChanged            EventType = "AWAKEN_ACP_SESSION_CHANGED"
@@ -280,6 +281,7 @@ type Event struct {
 	StreamCursor                     uint64                      `json:"streamCursor,omitempty"`
 	SemanticSeq                      uint64                      `json:"semanticSeq,omitempty"`
 	RecordID                         string                      `json:"recordId,omitempty"`
+	SourceEventID                    string                      `json:"sourceEventId,omitempty"`
 	Timestamp                        int64                       `json:"timestamp,omitempty"`
 	ThreadID                         string                      `json:"threadId,omitempty"`
 	RunID                            string                      `json:"runId,omitempty"`
@@ -441,28 +443,37 @@ type Event struct {
 	InteractionRecoveries      []string         `json:"interactionRecoveries,omitempty"`
 	InteractionFormSchema      map[string]any   `json:"interactionFormSchema,omitempty"`
 	// Native run-scoped Subagent fields.
-	SubagentTaskID           string `json:"subagentTaskId,omitempty"`
-	SubagentAgentID          string `json:"subagentAgentId,omitempty"`
-	SubagentParentAgentID    string `json:"subagentParentAgentId,omitempty"`
-	SubagentParentToolCallID string `json:"subagentParentToolCallId,omitempty"`
-	SubagentAgentType        string `json:"subagentAgentType,omitempty"`
-	SubagentDescription      string `json:"subagentDescription,omitempty"`
-	SubagentStatus           string `json:"subagentStatus,omitempty"`
-	SubagentWorkspaceMode    string `json:"subagentWorkspaceMode,omitempty"`
-	SubagentModelProfileID   string `json:"subagentModelProfileId,omitempty"`
-	SubagentActivity         string `json:"subagentActivity,omitempty"`
-	SubagentToolUseCount     int    `json:"subagentToolUseCount,omitempty"`
-	SubagentEstimatedTokens  int    `json:"subagentEstimatedTokens,omitempty"`
-	SubagentInputTokens      int    `json:"subagentInputTokens,omitempty"`
-	SubagentOutputTokens     int    `json:"subagentOutputTokens,omitempty"`
-	SubagentTotalTokens      int    `json:"subagentTotalTokens,omitempty"`
-	SubagentResultPreview    string `json:"subagentResultPreview,omitempty"`
-	SubagentErrorCode        string `json:"subagentErrorCode,omitempty"`
-	SubagentErrorMessage     string `json:"subagentErrorMessage,omitempty"`
-	SubagentSideEffectState  string `json:"subagentSideEffectState,omitempty"`
-	SubagentCreatedAt        string `json:"subagentCreatedAt,omitempty"`
-	SubagentStartedAt        string `json:"subagentStartedAt,omitempty"`
-	SubagentFinishedAt       string `json:"subagentFinishedAt,omitempty"`
+	SubagentTaskID             string `json:"subagentTaskId,omitempty"`
+	SubagentAgentID            string `json:"subagentAgentId,omitempty"`
+	SubagentParentAgentID      string `json:"subagentParentAgentId,omitempty"`
+	SubagentParentToolCallID   string `json:"subagentParentToolCallId,omitempty"`
+	SubagentAgentType          string `json:"subagentAgentType,omitempty"`
+	SubagentDescription        string `json:"subagentDescription,omitempty"`
+	SubagentStatus             string `json:"subagentStatus,omitempty"`
+	SubagentWorkspaceMode      string `json:"subagentWorkspaceMode,omitempty"`
+	AgentPhase                 string `json:"agentPhase,omitempty"`
+	SubagentModelID            string `json:"subagentModelId,omitempty"`
+	SubagentBackground         bool   `json:"subagentBackground,omitempty"`
+	SubagentClosed             bool   `json:"subagentClosed,omitempty"`
+	SubagentAttemptID          string `json:"subagentAttemptId,omitempty"`
+	SubagentContextMode        string `json:"subagentContextMode,omitempty"`
+	SubagentWorkflow           string `json:"subagentWorkflow,omitempty"`
+	SubagentReasoningEffort    string `json:"subagentReasoningEffort,omitempty"`
+	SubagentModelBindingSource string `json:"subagentModelBindingSource,omitempty"`
+	SubagentModelProfileID     string `json:"subagentModelProfileId,omitempty"`
+	SubagentActivity           string `json:"subagentActivity,omitempty"`
+	SubagentToolUseCount       int    `json:"subagentToolUseCount,omitempty"`
+	SubagentEstimatedTokens    int    `json:"subagentEstimatedTokens,omitempty"`
+	SubagentInputTokens        int    `json:"subagentInputTokens,omitempty"`
+	SubagentOutputTokens       int    `json:"subagentOutputTokens,omitempty"`
+	SubagentTotalTokens        int    `json:"subagentTotalTokens,omitempty"`
+	SubagentResultPreview      string `json:"subagentResultPreview,omitempty"`
+	SubagentErrorCode          string `json:"subagentErrorCode,omitempty"`
+	SubagentErrorMessage       string `json:"subagentErrorMessage,omitempty"`
+	SubagentSideEffectState    string `json:"subagentSideEffectState,omitempty"`
+	SubagentCreatedAt          string `json:"subagentCreatedAt,omitempty"`
+	SubagentStartedAt          string `json:"subagentStartedAt,omitempty"`
+	SubagentFinishedAt         string `json:"subagentFinishedAt,omitempty"`
 	// ACP fields surfaced on AWAKEN_ACP_* events.
 	ACPSessionID            string                `json:"acpSessionId,omitempty"`
 	ACPRunnerID             string                `json:"acpRunnerId,omitempty"`

@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"path/filepath"
 	"slices"
@@ -94,8 +95,9 @@ type threadTranscriptRunResponse struct {
 }
 
 type threadTranscriptResponse struct {
-	Thread awruntime.ThreadSnapshot      `json:"thread"`
-	Runs   []threadTranscriptRunResponse `json:"runs"`
+	ActivityCursor uint64                        `json:"activity_cursor"`
+	Thread         awruntime.ThreadSnapshot      `json:"thread"`
+	Runs           []threadTranscriptRunResponse `json:"runs"`
 }
 
 type rewindThreadRequest struct {
@@ -368,8 +370,9 @@ func (h runHandlers) handleGetThreadTranscript(w http.ResponseWriter, r *http.Re
 	}
 
 	response := threadTranscriptResponse{
-		Thread: transcript.Thread,
-		Runs:   make([]threadTranscriptRunResponse, 0, len(transcript.Runs)),
+		ActivityCursor: transcript.ActivityCursor,
+		Thread:         transcript.Thread,
+		Runs:           make([]threadTranscriptRunResponse, 0, len(transcript.Runs)),
 	}
 	for _, run := range transcript.Runs {
 		var frames []agui.Event
@@ -658,25 +661,6 @@ func (h runHandlers) handleGetSubagent(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"task": task})
 }
 
-func (h runHandlers) handleMessageSubagent(w http.ResponseWriter, r *http.Request) {
-	var request struct {
-		Content        string `json:"content"`
-		IdempotencyKey string `json:"idempotency_key"`
-	}
-	if r.Body != nil && r.ContentLength != 0 {
-		if err := decodeJSON(r, &request); err != nil {
-			writeErrorJSON(w, http.StatusBadRequest, subagentruntime.ErrorInvalidInput, err.Error())
-			return
-		}
-	}
-	receipt, err := h.runService.MessageSubagent(r.Context(), r.PathValue("run_id"), r.PathValue("task_id"), request.Content, request.IdempotencyKey)
-	if err != nil {
-		h.writeSubagentError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"receipt": receipt})
-}
-
 func (h runHandlers) handleCancelSubagent(w http.ResponseWriter, r *http.Request) {
 	var request struct {
 		Reason string `json:"reason"`
@@ -883,6 +867,16 @@ func mapRuntimeEvent(event awruntime.Event) []agui.Event {
 			cursor := frameSeq(event.Seq, i)
 			mapped[i].Seq = cursor
 			mapped[i].StreamCursor = cursor
+			origin := event.Seq
+			domain := "run"
+			if event.Activity {
+				if event.SourceSeq > 0 {
+					origin = event.SourceSeq
+				} else {
+					domain = "activity"
+				}
+			}
+			mapped[i].SourceEventID = fmt.Sprintf("%s:%s:%d", domain, event.RunID, frameSeq(origin, i))
 		}
 		return mapped
 	case awruntime.EventKindRunCancelled:

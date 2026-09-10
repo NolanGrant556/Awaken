@@ -43,7 +43,7 @@ func (agentcoreArchivedHistoryService) ReadArchivedHistory(context.Context, tool
 	return tool.ArchivedHistoryReadResult{}, nil
 }
 
-func TestArchivedHistoryServiceIsBoundOnlyToRootRuntime(t *testing.T) {
+func TestGeneralChildInheritsHistoryServiceWithIndependentScope(t *testing.T) {
 	service := agentcoreArchivedHistoryService{}
 	root := AgentConfig{ArchivedHistoryService: service}
 	runtimeConfig := toolRuntimeConfigFromAgentConfig(root)
@@ -54,8 +54,8 @@ func TestArchivedHistoryServiceIsBoundOnlyToRootRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if child.ArchivedHistoryService != nil {
-		t.Fatal("child must not inherit cross-thread archived history service")
+	if child.ArchivedHistoryService == nil || len(child.HistoryAncestors) != 0 {
+		t.Fatal("fresh child needs a history service but no implicit parent history grant")
 	}
 }
 

@@ -121,6 +121,7 @@ func BuiltinDisclosurePolicyFromEnv() DisclosurePolicy {
 var deferrableBuiltinToolNames = []string{
 	"archived_history",
 	"thread_history_read",
+	"tool_result_read",
 	"calculator",
 	"configure_acp_runner",
 	"configure_hook",

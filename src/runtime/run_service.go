@@ -169,32 +169,34 @@ type ComposerTokenPayload struct {
 }
 
 type ModelProfileConfig struct {
-	ProfileID           string                         `json:"profile_id,omitempty"`
-	ProviderID          string                         `json:"provider_id,omitempty"`
-	DisplayName         string                         `json:"display_name,omitempty"`
-	ModelID             string                         `json:"model_id,omitempty"`
-	CapabilityModelID   string                         `json:"capability_model_id,omitempty"`
-	EndpointSelector    string                         `json:"endpoint_selector,omitempty"`
-	ModelSelectorKind   string                         `json:"model_selector_kind,omitempty"`
-	BaseURL             string                         `json:"base_url,omitempty"`
-	InferenceEndpoint   string                         `json:"inference_endpoint,omitempty"`
-	Protocol            string                         `json:"protocol,omitempty"`
-	AuthScheme          string                         `json:"auth_scheme,omitempty"`
-	APIKey              string                         `json:"api_key,omitempty"`
-	Temperature         float64                        `json:"temperature,omitempty"`
-	MaxTokens           int                            `json:"max_tokens,omitempty"`
-	ContextWindow       int                            `json:"context_window,omitempty"`
-	MaxInputTokens      int                            `json:"max_input_tokens,omitempty"`
-	PromptCacheKey      string                         `json:"prompt_cache_key,omitempty"`
-	CredentialRevision  uint64                         `json:"credential_revision,omitempty"`
-	SupportsVision      bool                           `json:"supports_vision,omitempty"`
-	SupportsNativePDF   bool                           `json:"supports_native_pdf,omitempty"`
-	SupportsVideo       bool                           `json:"supports_video,omitempty"`
-	SupportsTools       string                         `json:"supports_tools,omitempty"`
-	SupportsPromptCache bool                           `json:"supports_prompt_cache,omitempty"`
-	SupportsComputerUse bool                           `json:"supports_computer_use,omitempty"`
-	ReasoningEffort     string                         `json:"reasoning_effort,omitempty"`
-	PurposeProfiles     map[string]*ModelProfileConfig `json:"purpose_profiles,omitempty"`
+	ProfileID              string                         `json:"profile_id,omitempty"`
+	ProviderID             string                         `json:"provider_id,omitempty"`
+	DisplayName            string                         `json:"display_name,omitempty"`
+	ModelID                string                         `json:"model_id,omitempty"`
+	CapabilityModelID      string                         `json:"capability_model_id,omitempty"`
+	EndpointSelector       string                         `json:"endpoint_selector,omitempty"`
+	ModelSelectorKind      string                         `json:"model_selector_kind,omitempty"`
+	BaseURL                string                         `json:"base_url,omitempty"`
+	InferenceEndpoint      string                         `json:"inference_endpoint,omitempty"`
+	Protocol               string                         `json:"protocol,omitempty"`
+	AuthScheme             string                         `json:"auth_scheme,omitempty"`
+	APIKey                 string                         `json:"api_key,omitempty"`
+	Temperature            float64                        `json:"temperature,omitempty"`
+	MaxTokens              int                            `json:"max_tokens,omitempty"`
+	ContextWindow          int                            `json:"context_window,omitempty"`
+	MaxInputTokens         int                            `json:"max_input_tokens,omitempty"`
+	PromptCacheKey         string                         `json:"prompt_cache_key,omitempty"`
+	CredentialRevision     uint64                         `json:"credential_revision,omitempty"`
+	SupportsVision         bool                           `json:"supports_vision,omitempty"`
+	SupportsNativePDF      bool                           `json:"supports_native_pdf,omitempty"`
+	SupportsVideo          bool                           `json:"supports_video,omitempty"`
+	SupportsTools          string                         `json:"supports_tools,omitempty"`
+	SupportsPromptCache    bool                           `json:"supports_prompt_cache,omitempty"`
+	SupportsComputerUse    bool                           `json:"supports_computer_use,omitempty"`
+	ReasoningEffort        string                         `json:"reasoning_effort,omitempty"`
+	PurposeProfiles        map[string]*ModelProfileConfig `json:"purpose_profiles,omitempty"`
+	PurposeProfileSources  map[string]string              `json:"purpose_profile_sources,omitempty"`
+	ConfigSnapshotRevision string                         `json:"config_snapshot_revision,omitempty"`
 }
 
 type Executor interface {
@@ -214,9 +216,10 @@ type RunService struct {
 	// runWG tracks in-flight run goroutines. Terminal run status is
 	// observable before the final transcript flush completes; tests and
 	// shutdown paths use drainRunWorkers to join those trailing writes.
-	runWG    sync.WaitGroup
-	sessions map[string]*Session
-	threads  map[string]*Thread
+	runWG         sync.WaitGroup
+	sessions      map[string]*Session
+	threads       map[string]*Thread
+	activityBuses map[string]*EventBus
 	// projectFences maps a folder to the projects currently fencing it. A folder
 	// stays fenced while any of them holds a fence.
 	projectFences           map[string]map[string]struct{}
@@ -484,6 +487,9 @@ func (s *RunService) restoreSkillInvocationHistory(activator *skillruntime.Activ
 // Thread holds the reusable Agent and metadata for a multi-turn conversation.
 // Runs with the same thread_id reuse the same Agent and Conversation.
 type Thread struct {
+	sessionPins              []*Session
+	workGroup                *subagentruntime.Manager
+	activity                 *EventBus
 	threadID                 string
 	projectID                string
 	agent                    *agentcore.Agent
@@ -562,8 +568,9 @@ type ThreadTranscriptRun struct {
 }
 
 type ThreadTranscript struct {
-	Thread ThreadSnapshot
-	Runs   []ThreadTranscriptRun
+	ActivityCursor uint64
+	Thread         ThreadSnapshot
+	Runs           []ThreadTranscriptRun
 }
 
 type RewindThreadRequest struct {
@@ -981,9 +988,13 @@ func (s *RunService) cancelRunsForThreads(threadIDs []string) {
 	}
 	s.mu.RLock()
 	var sessions []*Session
+	var groups []*subagentruntime.Manager
 	for _, thread := range s.threads {
-		if _, ok := set[thread.threadID]; !ok || thread.activeRunID == "" {
+		if _, ok := set[thread.threadID]; !ok {
 			continue
+		}
+		if thread.workGroup != nil {
+			groups = append(groups, thread.workGroup)
 		}
 		if session := s.sessions[thread.activeRunID]; session != nil {
 			sessions = append(sessions, session)
@@ -992,6 +1003,11 @@ func (s *RunService) cancelRunsForThreads(threadIDs []string) {
 	s.mu.RUnlock()
 	for _, session := range sessions {
 		session.RequestCancel()
+	}
+	for _, group := range groups {
+		if err := group.StopAll(context.Background()); err != nil {
+			log.Printf("stop task workgroup: %v", err)
+		}
 	}
 	for _, threadID := range threadIDs {
 		bashtool.CancelThreadTasks(threadID)
@@ -1011,7 +1027,7 @@ func (s *RunService) isThreadActive(threadID string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	thread := s.threads[threadID]
-	return thread != nil && thread.activeRunID != ""
+	return thread != nil && threadHasLiveWork(thread)
 }
 
 // ActiveRunCount returns the number of threads that currently have an active run.
@@ -1020,7 +1036,7 @@ func (s *RunService) ActiveRunCount() int {
 	defer s.mu.RUnlock()
 	count := 0
 	for _, thread := range s.threads {
-		if thread.activeRunID != "" {
+		if threadHasLiveWork(thread) {
 			count++
 		}
 	}
@@ -1044,7 +1060,7 @@ func (s *RunService) ActivitySnapshot() RunActivitySnapshot {
 	var snapshot RunActivitySnapshot
 	sessions := make([]*Session, 0, len(s.threads))
 	for _, thread := range s.threads {
-		if thread.activeRunID == "" {
+		if !threadHasLiveWork(thread) {
 			continue
 		}
 		snapshot.Active++
@@ -1064,7 +1080,7 @@ func (s *RunService) ActivitySnapshot() RunActivitySnapshot {
 func (s *RunService) closeAndEvictDeletedThread(threadID string) error {
 	s.mu.RLock()
 	thread := s.threads[threadID]
-	if thread != nil && thread.activeRunID != "" {
+	if thread != nil && threadHasLiveWork(thread) {
 		s.mu.RUnlock()
 		return ErrThreadBusy
 	}
@@ -1079,12 +1095,19 @@ func (s *RunService) closeAndEvictDeletedThread(threadID string) error {
 	}
 	s.mu.Lock()
 	if thread = s.threads[threadID]; thread != nil {
-		if thread.activeRunID != "" {
+		if threadHasLiveWork(thread) {
 			s.mu.Unlock()
 			return ErrThreadBusy
 		}
 		for _, runID := range thread.runIDs {
 			delete(s.sessions, runID)
+		}
+		if thread.workGroup != nil {
+			_ = thread.workGroup.Close(context.Background())
+		}
+		if bus := s.activityBuses[threadID]; bus != nil {
+			bus.Close()
+			delete(s.activityBuses, threadID)
 		}
 		delete(s.threads, threadID)
 	}
@@ -1239,7 +1262,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	}
 	var mediaArtifactReferences []tool.ScopedMediaArtifact
 	if hasRequestedThread {
-		transcript, transcriptErr := s.threadStore.GetTranscript(threadID)
+		transcript, transcriptErr := s.getThreadTranscript(threadID)
 		if transcriptErr == nil {
 			mediaArtifactReferences = mediaArtifactReferencesFromTranscript(transcript)
 		} else if !errors.Is(transcriptErr, ErrThreadNotFound) {
@@ -1389,9 +1412,17 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 				if agent != nil && thread.agent != nil {
 					agent.GetConversation().Context.SetMessages(thread.agent.GetConversation().Context.GetMessages())
 					cfg := agent.GetConfig()
-					cfg.SkillContextBlocks = append([]agentcore.ContextBlock(nil), thread.agent.GetConfig().SkillContextBlocks...)
-					cfg.ActivatedDeferredTools = append([]string(nil), thread.agent.GetConfig().ActivatedDeferredTools...)
-					cfg.RestoredContextWindowUsageAnchor = agentcore.CloneContextWindowUsageAnchor(thread.agent.GetConfig().RestoredContextWindowUsageAnchor)
+					previousConfig := thread.agent.GetConfig()
+					cfg.ChildSessions = previousConfig.ChildSessions
+					cfg.SkillContextBlocks = append([]agentcore.ContextBlock(nil), previousConfig.SkillContextBlocks...)
+					cfg.CompactContextBlocks = append([]agentcore.ContextBlock(nil), previousConfig.CompactContextBlocks...)
+					cfg.CompactedMemoryContext = previousConfig.CompactedMemoryContext
+					cfg.RestoredContextBundleV2 = previousConfig.RestoredContextBundleV2
+					if cfg.MemoryRecallMarkCompacted != nil {
+						cfg.MemoryRecallMarkCompacted(agentcore.CompactedMemoryIDsFromBundleV2(cfg.RestoredContextBundleV2))
+					}
+					cfg.ActivatedDeferredTools = append([]string(nil), previousConfig.ActivatedDeferredTools...)
+					cfg.RestoredContextWindowUsageAnchor = agentcore.CloneContextWindowUsageAnchor(previousConfig.RestoredContextWindowUsageAnchor)
 					agent.Reconfigure(cfg)
 				}
 				thread.agent = agent
@@ -1446,6 +1477,9 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 		threadSnapshot = s.threads[threadID].snapshot()
 	}
 	s.sessions[runID] = session
+	if thread := s.threads[threadID]; thread != nil {
+		thread.sessionPins = append(thread.sessionPins, session)
+	}
 	s.mu.Unlock()
 	configureAgentForRun(agent, modelRequestPurposeForClient(req.Client), hookSnapshot, &instructionSnapshot)
 
@@ -1509,7 +1543,9 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 			return record.RecordID, nil
 		})
 	}
-	s.bindSubagentController(ctx, agent, session, subagentModelProfileID(req.ModelProfile))
+	if err := s.bindSubagentController(ctx, agent, session, subagentModelProfileID(req.ModelProfile)); err != nil {
+		return rollbackStart(err, false)
+	}
 	createThreadErr := s.threadStore.CreateThread(threadSnapshot, modelProfileKey, threadLabel)
 	if createThreadErr != nil {
 		return rollbackStart(createThreadErr, true)
@@ -1658,36 +1694,96 @@ func (s *RunService) bindSubagentController(
 	agent *agentcore.Agent,
 	session *Session,
 	modelProfileID string,
-) {
+) error {
 	if agent == nil || session == nil {
-		return
+		return nil
 	}
 	agentConfig := agent.GetConfig()
-	controller := subagentruntime.NewManager(ctx, subagentruntime.Config{
-		MaxTasks: 8, MaxConcurrent: 4, ModelProfileID: strings.TrimSpace(modelProfileID),
-		ParentWorkspaceRoot: agentConfig.Workspace.Root,
-		ParentWritableRoots: append([]string(nil), agentConfig.Workspace.WritableRoots...),
-		Starter: func(childCtx context.Context, request subagentruntime.StartRequest) (string, error) {
-			return agent.RunNativeSubagent(childCtx, request, sessionEventSink{session: session})
-		},
-		Persist: func(persistCtx context.Context, event subagentruntime.PersistEvent) error {
-			recorder := session.semanticRecorderSnapshot()
-			if recorder == nil {
-				return agentcore.ErrPersistenceUnavailable
-			}
-			snapshot := event.Snapshot
-			record := agentcore.NewSemanticRecord(
-				agentcore.SemanticKind(event.Kind), snapshot.ThreadID, snapshot.RunID,
-				snapshot.TurnID, snapshot.ParentToolCallID, "", agentcore.PersistSubagentPayload(event),
-			)
-			if err := recorder.Append(persistCtx, record); err != nil {
+	agentConfig.NewChildComputerRuntime = s.childComputerFactory(session)
+	agentConfig.LoadChildContext = s.childContextLoader(session.Snapshot().ThreadID)
+	agent.Reconfigure(agentConfig)
+	managerConfig := agentcore.SubagentManagerConfig(agentConfig)
+	managerConfig.RootContext = ctx
+	managerConfig.RunID, managerConfig.ThreadID = session.Snapshot().RunID, session.Snapshot().ThreadID
+	managerConfig.Starter = func(childCtx context.Context, request subagentruntime.StartRequest) (string, error) {
+		return agent.RunNativeSubagent(childCtx, request, sessionEventSink{session: session})
+	}
+	managerConfig.Retain = func(snapshot subagentruntime.TaskSnapshot) func() {
+		s.mu.RLock()
+		ownerSession := s.sessions[snapshot.RunID]
+		s.mu.RUnlock()
+		if ownerSession == nil {
+			return func() {}
+		}
+		release := ownerSession.RetainAsyncHook()
+		return func() {
+			bashtool.FinishSubagentTasks(snapshot.TaskID)
+			release()
+		}
+	}
+	managerConfig.Persist = func(persistCtx context.Context, event subagentruntime.PersistEvent) error {
+		s.mu.RLock()
+		ownerSession := s.sessions[event.Snapshot.RunID]
+		s.mu.RUnlock()
+		if ownerSession == nil {
+			return agentcore.ErrPersistenceUnavailable
+		}
+		recorder := ownerSession.semanticRecorderSnapshot()
+		if recorder == nil {
+			return agentcore.ErrPersistenceUnavailable
+		}
+		snapshot := event.Snapshot
+		record := agentcore.NewSemanticRecord(
+			agentcore.SemanticKind(event.Kind), snapshot.ThreadID, snapshot.RunID,
+			snapshot.TurnID, snapshot.ParentToolCallID, "", agentcore.PersistSubagentPayload(event),
+		)
+		if err := recorder.Append(persistCtx, record); err != nil {
+			return err
+		}
+		return recorder.Flush(persistCtx)
+	}
+	var saved []subagentruntime.RestoredTask
+	s.mu.RLock()
+	threadBefore := s.threads[session.Snapshot().ThreadID]
+	needsRestore := threadBefore == nil || threadBefore.workGroup == nil
+	s.mu.RUnlock()
+	if needsRestore && s.journals != nil {
+		journal, err := s.journals.Open(session.Snapshot().ThreadID)
+		if err != nil {
+			return err
+		}
+		if last := journal.LastAssignedSequence(); last > 0 {
+			records, err := journal.SemanticRecords(1, last)
+			if err != nil {
 				return err
 			}
-			return recorder.Flush(persistCtx)
-		},
-	})
+			saved, err = restoreCollaboration(records)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	s.mu.Lock()
+	thread := s.threads[session.Snapshot().ThreadID]
+	var controller *subagentruntime.Manager
+	if thread != nil {
+		controller = thread.workGroup
+		thread.activity = s.activityBusLocked(thread.threadID)
+		session.SetActivityBus(thread.activity)
+	}
+	if controller == nil {
+		controller = subagentruntime.NewManager(context.Background(), managerConfig)
+		controller.Restore(saved)
+		if thread != nil {
+			thread.workGroup = controller
+		}
+	}
+	s.mu.Unlock()
+
 	session.SetSubagentController(controller)
 	agent.SetSubagentController(controller)
+	agent.BindRootCreator(ctx, controller, sessionEventSink{session: session})
+	return nil
 }
 
 func subagentModelProfileID(profile *ModelProfileConfig) string {
@@ -1987,6 +2083,7 @@ func modelProfileCacheKey(profile *ModelProfileConfig) string {
 		return ""
 	}
 	parts := []string{
+		profile.ConfigSnapshotRevision,
 		profile.ProfileID,
 		profile.ProviderID,
 		profile.ModelID,
@@ -2127,7 +2224,7 @@ func (s *RunService) SetThreadArchived(threadID string, archived bool) (ThreadSn
 		if thread.deletionRequested {
 			return ThreadSnapshot{}, ErrThreadNotFound
 		}
-		if thread.activeRunID != "" {
+		if threadHasLiveWork(thread) {
 			return ThreadSnapshot{}, ErrThreadBusy
 		}
 		if thread.source == ScheduledClientSource {
@@ -2305,11 +2402,18 @@ func (s *RunService) DeleteThread(threadID string) error {
 
 	s.mu.Lock()
 	if thread, ok := s.threads[threadID]; ok {
-		if thread.activeRunID != "" {
+		if threadHasLiveWork(thread) {
 			s.mu.Unlock()
 			return ErrThreadBusy
 		}
 		runIDs := append([]string(nil), thread.runIDs...)
+		if thread.workGroup != nil {
+			_ = thread.workGroup.Close(context.Background())
+		}
+		if bus := s.activityBuses[threadID]; bus != nil {
+			bus.Close()
+			delete(s.activityBuses, threadID)
+		}
 		delete(s.threads, threadID)
 		for _, runID := range runIDs {
 			delete(s.sessions, runID)
@@ -2367,11 +2471,21 @@ func (s *RunService) GetRun(runID string) (Run, error) {
 func (s *RunService) GetThreadTranscript(threadID string) (ThreadTranscript, error) {
 	s.projectMutationMu.RLock()
 	defer s.projectMutationMu.RUnlock()
+	return s.getThreadTranscript(threadID)
+}
+
+func (s *RunService) getThreadTranscript(threadID string) (ThreadTranscript, error) {
 	s.mu.RLock()
+	var activityCursor uint64
+	if bus := s.activityBuses[threadID]; bus != nil {
+		activityCursor = bus.StreamCursor()
+	}
 	thread, ok := s.threads[threadID]
 	if !ok {
 		s.mu.RUnlock()
-		return s.threadStore.GetTranscript(threadID)
+		transcript, err := s.threadStore.GetTranscript(threadID)
+		transcript.ActivityCursor = activityCursor
+		return transcript, err
 	}
 	if thread.deletionRequested {
 		s.mu.RUnlock()
@@ -2440,7 +2554,7 @@ func (s *RunService) GetThreadTranscript(threadID string) (ThreadTranscript, err
 				published := make([]agentcore.SemanticRecord, 0, len(durable.SemanticRecords))
 				for _, record := range durable.SemanticRecords {
 					_, visible := active.publishedIDs[record.RecordID]
-					if visible || isActiveTranscriptReplaySupplement(record.Kind) {
+					if visible || isActiveTranscriptReplaySupplement(record.Kind) || isTerminalStatus(active.run.Status) {
 						published = append(published, record)
 					}
 				}
@@ -2464,8 +2578,9 @@ func (s *RunService) GetThreadTranscript(threadID string) (ThreadTranscript, err
 	}
 
 	return ThreadTranscript{
-		Thread: snapshot,
-		Runs:   runs,
+		ActivityCursor: activityCursor,
+		Thread:         snapshot,
+		Runs:           runs,
 	}, nil
 }
 
@@ -2489,7 +2604,7 @@ func (s *RunService) RewindThread(req RewindThreadRequest) (RewindThreadResult, 
 	defer s.projectMutationMu.Unlock()
 	s.mu.Lock()
 	thread, ok := s.threads[threadID]
-	if ok && (thread.activeRunID != "" || thread.deletionRequested) {
+	if ok && (threadHasLiveWork(thread) || thread.deletionRequested) {
 		s.mu.Unlock()
 		return RewindThreadResult{}, ErrThreadBusy
 	}
@@ -2512,7 +2627,7 @@ func (s *RunService) RewindThread(req RewindThreadRequest) (RewindThreadResult, 
 		return RewindThreadResult{}, ErrThreadRewindUnsupported
 	}
 
-	transcript, err := s.threadStore.GetTranscript(threadID)
+	transcript, err := s.getThreadTranscript(threadID)
 	if err != nil {
 		return RewindThreadResult{}, err
 	}
@@ -2564,8 +2679,15 @@ func (s *RunService) RewindThread(req RewindThreadRequest) (RewindThreadResult, 
 	// Journal is authority after flush. Drop in-memory sessions before the
 	// metadata projection so a later List/Get cannot emit the removed suffix.
 	s.mu.Lock()
-	for _, runID := range removedRunIDs {
-		delete(s.sessions, runID)
+	for _, run := range transcript.Runs {
+		delete(s.sessions, run.Run.RunID)
+	}
+	if thread != nil && thread.workGroup != nil {
+		_ = thread.workGroup.Close(context.Background())
+	}
+	if bus := s.activityBuses[threadID]; bus != nil {
+		bus.Close()
+		delete(s.activityBuses, threadID)
 	}
 	delete(s.threads, threadID)
 	s.mu.Unlock()
@@ -2711,7 +2833,22 @@ func (s *RunService) CancelRun(runID string) (Run, error) {
 		return Run{}, err
 	}
 	run := session.RequestCancel()
-	bashtool.CancelThreadTasks(run.ThreadID)
+	if isTerminalStatus(run.Status) {
+		return run, nil
+	}
+	s.mu.RLock()
+	thread := s.threads[run.ThreadID]
+	var group *subagentruntime.Manager
+	if thread != nil && thread.activeRunID == runID {
+		bashtool.CancelThreadTasks(run.ThreadID)
+		group = thread.workGroup
+	}
+	s.mu.RUnlock()
+	if group != nil {
+		if err := group.StopRun(context.Background(), runID); err != nil {
+			log.Printf("stop run workgroup: %v", err)
+		}
+	}
 	return run, nil
 }
 
@@ -2752,25 +2889,17 @@ func (s *RunService) GetSubagent(runID, taskID string) (subagentruntime.TaskSnap
 	if controller == nil {
 		return subagentruntime.TaskSnapshot{}, &subagentruntime.Error{Code: subagentruntime.ErrorNotFound, Message: "subagent task not found"}
 	}
-	return controller.Status(taskID)
-}
-
-func (s *RunService) MessageSubagent(ctx context.Context, runID, taskID, content, idempotencyKey string) (subagentruntime.MessageReceipt, error) {
-	session, err := s.session(runID)
-	if err != nil {
-		return subagentruntime.MessageReceipt{}, err
+	task, err := controller.Status(taskID)
+	if err == nil && task.RunID != "" && task.RunID != runID {
+		return subagentruntime.TaskSnapshot{}, &subagentruntime.Error{Code: subagentruntime.ErrorNotFound, Message: "subagent task does not belong to this run"}
 	}
-	controller := session.SubagentController()
-	if controller == nil {
-		return subagentruntime.MessageReceipt{}, &subagentruntime.Error{Code: subagentruntime.ErrorNotFound, Message: "subagent task not found"}
-	}
-	if manager, ok := controller.(*subagentruntime.Manager); ok {
-		return manager.MessageIdempotent(ctx, taskID, content, idempotencyKey)
-	}
-	return controller.Message(ctx, taskID, content)
+	return task, err
 }
 
 func (s *RunService) CancelSubagent(ctx context.Context, runID, taskID, reason string) (subagentruntime.TaskSnapshot, error) {
+	if _, err := s.GetSubagent(runID, taskID); err != nil {
+		return subagentruntime.TaskSnapshot{}, err
+	}
 	session, err := s.session(runID)
 	if err != nil {
 		return subagentruntime.TaskSnapshot{}, err
@@ -2869,9 +2998,7 @@ func (s *RunService) executeWithMediaArtifactReferences(session *Session, execut
 		}
 		restoreAgentDisplayInput(agent, input, displayInput)
 		s.flushAgentTranscript(session, agent)
-		if cr := session.ComputerRuntime(); cr != nil {
-			_ = cr.Close(context.Background(), "run_ended")
-		}
+		session.CloseRootComputer()
 		s.clearActiveRun(snapshot.ThreadID, snapshot.RunID)
 		s.onRunTerminal(snapshot.ThreadID)
 	}()
@@ -2927,6 +3054,21 @@ func (s *RunService) executeWithMediaArtifactReferences(session *Session, execut
 	}
 
 	result, err := executor.Run(ctx, input, sessionEventSink{session: session})
+	// Also cover executors that return before emitting the Agent terminal barrier.
+	session.CloseRootComputer()
+	var cleanupErr error
+	switch controller := session.SubagentController().(type) {
+	case *subagentruntime.Manager:
+		cleanupErr = controller.EndAttempt(context.Background(), "root", snapshot.RunID)
+	case interface {
+		EndAttempt(context.Context, string) error
+	}:
+		cleanupErr = controller.EndAttempt(context.Background(), snapshot.RunID)
+	}
+	if cleanupErr != nil {
+		err = errors.Join(err, cleanupErr)
+	}
+
 	if err == nil {
 		if session.CancelRequested() {
 			session.CompleteCancelled("你停止了生成本次回答", partialAssistantResult(agent))
@@ -3055,7 +3197,7 @@ func (s *RunService) preActivateComposerSkillsWithSink(ctx context.Context, agen
 			return &skillruntime.SkillCompatibilityError{Code: "skill_fork_unavailable", Message: "composer fork Skill requires a live run event sink"}
 		}
 		child, err := agent.RunForkedSkill(ctx, skillruntime.SkillForkRequest{
-			SkillID: plan.SkillID, Body: plan.MainBody, RootDir: plan.RootDir,
+			SkillID: plan.SkillID, Body: plan.MainBody, Arguments: snapshot.Input, RootDir: plan.RootDir,
 			SkillPath: plan.SkillFilePath, Agent: plan.Agent, Model: plan.Model,
 			Effort: plan.Effort, ToolHints: append([]skills.ToolHint(nil), plan.ToolHints...),
 		}, sink)
@@ -3699,6 +3841,16 @@ func (s *RunService) ComputerRuntime(runID string) (*computer.Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
+	if s.computerLeaseManager != nil {
+		if lease, held := s.computerLeaseManager.Current("host://local/desktop"); held {
+			session.mu.RLock()
+			child := session.childComputers[string(lease.BindingID)]
+			session.mu.RUnlock()
+			if child != nil {
+				return child, nil
+			}
+		}
+	}
 	if cr := session.ComputerRuntime(); cr != nil {
 		return cr, nil
 	}
@@ -3744,7 +3896,7 @@ func (s *RunService) pruneInactiveThreadsLocked() {
 
 	inactive := make([]*Thread, 0, len(s.threads))
 	for _, thread := range s.threads {
-		if thread.activeRunID == "" {
+		if !threadHasLiveWork(thread) {
 			inactive = append(inactive, thread)
 		}
 	}
@@ -3754,6 +3906,16 @@ func (s *RunService) pruneInactiveThreadsLocked() {
 	for len(s.threads) > maxRetainedThreads && len(inactive) > 0 {
 		thread := inactive[0]
 		inactive = inactive[1:]
+		if thread.workGroup != nil {
+			_ = thread.workGroup.Close(context.Background())
+		}
+		if bus := s.activityBuses[thread.threadID]; bus != nil {
+			bus.Close()
+			delete(s.activityBuses, thread.threadID)
+		}
+		for _, runID := range thread.runIDs {
+			delete(s.sessions, runID)
+		}
 		delete(s.threads, thread.threadID)
 	}
 }
@@ -4176,4 +4338,22 @@ func mergeTaskScopeAttachments(scope WorkspaceConfig, attachments []RunInputAtta
 	scope.ScopeID = buildTaskScopeID(scope.WorkspaceRoot, scope.ReadableRoots, scope.WritableRoots, scope.OutputRoots, scope.AttachedFiles)
 	scope.TemporaryWorkRoot = filepath.Join(os.TempDir(), "awaken-task-scopes", scope.ScopeID)
 	return scope
+}
+
+func threadHasLiveWork(thread *Thread) bool {
+	if thread == nil {
+		return false
+	}
+	if thread.activeRunID != "" || thread.workGroup.HasLiveWork("") {
+		return true
+	}
+	for _, session := range thread.sessionPins {
+		session.mu.RLock()
+		retained := session.asyncHookRetains > 0
+		session.mu.RUnlock()
+		if retained {
+			return true
+		}
+	}
+	return false
 }

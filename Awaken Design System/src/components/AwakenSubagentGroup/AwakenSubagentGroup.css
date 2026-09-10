@@ -15,17 +15,13 @@
   font-size: 12px;
 }
 
-.aw-subagent-group__header span {
-  color: var(--aw-color-text-muted, #777);
-}
-
 .aw-subagent-group__rows {
   display: grid;
 }
 
 .aw-subagent-row {
   display: grid;
-  grid-template-columns: 8px minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
   width: 100%;
@@ -49,62 +45,32 @@
   outline: none;
 }
 
-.aw-subagent-row__status {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #909090;
-}
-
-.aw-subagent-row--running .aw-subagent-row__status,
-.aw-subagent-row--queued .aw-subagent-row__status,
-.aw-subagent-row--cancelling .aw-subagent-row__status {
-  background: #5f7cff;
-  box-shadow: 0 0 0 3px rgba(95, 124, 255, 0.14);
-}
-
-.aw-subagent-row--completed .aw-subagent-row__status {
-  background: #2e9b65;
-}
-
-.aw-subagent-row--failed .aw-subagent-row__status,
-.aw-subagent-row--interrupted .aw-subagent-row__status {
-  background: #d05b52;
-}
-
-.aw-subagent-row__body,
-.aw-subagent-row__title {
+.aw-subagent-row__name {
   min-width: 0;
-}
-
-.aw-subagent-row__body {
-  display: grid;
-  gap: 3px;
-}
-
-.aw-subagent-row__title {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-
-.aw-subagent-row__title strong,
-.aw-subagent-row__detail,
-.aw-subagent-row__metrics {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.aw-subagent-row__title strong {
   font-size: 13px;
   font-weight: 600;
+  line-height: 20px;
 }
 
-.aw-subagent-row__title small,
-.aw-subagent-row__detail,
-.aw-subagent-row__metrics,
 .aw-subagent-row__label {
-  color: var(--aw-color-text-muted, #777);
+  color: var(--aw-text-secondary);
   font-size: 11px;
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.aw-subagent-row--running .aw-subagent-row__label {
+  color: var(--aw-status-running);
+}
+
+.aw-subagent-row--completed .aw-subagent-row__label {
+  color: var(--aw-status-success-text);
+}
+
+.aw-subagent-row--failed .aw-subagent-row__label,
+.aw-subagent-row--interrupted .aw-subagent-row__label {
+  color: var(--aw-status-danger-text);
 }

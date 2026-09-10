@@ -181,6 +181,7 @@ func (e *runEventEmitter) ensureAssistantMessageID() string {
 }
 
 func (e *runEventEmitter) resetTurn() {
+	e.logicalModelCallID, e.transportAttempt = "", 0
 	e.currentAssistantID = ""
 	e.textMessageID = ""
 	e.reasoningMessageID = ""

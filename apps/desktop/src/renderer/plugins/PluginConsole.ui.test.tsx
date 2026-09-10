@@ -38,7 +38,7 @@ const skill: AwakenPluginConsoleComponent = {
   diagnosticCount: 2,
 };
 
-function Harness() {
+function Harness({ invalid = false }: { invalid?: boolean } = {}) {
   const [detail, setDetail] = useState<AwakenPluginConsoleDetail | null>(null);
   const [activeTab, setActiveTab] = useState<"overview" | "preview" | "source" | "diagnostics">("preview");
   return (
@@ -47,7 +47,7 @@ function Harness() {
       displayName="Example Plugin"
       version="1.0.0"
       enabled
-      components={[skill]}
+      components={[invalid ? { ...skill, validation: "invalid", mappingState: "invalid", switchable: false } : skill]}
       selectedDetail={detail}
       activeDetailTab={activeTab}
       onBack={() => undefined}
@@ -59,7 +59,7 @@ function Harness() {
           component,
           preview: "# Skill preview",
           source: "# Skill source",
-          diagnostics: [{ code: "sample_diagnostic", message: "示例诊断" }],
+          diagnostics: [{ code: "sample_diagnostic", message: "示例诊断", severity: invalid ? "error" : "info" }],
           resources: ["references/example.md"],
         });
       }}
@@ -441,6 +441,25 @@ describe("AwakenPluginConsole compact component flow", () => {
       root.unmount();
     });
     container.remove();
+  });
+
+  it("explains an invalid Skill while keeping its preview readable and invocation unavailable", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => root.render(<Harness invalid />));
+      expect(container.textContent).toContain("组件不可用，查看原因");
+      await act(async () => container.querySelector<HTMLButtonElement>(".aw-plugin-component-row__main")?.click());
+      const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+      expect(dialog?.textContent).toContain("Skill preview");
+      expect(dialog?.querySelector('[role="alert"]')?.textContent).toContain("技能不可用：示例诊断");
+      expect(dialog?.querySelector('[role="alert"]')?.closest(".aw-dialog__foot")).not.toBeNull();
+      expect([...dialog!.querySelectorAll("button")].some((button) => button.textContent === "在对话中使用")).toBe(false);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
   });
 
   it("routes the Skill footer action through the exact component selection", async () => {

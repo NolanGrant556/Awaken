@@ -150,6 +150,13 @@ export function projectAguiEventToNarrative(
       return commitActive(base, "done");
     case "AWAKEN_TURN_STARTED":
       return activateContinuationPlanning(base, event);
+    case "AWAKEN_AGENT_PHASE": {
+      const id = `planning:${eventScope(event)}:waiting-children`;
+      if (event.agentPhase === "waiting_children") {
+        return setActive(base, { kind: "planning", id, text: "等待子任务结果", status: "active" });
+      }
+      return base.activeItem?.id === id ? { ...base, activeItem: undefined } : base;
+    }
     case "REASONING_START":
     case "REASONING_MESSAGE_START":
       return activateThinking(base, event);
@@ -1053,6 +1060,8 @@ function commitACPTool(
 }
 
 function eventKey(event: AguiEvent): string | undefined {
+  if (event.recordId) return `record:${event.recordId}:${event.type}:${event.messageId ?? event.toolCallId ?? "frame"}`;
+  if (event.sourceEventId) return `source:${event.sourceEventId}:${event.type}`;
   // Argument deltas are live-only and can arrive for every token. Only their
   // Core-derived safe preparation snapshot may affect the active row, so they
   // do not need replay/dedup bookkeeping in Renderer state.

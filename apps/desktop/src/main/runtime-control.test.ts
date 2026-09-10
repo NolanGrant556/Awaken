@@ -69,4 +69,14 @@ describe("RuntimeControlClient", () => {
       vi.unstubAllGlobals();
     }
   });
+  it("sends the original Computer session identity with return control", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const client = new RuntimeControlClient({ schema_version: 1, runtime_identity: "test", instance_id: "test", pid: 1, owner_mode: "desktop", base_url: "http://127.0.0.1:9999", control_token: "test-token", started_at: new Date().toISOString() });
+      await client.computerSessionControl("old-run", "return", "child-session");
+      expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:9999/v1/control/computer/sessions/old-run/return", expect.objectContaining({ body: JSON.stringify({ session_id: "child-session" }) }));
+    } finally { vi.unstubAllGlobals(); }
+  });
+
 });

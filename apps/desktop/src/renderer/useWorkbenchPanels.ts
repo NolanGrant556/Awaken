@@ -1,14 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import {
   MediaArtifactPreviewItem,
   MediaArtifactPreviewState,
 } from "./artifactMediaPresentation";
 import { useRunPlanEntry } from "./useRunPlanEntry";
+import { createInspectorTabs, inspectorTabsForThread, inspectorTabsReducer, subagentTabId, type InspectorTabsAction, type InspectorTabsCommand } from "./inspectorTabs";
 
 export function useWorkbenchPanels(
   activeThreadId: string | undefined,
   runPlanEntry: Pick<ReturnType<typeof useRunPlanEntry>, "closePanel">,
-  fallbackSubagentTaskId: () => string | undefined,
   onThreadReset: () => void,
 ) {
   const runtimeState = { activeThreadId };
@@ -22,13 +22,20 @@ export function useWorkbenchPanels(
 
   const contextUsagePanelRef = useRef<HTMLDivElement>(null);
 
-  const [selectedSubagentTaskId, setSelectedSubagentTaskId] = useState<
-    string | undefined
-  >();
+  const [tabsState, dispatchTabs] = useReducer(inspectorTabsReducer, activeThreadId, createInspectorTabs);
+  const state = inspectorTabsForThread(tabsState, activeThreadId);
+  const dispatch = (action: InspectorTabsCommand) => dispatchTabs({ ...action, threadId: activeThreadId } as InspectorTabsAction);
+  const inspectorTabs = { state, dispatch };
+  const activeTab = state.tabs.find(tab => tab.id === state.activeId);
+  const openSubagentTaskId = activeTab?.kind === "subagent" ? activeTab.taskId : undefined;
+  const subagentTabs = { taskIds: state.tabs.flatMap(tab => tab.kind === "subagent" ? [tab.taskId] : []) };
 
-  const [openSubagentTaskId, setOpenSubagentTaskId] = useState<
-    string | undefined
-  >();
+  function closeSubagentTab(taskId: string): void {
+    dispatchTabs({ type: "close", threadId: activeThreadId, id: subagentTabId(taskId) });
+  }
+  function resetSubagentTabs(): void {
+    dispatchTabs({ type: "remove-subagents", threadId: activeThreadId });
+  }
 
   useEffect(() => {
     setMediaPreview(null);
@@ -72,17 +79,14 @@ export function useWorkbenchPanels(
 
   useEffect(() => {
     setContextUsagePanelOpen(false);
-    setSelectedSubagentTaskId(undefined);
-    setOpenSubagentTaskId(undefined);
+    dispatchTabs({ type: "sync-thread", threadId: activeThreadId });
     onThreadReset();
   }, [runtimeState.activeThreadId]);
 
-  function handleOpenSubagent(taskId?: string): void {
+  function openSubagentTab(taskId: string): void {
     setContextUsagePanelOpen(false);
     runPlanEntry.closePanel(false);
-    setOpenSubagentTaskId(
-      taskId ?? openSubagentTaskId ?? fallbackSubagentTaskId(),
-    );
+    dispatchTabs({ type: "open-subagent", threadId: activeThreadId, taskId });
   }
 
   function openMediaPreview(
@@ -92,22 +96,22 @@ export function useWorkbenchPanels(
     if (items.length === 0) return;
     setMediaPreview({ items, activeId });
     setContextUsagePanelOpen(false);
-    setOpenSubagentTaskId(undefined);
     runPlanEntry.closePanel(false);
   }
   return {
+    inspectorTabs,
     contextUsagePanelOpen,
     setContextUsagePanelOpen,
     contextUsageTriggerRef,
     contextUsagePanelRef,
     mediaPreview,
     setMediaPreview,
-    selectedSubagentTaskId,
-    setSelectedSubagentTaskId,
+    subagentTabs,
     openSubagentTaskId,
-    setOpenSubagentTaskId,
+    closeSubagentTab,
+    resetSubagentTabs,
     closeContextUsagePanel,
     openMediaPreview,
-    handleOpenSubagent,
+    openSubagentTab,
   };
 }

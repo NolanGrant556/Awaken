@@ -4,6 +4,7 @@ import (
 	stdcontext "context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 
 	convcontext "awaken/src/context"
@@ -17,6 +18,7 @@ const (
 )
 
 var errContextWindowBlocked = errors.New("context window blocked")
+var providerContextCapMessage = regexp.MustCompile(`(?i)\bsupports only [0-9]+\s*[km]?\s+context\b`)
 
 type CompactMode string
 
@@ -155,8 +157,8 @@ func contextProjectionRequest(envelope ContextEnvelope, state ContextWindowState
 	req := LLMRequest{
 		SystemPrompt: envelopeProjectedSystemPrompt(envelope), PromptSections: promptSectionsFromEnvelope(envelope),
 		Messages: envelope.Messages, Tools: envelope.ToolSchemas, AttributedTools: envelope.AttributedTools,
-		Model: envelope.Model, CapabilityModelID: envelope.CompactModelConfig.CapabilityModelID,
-		EndpointSelector: envelope.CompactModelConfig.EndpointSelector, ModelSelectorKind: envelope.CompactModelConfig.ModelSelectorKind,
+		Model: envelope.Model, CapabilityModelID: envelope.ExecutionModelConfig.CapabilityModelID,
+		EndpointSelector: envelope.ExecutionModelConfig.EndpointSelector, ModelSelectorKind: envelope.ExecutionModelConfig.ModelSelectorKind,
 		ContextWindowState: state,
 	}
 	for _, item := range envelope.UserContextItems {
@@ -420,6 +422,9 @@ func isPromptTooLongError(err error) bool {
 		return false
 	}
 	text := strings.ToLower(err.Error())
+	if providerContextCapMessage.MatchString(text) {
+		return true
+	}
 	for _, marker := range []string{
 		"prompt too long",
 		"context length",

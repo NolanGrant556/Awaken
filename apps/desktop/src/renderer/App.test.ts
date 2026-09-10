@@ -72,7 +72,6 @@ import {
   shouldResetActiveThreadForWorkspaceChange,
 } from "./projectRunScope";
 import {
-  nextSubagentInspectorTaskId,
   subagentAgentTypeLabel,
   subagentElapsedMs,
   subagentWorkspaceModeLabel,
@@ -154,7 +153,6 @@ import {
   runPlanStepStatusForDisplay,
   scrollTopForLatestTurnScrollTail,
   scrollTopForPromptAnchor,
-  subagentDetailPanelBottomOffset,
   shouldCancelPendingPromptAnchorForScrollIntent,
   shouldFollowLatestTurnScrollTail,
   shouldPauseLatestOutputFollowForScroll,
@@ -736,7 +734,6 @@ function stubElectronBridge(): void {
       saveGlobalAgentsDocument: vi.fn(async () => { throw new Error("Unconfigured saveGlobalAgentsDocument"); }),
       deleteGlobalAgentsDocument: vi.fn(async () => { throw new Error("Unconfigured deleteGlobalAgentsDocument"); }),
       cancelSubagent: vi.fn(async () => { throw new Error("Unconfigured cancelSubagent"); }),
-      messageSubagent: vi.fn(async () => { throw new Error("Unconfigured messageSubagent"); }),
       getHookStatus: vi.fn(async () => { throw new Error("Unconfigured getHookStatus"); }),
       trustProjectHook: vi.fn(async () => { throw new Error("Unconfigured trustProjectHook"); }),
       revokeProjectHook: vi.fn(async () => { throw new Error("Unconfigured revokeProjectHook"); }),
@@ -2306,6 +2303,31 @@ describe("assistant answer footer contract", () => {
 });
 
 describe("UserQuestionPrompt pager contract", () => {
+  it("keeps the complete long question with options inside the keyboard-scrollable body", () => {
+    const longQuestion = "邮件确认内容\n".repeat(300) + "末尾核验标记-END-519";
+    const html = renderToString(
+      React.createElement(UserQuestionPrompt, {
+        question: {
+          id: "long-question",
+          questions: [{ header: "发送摘要", question: longQuestion, options: [{ label: "确认" }] }],
+        },
+        onCancel: vi.fn(),
+        onSubmit: vi.fn(),
+      }),
+    );
+    const topbar = html.indexOf('class="user-question-card__topbar"');
+    const body = html.indexOf('class="user-question-card__body"');
+    const title = html.indexOf(longQuestion);
+    const options = html.indexOf('class="user-question-card__options"');
+    const actions = html.indexOf('class="user-question-card__actions"');
+    expect(topbar).toBeLessThan(body);
+    expect(title).toBeGreaterThan(body);
+    expect(title).toBeLessThan(options);
+    expect(options).toBeLessThan(actions);
+    expect(html.slice(body, title)).toContain('role="region" aria-label="问题与选项" tabindex="0"');
+    expect(html.slice(actions)).toContain("提交回答");
+  });
+
   it("renders one question at a time with a page counter", () => {
     const html = renderToString(
       React.createElement(UserQuestionPrompt, {
@@ -4950,10 +4972,7 @@ describe("App workbench presentation", () => {
     });
   });
 
-  it("toggles the subagent inspector detail without changing task identity", () => {
-    expect(nextSubagentInspectorTaskId(undefined, "task-1")).toBe("task-1");
-    expect(nextSubagentInspectorTaskId("task-1", "task-1")).toBeUndefined();
-  });
+
 
   it("labels plan/general roles and write isolation without claiming Desktop smoke", () => {
     expect(subagentAgentTypeLabel("explore")).toBe("探索智能体");
@@ -4965,14 +4984,7 @@ describe("App workbench presentation", () => {
     expect(subagentWorkspaceModeLabel("git_worktree")).toBe("Git worktree");
   });
 
-  it("positions subagent detail above the measured dock composer", () => {
-    expect(subagentDetailPanelBottomOffset({ composerContentInset: 88 })).toBe(
-      100,
-    );
-    expect(subagentDetailPanelBottomOffset({ composerContentInset: -20 })).toBe(
-      28,
-    );
-  });
+
 
   it("derives live and terminal subagent elapsed time from durable timestamps", () => {
     expect(

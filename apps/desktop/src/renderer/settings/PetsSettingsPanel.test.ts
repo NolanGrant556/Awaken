@@ -24,7 +24,6 @@ function createMockRuntimeClient(): RuntimeClient {
     saveGlobalAgentsDocument: vi.fn(async () => { throw new Error("Unconfigured saveGlobalAgentsDocument"); }),
     deleteGlobalAgentsDocument: vi.fn(async () => { throw new Error("Unconfigured deleteGlobalAgentsDocument"); }),
     cancelSubagent: vi.fn(async () => { throw new Error("Unconfigured cancelSubagent"); }),
-    messageSubagent: vi.fn(async () => { throw new Error("Unconfigured messageSubagent"); }),
     getHookStatus: vi.fn(async () => { throw new Error("Unconfigured getHookStatus"); }),
     trustProjectHook: vi.fn(async () => { throw new Error("Unconfigured trustProjectHook"); }),
     revokeProjectHook: vi.fn(async () => { throw new Error("Unconfigured revokeProjectHook"); }),

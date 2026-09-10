@@ -492,6 +492,43 @@ func TestTaskCheckpointV2CoversExecutionFactsAndInjectsRecentTurns(t *testing.T)
 	}
 }
 
+func TestRepeatedCheckpointUsesCurrentPlanAndChildStatus(t *testing.T) {
+	var prior *PostCompactContextBundleV2
+	constraint := newCheckpointFact("constraint", "preserve FIRST-372", "critical", true, []string{"user-record"})
+	completed := newCheckpointFact("completed_tool_action", "earlier write completed", "important", false, []string{"write-result"})
+	for version := 1; version <= 3; version++ {
+		status := tool.RunPlanInProgress
+		childStatus := "running"
+		if version > 1 {
+			status, childStatus = tool.RunPlanCompleted, "completed"
+		}
+		plan := NewRunPlanService(RunPlanServiceConfig{Restored: &tool.RunPlanSnapshot{
+			PlanID: "plan", Version: uint64(version), Items: []tool.RunPlanItem{{Step: "read block", ActiveForm: "reading", Status: status}},
+		}})
+		sources := []CheckpointFact(nil)
+		if version == 1 {
+			sources = []CheckpointFact{constraint, completed}
+		}
+		checkpoint, expected := buildTaskCheckpointV2(prior, nil, sources, plan, MemoryRecallSnapshotRef{}, nil,
+			[]SubagentHandoffRef{{TaskID: "child-task", Status: childStatus, Description: "child"}}, nil)
+		if err := validateTaskCheckpointCoverage(checkpoint, checkpointCoverageReceipt(expected, checkpoint)); err != nil {
+			t.Fatalf("compact generation %d rejected normal progress: %v", version, err)
+		}
+		seen := map[string]bool{}
+		for _, fact := range allCheckpointFacts(checkpoint) {
+			seen[fact.FactID] = true
+		}
+		if !seen[constraint.FactID] || !seen[completed.FactID] {
+			t.Fatal("replacing a plan discarded independent facts")
+		}
+		section, err := MaterializeSection(checkpoint)
+		if err != nil {
+			t.Fatal(err)
+		}
+		prior = &PostCompactContextBundleV2{TaskCheckpoint: section}
+	}
+}
+
 func TestTaskCheckpointV2BoundsHistoricalCriticalFactsWithoutCoverageFailure(t *testing.T) {
 	records := make([]SemanticRecord, 0, maxCheckpointFactsPerCategory+6)
 	for index := 0; index < maxCheckpointFactsPerCategory+6; index++ {

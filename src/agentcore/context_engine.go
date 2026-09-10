@@ -142,7 +142,7 @@ func (g *contextGovernor) PrepareRequest(ctx stdcontext.Context, llmReq LLMReque
 				}
 				return LLMRequest{}, blockErr
 			}
-			if !llmReq.ContextWindowState.ShouldBlock() {
+			if !llmReq.ContextWindowState.ShouldBlock() || compactFailureAllowsContinue(err) {
 				return g.evaluateRequest(llmReq), nil
 			}
 		} else {
@@ -647,6 +647,10 @@ func compactFailureReason(err error) string {
 	default:
 		return err.Error()
 	}
+}
+
+func compactFailureAllowsContinue(err error) bool {
+	return errors.Is(err, errInsufficientReduction) && !compactMandatoryFloorUnreachable(err)
 }
 
 func compactFailureClass(err error) string {

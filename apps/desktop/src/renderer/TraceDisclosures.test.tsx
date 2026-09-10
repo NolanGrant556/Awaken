@@ -12,6 +12,9 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { SubagentPanel } from "./SubagentPanel";
+import { createInitialRuntimeState, reduceRuntimeState } from "./runtime/reducer";
+
 describe("execution trace disclosures", () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -39,6 +42,40 @@ describe("execution trace disclosures", () => {
     });
     element.dispatchEvent(event);
   }
+
+  it.each(["completed", "failed", "cancelled", "interrupted"] as const)(
+    "removes the child thinking animation on %s while retaining readable reasoning",
+    async (status) => {
+      const identity = { runId: "run-1", subagentTaskId: "child-1" };
+      let state = reduceRuntimeState(createInitialRuntimeState(), { type: "run/event", event: {
+        ...identity, type: "REASONING_MESSAGE_CONTENT", messageId: "reasoning-1", delta: "已读取24块，480行",
+      } });
+      const renderPanel = () => <SubagentPanel task={state.subagentsById["child-1"]}
+        nowMs={0} cancelling={false} onCancel={() => {}}
+        renderActivity={(_id, items) => items.map(item => item.kind === "thinking"
+          ? <AwakenThoughtTrace key={item.id} text={item.text} status={item.status} /> : null)} />;
+      await act(async () => root.render(renderPanel()));
+      expect(container.querySelector(".thought-trace-active")).not.toBeNull();
+      expect(container.textContent).toContain("思考中");
+
+      state = reduceRuntimeState(state, { type: "run/event", event: {
+        ...identity, type: "AWAKEN_SUBAGENT_CHANGED", subagentStatus: status,
+        ...(status !== "completed" ? { subagentErrorCode: `subagent_${status}`, subagentErrorMessage: "子任务已终止" } : {}),
+      } });
+      await act(async () => root.render(renderPanel()));
+      expect(container.querySelector(".thought-trace-active")).toBeNull();
+      expect(container.querySelector(".thought-trace-status")).toBeNull();
+      expect(container.textContent).not.toContain("思考中");
+      expect(container.textContent).toContain("思考过程");
+      if (status !== "completed") expect(container.querySelector('[role="alert"]')?.textContent).toContain(`subagent_${status}`);
+      await act(async () => container.querySelector<HTMLButtonElement>(".thought-trace-heading")?.click());
+      expect(container.querySelector(".thought-trace-body p")?.textContent).toBe("已读取24块，480行");
+      // Reopening the panel must not replay the terminal thinking animation.
+      await act(async () => root.render(null));
+      await act(async () => root.render(renderPanel()));
+      expect(container.querySelector(".thought-trace-active")).toBeNull();
+    },
+  );
 
   it("keeps thinking open while active, collapses it when done, and honors a manual reopen", async () => {
     await act(async () => {

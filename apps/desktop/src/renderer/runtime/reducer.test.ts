@@ -702,6 +702,97 @@ describe("runtime reducer native subagent isolation", () => {
     expect(childItems.some((item) => item.kind === "answer")).toBe(true);
   });
 
+  it.each(["completed", "failed", "cancelled", "interrupted"] as const)(
+    "settles child reasoning on %s without a reasoning-end frame and keeps late snapshots static",
+    (status) => {
+      const child = { runId: "run-1", subagentTaskId: "task-1", subagentAgentId: "agent-1" };
+      const state = dispatch([
+        runEvent({ type: "REASONING_MESSAGE_CONTENT", runId: "run-1", messageId: "root-thought", delta: "主任务仍在思考" }),
+        runEvent({ ...child, type: "AWAKEN_SUBAGENT_CHANGED", subagentStatus: "running" }),
+        runEvent({ ...child, type: "REASONING_MESSAGE_CONTENT", messageId: "thought", delta: "已读24块" }),
+        runEvent({ ...child, type: "AWAKEN_SUBAGENT_CHANGED", subagentStatus: status }),
+      ]);
+      const task = state.subagentsById["task-1"];
+      expect(task.status).toBe(status);
+      expect(task.narrative.activeItem).toBeUndefined();
+      expect(task.narrative.committedItems).toContainEqual(expect.objectContaining({
+        kind: "thinking", text: "已读24块", status: "done",
+      }));
+      expect(state.narrative.activeItem).toMatchObject({ kind: "thinking", status: "active" });
+
+      const late = reduceRuntimeState(state, runEvent({
+        ...child, type: "REASONING_MESSAGE_CONTENT", messageId: "thought", delta: "，480行",
+      }));
+      expect(late.subagentsById["task-1"].narrative.activeItem).toBeUndefined();
+      expect(late.subagentsById["task-1"].narrative.committedItems).toContainEqual(expect.objectContaining({
+        kind: "thinking", text: "已读24块", status: "done",
+      }));
+      const snapshot = reduceRuntimeState(late, runEvent({
+        ...child, type: "REASONING_MESSAGE_CONTENT", recordId: "durable-thought", messageId: "thought", delta: "已读24块，480行",
+      }));
+      expect(snapshot.subagentsById["task-1"].narrative.activeItem).toBeUndefined();
+      expect(snapshot.subagentsById["task-1"].narrative.committedItems).toContainEqual(expect.objectContaining({
+        kind: "thinking", text: "已读24块，480行", status: "done",
+      }));
+      const resumed = reduceRuntimeState(late, runEvent({
+        ...child, subagentTaskId: "task-2", type: "REASONING_MESSAGE_CONTENT", messageId: "new-thought", delta: "新分配继续",
+      }));
+      expect(resumed.subagentsById["task-2"].narrative.activeItem).toMatchObject({ kind: "thinking", status: "active" });
+      expect(resumed.subagentsById["task-1"].status).toBe(status);
+    },
+  );
+
+  it("settles cancelled child tools without inventing successful results and accepts late real results", () => {
+    const child = { runId: "run-1", subagentTaskId: "task-1" };
+    const state = dispatch([
+      runEvent({ ...child, type: "TOOL_CALL_START", toolCallId: "read-1", toolCallName: "Read" }),
+      runEvent({ ...child, type: "TOOL_CALL_START", toolCallId: "read-2", toolCallName: "Read" }),
+      runEvent({ ...child, type: "TOOL_CALL_RESULT", toolCallId: "read-1", toolCallName: "Read", toolStatus: "succeeded", content: "第1块" }),
+      runEvent({ ...child, type: "REASONING_MESSAGE_CONTENT", messageId: "last-thought", delta: "等待读取结果" }),
+      runEvent({ ...child, type: "AWAKEN_SUBAGENT_CHANGED", subagentStatus: "cancelled" }),
+    ]);
+    expect(state.subagentsById["task-1"].narrative.activeItem).toBeUndefined();
+    const group = state.subagentsById["task-1"].narrative.committedItems.find(item => item.kind === "exploring");
+    expect(group).toMatchObject({ status: "done", actions: [
+      expect.objectContaining({ status: "done" }), expect.objectContaining({ status: "cancelled" }),
+    ] });
+    const late = reduceRuntimeState(state, runEvent({ ...child, type: "TOOL_CALL_RESULT", toolCallId: "read-2", toolCallName: "Read", toolStatus: "succeeded", content: "第2块" }));
+    expect(late.subagentsById["task-1"].status).toBe("cancelled");
+    expect(late.subagentsById["task-1"].narrative.activeItem).toBeUndefined();
+    expect(late.subagentsById["task-1"].narrative.committedItems.map(item => item.id))
+      .toEqual(state.subagentsById["task-1"].narrative.committedItems.map(item => item.id));
+    expect(late.subagentsById["task-1"].narrative.committedItems.find(item => item.kind === "exploring")).toMatchObject({
+      actions: [expect.objectContaining({ status: "done" }), expect.objectContaining({ status: "done" })],
+    });
+  });
+
+  it("replays child terminal history without restoring waiting or reconnect animations", () => {
+    const child = { runId: "run-1", subagentTaskId: "task-1" };
+    const state = dispatch([{ type: "run/replayBatch", actions: [
+      runEvent({ ...child, type: "REASONING_MESSAGE_CONTENT", recordId: "thought", messageId: "thought", delta: "已读取24块" }),
+      runEvent({ ...child, type: "AWAKEN_COMPACT_STARTED" }),
+      runEvent({ ...child, type: "AWAKEN_SUBAGENT_CHANGED", subagentStatus: "cancelled" }),
+      runEvent({ ...child, type: "AWAKEN_TURN_STARTED", agentPhase: "waiting_children" }),
+    ] }]);
+    const task = state.subagentsById["task-1"];
+    expect(task.status).toBe("cancelled");
+    expect(task.activity).toBeUndefined();
+    expect(task.narrative.activeItem).toBeUndefined();
+    expect(task.narrative.committedItems.some(item => item.kind === "planning" || item.kind === "providerReconnect")).toBe(false);
+    expect(task.narrative.committedItems).toContainEqual(expect.objectContaining({ kind: "thinking", text: "已读取24块", status: "done" }));
+  });
+
+  it.each(["completed", "failed", "interrupted"] as const)("keeps unconfirmed child tools interrupted on %s", (status) => {
+    const child = { runId: "run-1", subagentTaskId: "task-1" };
+    const state = dispatch([
+      runEvent({ ...child, type: "TOOL_CALL_START", toolCallId: "bash-1", toolCallName: "Bash" }),
+      runEvent({ ...child, type: "AWAKEN_SUBAGENT_CHANGED", subagentStatus: status }),
+    ]);
+    const task = state.subagentsById["task-1"];
+    expect(task.narrative.activeItem).toBeUndefined();
+    expect(task.narrative.committedItems).toContainEqual(expect.objectContaining({ kind: "tool", status: "interrupted" }));
+  });
+
   it("keeps terminal task truth stable and clears stale activity", () => {
     const state = dispatch([
       runEvent({

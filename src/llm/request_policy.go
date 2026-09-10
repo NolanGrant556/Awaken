@@ -102,13 +102,10 @@ func isAgentExecutionPurpose(purpose RequestPurpose) bool {
 }
 
 func supportsAuxiliaryReasoningEffort(cfg Config, req Request) bool {
-	if req.Purpose != RequestPurposeThreadTitle && req.Purpose != RequestPurposeCompactSummary {
+	if !isAuxiliaryReasoningBoundedPurpose(req.Purpose) {
 		return false
 	}
-	provider := strings.ToLower(strings.TrimSpace(cfg.ProviderID))
-	model := capabilityModelID(cfg, req)
-	return (provider == "kimi-cn" && model == "kimi-k3") ||
-		(provider == "kimi-coding-plan" && (model == "k3" || model == "k3-256k"))
+	return supportsLowestEffortReasoningFallback(cfg, req)
 }
 
 // capabilityModelID is the documented model-family identity used for
@@ -129,18 +126,19 @@ func applyAuxiliaryRequestPolicy(cfg Config, req Request) Request {
 	model := strings.ToLower(resolveModel(cfg, req))
 	key := providerModelKey(cfg, req)
 
+	if ResolveReasoningOffDecision(cfg, req).Kind == ReasoningOffLowestEffort {
+		// Unpublished off is not "omit the field". Use the confirmed lowest
+		// effort so title/compact budgets are not spent on default reasoning.
+		req.DisableReasoning = false
+		req.ReasoningPolicy = "low"
+	}
+
 	switch {
 	case isKimiK27Code(model):
 		// Kimi K2.7 Code always thinks and rejects thinking.disabled.
 		req.DisableReasoning = false
 		setCompactTemperature(&req, 1.0)
 	case isKimiK3(model):
-		// Kimi K3 does not expose a confirmed reasoning-off switch on these
-		// routes. Force the lowest supported effort for auxiliary calls so
-		// title/compact requests do not spend most of their budget on private
-		// reasoning.
-		req.DisableReasoning = false
-		req.ReasoningPolicy = "low"
 		setCompactTemperature(&req, 1.0)
 	case isKimiK25OrK26(model):
 		if req.DisableReasoning {

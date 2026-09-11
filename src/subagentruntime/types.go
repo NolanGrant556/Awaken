@@ -203,6 +203,13 @@ type QueuedMessage struct {
 	QueuedAt time.Time `json:"queued_at"`
 }
 
+// ParentNotice is a host-owned fact for the root Agent. It is not a user
+// message and does not cancel the root run.
+type ParentNotice struct {
+	ID      string
+	Content string
+}
+
 func (s TaskSnapshot) Terminal() bool {
 	switch s.Status {
 	case StatusCompleted, StatusFailed, StatusCancelled, StatusInterrupted:

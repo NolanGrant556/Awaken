@@ -36,7 +36,16 @@ describe("RunStage layout", () => {
       ));
 
     expect(designSystemStyles).toContain(
+      "grid-template-columns: auto minmax(12px, 1fr) minmax(0, 16.25rem) auto;",
+    );
+    expect(designSystemStyles).toContain(
       "@container composer-bar-layout (max-width: 440px)",
+    );
+    expect(designSystemStyles).toMatch(
+      /\.composer-bar-model-trigger-open\s*\{\s*width:\s*100%;/,
+    );
+    expect(designSystemStyles).not.toMatch(
+      /\.composer-bar-model-trigger-open\s*\{[^}]*100vw/,
     );
     expect(designSystemStyles).toMatch(
       /\.composer-bar \.composer-bar-model-trigger-label,\s*\.composer-bar \.composer-bar-model-trigger-chevron\s*\{\s*display: none;/,
@@ -228,6 +237,8 @@ describe("RunStage layout", () => {
     expect(rail).toContain("flex: 1 1 auto;");
     expect(rail).toContain("overflow: hidden;");
     expect(tabs).toContain("flex: 0 1 auto;");
+    expect(tabs).toContain("align-items: flex-end;");
+    expect(tabs).toContain("padding: 0 0 0 4px;");
     expect(tabs).toContain("overflow-x: auto;");
     expect(addWrapper).toContain("flex: 0 0 auto;");
     expect(actions).toContain("flex: 0 0 auto;");

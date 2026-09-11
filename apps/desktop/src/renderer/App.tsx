@@ -1554,8 +1554,13 @@ export function App() {
   async function handleStopAllAgents(): Promise<void> {
     const threadId = runtimeState.activeThreadId;
     if (!threadId || !runtimeClient.stopThreadAgents) return;
-    try { await runtimeClient.stopThreadAgents(threadId); }
-    catch (error) { setNotice(error instanceof Error ? error.message : "停止全部 Agent 失败"); }
+    try {
+      // Core cancels active subagents only and injects the user stop into the
+      // root Agent. Composer stop-run still cancels the whole run tree.
+      await runtimeClient.stopThreadAgents(threadId);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "停止全部子任务失败");
+    }
   }
 
   const platform = runtimeClient.platform as PlatformKind;
@@ -1584,6 +1589,8 @@ export function App() {
     subagentNowMs,
     openSubagentTaskId,
     handleOpenSubagent,
+    onStopAllAgents:
+      runningSubagentCount > 0 ? handleStopAllAgents : undefined,
     openMediaPreview,
     handleOpenDeliverablePreview,
     setNotice,
@@ -1772,7 +1779,6 @@ export function App() {
               fileWorkspace={fileWorkspace}
               subagentTabs={openSubagentTabs}
               onOpenSubagent={handleOpenSubagent}
-              onStopAllAgents={runningSubagentCount > 0 ? handleStopAllAgents : undefined}
               platform={platform}
               handleNewTask={handleNewTask}
               currentConversationLabel={currentConversationLabel}

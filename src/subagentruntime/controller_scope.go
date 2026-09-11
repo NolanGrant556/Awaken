@@ -209,6 +209,17 @@ func (s *scopedController) Wait(ctx context.Context, req WaitRequest) (WaitResul
 func (s *scopedController) DrainTerminalNotifications() []TaskSnapshot {
 	return s.manager.drainTerminalForParent(s.agentID)
 }
+func (s *scopedController) EnqueueParentNotice(id, content string) {
+	if s.agentID == "root" {
+		s.manager.EnqueueParentNotice(id, content)
+	}
+}
+func (s *scopedController) DrainParentNotices() []ParentNotice {
+	if s.agentID != "root" {
+		return nil
+	}
+	return s.manager.DrainParentNotices()
+}
 func (s *scopedController) AcknowledgeTerminal(id string) {
 	if s.owns(id) {
 		s.manager.AcknowledgeTerminal(id)

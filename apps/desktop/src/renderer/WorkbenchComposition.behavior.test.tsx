@@ -73,6 +73,161 @@ describe("Desktop composition boundaries", () => {
     return () => files;
   }
 
+  it("places stop-all on the center subagent group instead of the chrome", async () => {
+    const stopAll = vi.fn();
+    let files!: ReturnType<typeof useFileWorkspaceSession>;
+    await mount(() => {
+      const panels = useWorkbenchPanels("thread", { closePanel: vi.fn() }, vi.fn());
+      files = useFileWorkspaceSession({
+        inspectorTabs: panels.inspectorTabs,
+        registry: {
+          workspaceLabelProjectId: "project",
+          backendProjectIdFor: () => "project",
+          projectLabelById: new Map([["project", "Fixture"]]),
+          foldersForProjectId: () => [],
+        },
+        runtimeState: { ...createInitialRuntimeState(), activeThreadId: "thread" },
+        forceFull: false,
+        hasDraft: false,
+        isBusy: false,
+        requestComposerFocus: vi.fn(),
+        onBeforeFileOpen: vi.fn(),
+        onBeforeFileExpand: vi.fn(),
+      });
+      const renderer = useNarrativeRenderer({
+        runtimeState: createInitialRuntimeState(),
+        appearanceTheme: "light",
+        platform: "macos",
+        replayedNarrativeItemIds: new Set(),
+        subagentNowMs: 0,
+        handleOpenSubagent: vi.fn(),
+        onStopAllAgents: stopAll,
+        openMediaPreview: vi.fn(),
+        handleOpenDeliverablePreview: vi.fn(),
+        setNotice: vi.fn(),
+        workbenchDisclosureStore: createWorkbenchDisclosureStore(),
+        media: {
+          artifactMediaSources: {},
+          artifactMediaMetadata: {},
+          openingArtifactId: null,
+          recordArtifactMediaMetadata: vi.fn(),
+          refreshArtifactMediaSource: vi.fn(),
+          openArtifactExternally: async () => {},
+          revealArtifact: async () => {},
+        },
+      });
+      return (
+        <>
+          <DesktopWorkbenchChrome
+            fileWorkspace={files}
+            platform="macos"
+            currentConversationLabel="主任务"
+            handleNewTask={vi.fn()}
+            subagentTabs={[]}
+            onOpenSubagent={vi.fn()}
+          />
+          {renderer.renderNarrativeItem(
+            {
+              kind: "subagentGroup",
+              id: "group",
+              tasks: [
+                {
+                  taskId: "child",
+                  description: "运行 worker.py",
+                  agentType: "general",
+                  status: "running",
+                  toolUseCount: 1,
+                },
+              ],
+            },
+            "group",
+          )}
+        </>
+      );
+    });
+    await act(async () => files.handleOpenFileWorkspace());
+    expect(host.querySelector('[aria-label="停止全部任务"]')).toBeNull();
+    const button = host.querySelector<HTMLButtonElement>(
+      ".aw-subagent-group__stop-all",
+    );
+    expect(button?.textContent).toBe("停止全部任务");
+    await act(async () => button?.click());
+    expect(stopAll).toHaveBeenCalledTimes(1);
+  });
+
+  it("collapses the inspector when switching away from an existing thread", async () => {
+    let files!: ReturnType<typeof useFileWorkspaceSession>;
+    function Harness({ threadId }: { threadId?: string }) {
+      const panels = useWorkbenchPanels(
+        threadId,
+        { closePanel: vi.fn() },
+        vi.fn(),
+      );
+      files = useFileWorkspaceSession({
+        inspectorTabs: panels.inspectorTabs,
+        registry: {
+          workspaceLabelProjectId: "project",
+          backendProjectIdFor: () => "project",
+          projectLabelById: new Map([["project", "Fixture"]]),
+          foldersForProjectId: () => [],
+        },
+        runtimeState: {
+          ...createInitialRuntimeState(),
+          activeThreadId: threadId,
+        },
+        forceFull: false,
+        hasDraft: false,
+        isBusy: false,
+        requestComposerFocus: vi.fn(),
+        onBeforeFileOpen: vi.fn(),
+        onBeforeFileExpand: vi.fn(),
+      });
+      return null;
+    }
+    await act(async () => root.render(<Harness threadId="thread-a" />));
+    await act(async () => files.handleOpenFileWorkspace());
+    expect(files.inspectorCollapsed).toBe(false);
+    await act(async () => root.render(<Harness threadId="thread-b" />));
+    expect(files.inspectorCollapsed).toBe(true);
+    expect(files.fileWorkspaceExpanded).toBe(false);
+  });
+
+  it("does not collapse the inspector when a new thread first receives an id", async () => {
+    let files!: ReturnType<typeof useFileWorkspaceSession>;
+    function Harness({ threadId }: { threadId?: string }) {
+      const panels = useWorkbenchPanels(
+        threadId,
+        { closePanel: vi.fn() },
+        vi.fn(),
+      );
+      files = useFileWorkspaceSession({
+        inspectorTabs: panels.inspectorTabs,
+        registry: {
+          workspaceLabelProjectId: "project",
+          backendProjectIdFor: () => "project",
+          projectLabelById: new Map([["project", "Fixture"]]),
+          foldersForProjectId: () => [],
+        },
+        runtimeState: {
+          ...createInitialRuntimeState(),
+          activeThreadId: threadId,
+        },
+        forceFull: false,
+        hasDraft: false,
+        isBusy: false,
+        requestComposerFocus: vi.fn(),
+        onBeforeFileOpen: vi.fn(),
+        onBeforeFileExpand: vi.fn(),
+      });
+      return null;
+    }
+    await act(async () => root.render(<Harness />));
+    await act(async () => files.handleOpenFileWorkspace());
+    expect(files.inspectorCollapsed).toBe(false);
+    await act(async () => root.render(<Harness threadId="created" />));
+    expect(files.inspectorCollapsed).toBe(false);
+  });
+
   it("keeps scrollable tabs separate from fixed expand and panel controls", async () => {
     const files = await chrome();
     await act(async () => files().handleOpenFileWorkspace());

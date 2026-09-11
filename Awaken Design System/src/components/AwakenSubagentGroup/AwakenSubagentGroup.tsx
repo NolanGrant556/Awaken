@@ -18,6 +18,7 @@ export type AwakenSubagentRowView = {
 export type AwakenSubagentGroupProps = {
   tasks: AwakenSubagentRowView[];
   onSelect?: (taskId: string) => void;
+  onStopAll?: () => void;
 };
 
 const groupStatusLabels = {
@@ -26,11 +27,28 @@ const groupStatusLabels = {
   completed: "完成",
 };
 
-export function AwakenSubagentGroup({ tasks, onSelect }: AwakenSubagentGroupProps) {
+const busyStatuses = new Set(["queued", "running", "cancelling"]);
+
+export function AwakenSubagentGroup({
+  tasks,
+  onSelect,
+  onStopAll,
+}: AwakenSubagentGroupProps) {
+  const canStopAll =
+    Boolean(onStopAll) && tasks.some((task) => busyStatuses.has(task.status));
   return (
     <section className="aw-subagent-group" aria-label="subagent">
       <header className="aw-subagent-group__header">
         <strong>subagent</strong>
+        {canStopAll ? (
+          <button
+            type="button"
+            className="aw-subagent-group__stop-all"
+            onClick={() => onStopAll?.()}
+          >
+            停止全部任务
+          </button>
+        ) : null}
       </header>
       <div className="aw-subagent-group__rows">
         {tasks.map((task) => (

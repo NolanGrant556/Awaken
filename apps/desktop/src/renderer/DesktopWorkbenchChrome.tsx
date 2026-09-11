@@ -40,7 +40,6 @@ type Props = {
   currentConversationLabel: string;
   subagentTabs: SubagentTaskView[];
   onOpenSubagent: (taskId: string) => void;
-  onStopAllAgents?: () => Promise<void>;
 };
 export function DesktopWorkbenchChrome({
   fileWorkspace: files,
@@ -49,7 +48,6 @@ export function DesktopWorkbenchChrome({
   currentConversationLabel,
   subagentTabs,
   onOpenSubagent,
-  onStopAllAgents,
 }: Props) {
   const tabsRef = useRef<HTMLDivElement>(null);
   const { state, dispatch } = files.inspectorTabs;
@@ -281,18 +279,6 @@ export function DesktopWorkbenchChrome({
               </Tooltip>
             </div>
             <div className="project-files-chrome-actions">
-              {onStopAllAgents ? (
-                <Tooltip label="停止全部任务" placement="bottom">
-                  <button
-                    type="button"
-                    className="workbench-chrome-icon"
-                    aria-label="停止全部任务"
-                    onClick={() => void onStopAllAgents()}
-                  >
-                    <AwakenIcon concept="stop" size={14} />
-                  </button>
-                </Tooltip>
-              ) : null}
               {files.fileWorkspacePanelAction ? (
                 <Tooltip
                   label={

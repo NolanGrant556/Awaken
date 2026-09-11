@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   expandedFileComposerCompletionKey,
   shouldCollapseExpandedFileComposer,
@@ -145,6 +145,22 @@ export function useFileWorkspaceSession(options: Options) {
     handleSidebarResizeKeyDown,
     handleInspectorResizeKeyDown,
   } = workbenchLayout;
+
+  const previousThreadIdRef = useRef(runtimeState.activeThreadId);
+  useEffect(() => {
+    const previous = previousThreadIdRef.current;
+    const next = runtimeState.activeThreadId;
+    if (previous === next) return;
+    previousThreadIdRef.current = next;
+    if (!previous) return;
+    setFileWorkspaceExpanded(false);
+    setExpandedWorkspaceSurface("file");
+    setExpandedFileComposerIdleMode("full");
+    setInspectorCollapsed(true);
+    if (inspectorCollapsedBeforeResponsiveRef.current !== null) {
+      inspectorCollapsedBeforeResponsiveRef.current = true;
+    }
+  }, [runtimeState.activeThreadId, setInspectorCollapsed]);
 
   const fileWorkspacePanelAction = fileWorkspacePanelActionForState({
     fileWorkspaceOpen: fileWorkspaceOpen && !subagentPanelActive && !inspectorChooserActive,

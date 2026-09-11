@@ -902,9 +902,18 @@ export function shouldResumeLatestOutputFollow({
 export function shouldShowReturnToLatestAffordance({
   followMode,
   hasLatestTurn,
+  isNearLatestOutput,
+  isAtScrollBottom,
 }: {
   followMode: LatestOutputFollowMode;
   hasLatestTurn: boolean;
+  isNearLatestOutput: boolean;
+  isAtScrollBottom: boolean;
 }): boolean {
-  return followMode === "paused_by_user" && hasLatestTurn;
+  return (
+    followMode === "paused_by_user" &&
+    hasLatestTurn &&
+    !isNearLatestOutput &&
+    !isAtScrollBottom
+  );
 }

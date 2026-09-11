@@ -395,6 +395,117 @@ data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text
 	}
 }
 
+type unexpectedEOFStreamTransport struct {
+	body string
+}
+
+func (t unexpectedEOFStreamTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Body != nil {
+		_, _ = io.Copy(io.Discard, req.Body)
+		_ = req.Body.Close()
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       &unexpectedEOFBody{Reader: strings.NewReader(t.body)},
+		Request:    req,
+	}, nil
+}
+
+type unexpectedEOFBody struct {
+	*strings.Reader
+}
+
+func (b *unexpectedEOFBody) Read(p []byte) (int, error) {
+	n, err := b.Reader.Read(p)
+	if err == io.EOF {
+		if n > 0 {
+			return n, nil
+		}
+		return 0, io.ErrUnexpectedEOF
+	}
+	return n, err
+}
+
+func (b *unexpectedEOFBody) Close() error { return nil }
+
+func withUnexpectedEOFStream(t *testing.T, payload string) {
+	t.Helper()
+	original := streamHTTPClient
+	streamHTTPClient = &http.Client{Transport: unexpectedEOFStreamTransport{body: payload}}
+	t.Cleanup(func() { streamHTTPClient = original })
+}
+
+func TestStreamInvokeAnthropicUnexpectedEOFWithClosedToolsDisconnects(t *testing.T) {
+	withUnexpectedEOFStream(t, strings.Join([]string{
+		`event: content_block_start`,
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"Read"}}`,
+		``,
+		`event: content_block_delta`,
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"file_path\":\"a.txt\"}"}}`,
+		``,
+		`event: content_block_stop`,
+		`data: {"type":"content_block_stop","index":0}`,
+		``,
+		`event: content_block_start`,
+		`data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_2","name":"Read"}}`,
+		``,
+		`event: content_block_delta`,
+		`data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"file_path\":\"b.txt\"}"}}`,
+		``,
+		`event: content_block_stop`,
+		`data: {"type":"content_block_stop","index":1}`,
+		``,
+		`event: content_block_start`,
+		`data: {"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"toolu_3","name":"Read"}}`,
+		``,
+		`event: content_block_delta`,
+		`data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"file_path\":"}}`,
+		``,
+	}, "\n"))
+
+	resp, err := StreamInvokeWithObserver(
+		context.Background(),
+		anthropicConfig("http://127.0.0.1:1"),
+		Request{UserPrompt: "hi"},
+		StreamObserver{},
+	)
+	var disconnected *StreamDisconnectedError
+	if !errors.As(err, &disconnected) || resp != nil {
+		t.Fatalf("unexpected EOF must not install closed tool_use, response=%+v err=%v", resp, err)
+	}
+}
+
+func TestStreamInvokeAnthropicUnexpectedEOFWithoutClosedToolsDisconnects(t *testing.T) {
+	for _, name := range []string{"text", "open-tool"} {
+		payload := `event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial"}}` + "\n\n"
+		if name == "open-tool" {
+			payload = strings.Join([]string{
+				`event: content_block_start`,
+				`data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_open","name":"Read"}}`,
+				``,
+				`event: content_block_delta`,
+				`data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"file_path\":"}}`,
+				``,
+			}, "\n")
+		}
+		t.Run(name, func(t *testing.T) {
+			withUnexpectedEOFStream(t, payload)
+			resp, err := StreamInvokeWithObserver(
+				context.Background(),
+				anthropicConfig("http://127.0.0.1:1"),
+				Request{UserPrompt: "hi"},
+				StreamObserver{},
+			)
+			var disconnected *StreamDisconnectedError
+			if !errors.As(err, &disconnected) || resp != nil {
+				t.Fatalf("unexpected EOF without closed tools must disconnect, response=%+v err=%v", resp, err)
+			}
+		})
+	}
+}
+
 func TestStreamInvokeAnthropicThinkingAndText(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/anthropic/v1/messages" {

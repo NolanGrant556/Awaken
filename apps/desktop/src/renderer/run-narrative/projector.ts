@@ -513,30 +513,55 @@ function activateCompactPlanning(
   });
 }
 
+function isDiscardableReconnectOutput(
+  item: RunNarrativeItem | undefined,
+): boolean {
+  if (!item) {
+    return false;
+  }
+  if (item.kind === "thinking" || item.kind === "answer") {
+    return true;
+  }
+  if (item.kind === "tool" && item.status === "active") {
+    return true;
+  }
+  if (item.kind === "exploring" && item.status === "active") {
+    return true;
+  }
+  return false;
+}
+
 export function discardInProgressModelOutput(
   state: RunNarrativeState,
   event?: AguiEvent,
 ): RunNarrativeState {
-  const active = state.activeItem;
+  const discardedIds = new Set<string>();
   const committedItems = state.committedItems.slice();
   while (
     committedItems.length > 0 &&
-    (committedItems.at(-1)?.kind === "thinking" ||
-      committedItems.at(-1)?.kind === "answer")
+    isDiscardableReconnectOutput(committedItems.at(-1))
   ) {
-    committedItems.pop();
+    const removed = committedItems.pop();
+    if (removed) {
+      discardedIds.add(removed.id);
+    }
   }
-  const activeIsModelOutput =
-    active?.kind === "thinking" || active?.kind === "answer";
-  if (
-    !activeIsModelOutput &&
-    committedItems.length === state.committedItems.length
-  ) {
+  const activeIsDiscardable = isDiscardableReconnectOutput(state.activeItem);
+  if (state.activeItem && activeIsDiscardable) {
+    discardedIds.add(state.activeItem.id);
+  }
+  if (!activeIsDiscardable && discardedIds.size === 0) {
     return state;
   }
+  const inspectorSelection =
+    state.inspectorSelection?.kind === "tool" &&
+    discardedIds.has(state.inspectorSelection.id)
+      ? undefined
+      : state.inspectorSelection;
   return {
     ...state,
     committedItems,
+    inspectorSelection,
     activeItem: {
       kind: "planning",
       id: `planning:${event ? eventScope(event) : "current"}`,

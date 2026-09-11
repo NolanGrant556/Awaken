@@ -55,6 +55,9 @@ func TestIsTransientRequestErrorRetriesPreResponseTransport429And5xx(t *testing.
 	if IsConnectionError(&StreamDisconnectedError{Reason: "stream eof"}) {
 		t.Fatal("post-response stream disconnect is not a connection wait")
 	}
+	if !IsStreamDisconnectedError(&StreamDisconnectedError{Reason: "stream eof"}) {
+		t.Fatal("stream eof must classify as stream disconnect")
+	}
 }
 
 func TestSafeRetryDetailNeverLeaksURL(t *testing.T) {

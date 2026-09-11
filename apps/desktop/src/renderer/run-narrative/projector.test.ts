@@ -2053,6 +2053,44 @@ describe("run plan narrative ownership (RP-D03)", () => {
     });
   });
 
+  it("discards unexecuted in-progress tools on provider reconnect reset", () => {
+    let state = projectAguiEventToNarrative(createInitialRunNarrativeState(), {
+      type: "TOOL_CALL_ARGS_DELTA",
+      runId: "run-1",
+      toolCallId: "write-live",
+      toolCallName: "Write",
+      delta: '{"file_path":"/tmp/a.md"',
+      toolPreparationKind: "write",
+      toolPreparationPath: "/tmp/a.md",
+      toolPreparationAddedLines: 1,
+    });
+    expect(state.activeItem).toMatchObject({
+      kind: "tool",
+      id: "tool:run-1:write-live",
+      status: "active",
+    });
+
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_PROVIDER_RECONNECT",
+      runId: "run-1",
+      providerReconnect: {
+        phase: "reconnecting",
+        attempt: 1,
+        maxAttempts: 5,
+        detail: "stream eof",
+        resetInProgress: true,
+      },
+    });
+    expect(state.activeItem).toMatchObject({
+      kind: "planning",
+      status: "active",
+    });
+    expect(state.committedItems.some((item) => item.kind === "tool")).toBe(
+      false,
+    );
+    expect(state.inspectorSelection).toBeUndefined();
+  });
+
   it("discards reasoning already moved behind an in-progress answer", () => {
     let state = projectAguiEventToNarrative(createInitialRunNarrativeState(), {
       type: "REASONING_MESSAGE_CONTENT",

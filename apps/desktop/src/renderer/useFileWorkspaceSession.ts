@@ -255,7 +255,9 @@ export function useFileWorkspaceSession(options: Options) {
   }
 
   function handleShowExpandedFileComposerFull(): void {
-    setExpandedFileComposerTrackedRun(undefined);
+    if (!isBusy) {
+      setExpandedFileComposerTrackedRun(undefined);
+    }
     setExpandedFileComposerIdleMode("full");
     requestComposerFocus();
   }
@@ -264,14 +266,15 @@ export function useFileWorkspaceSession(options: Options) {
     if (
       !shouldCollapseExpandedFileComposer({
         active: fileWorkspaceSurfaceActive,
-        busy: isBusy,
         forceFull: expandedFileComposerForceFull,
         hasDraft: expandedFileComposerHasDraft,
       })
     ) {
       return;
     }
-    setExpandedFileComposerTrackedRun(undefined);
+    if (!isBusy) {
+      setExpandedFileComposerTrackedRun(undefined);
+    }
     setExpandedFileComposerIdleMode("rail");
   }
 

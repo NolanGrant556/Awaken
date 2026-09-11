@@ -1842,7 +1842,36 @@ body.is-project-file-list-resizing .project-files-workspace__body {
 }
 
 .expanded-file-composer__pill-running {
+  grid-template-columns: minmax(0, 1fr) auto;
   width: min(390px, 100%);
+  padding-right: 12px;
+  cursor: default;
+}
+
+.expanded-file-composer__pill-main {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 58px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.expanded-file-composer__pill-main:focus-visible {
+  outline: 2px solid var(--aw-focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--aw-radius-pill);
+}
+
+.expanded-file-composer__stop {
+  display: grid;
+  place-items: center;
 }
 
 .expanded-file-composer__spinner svg {
@@ -1938,6 +1967,10 @@ body.is-project-file-list-resizing .project-files-workspace__body {
 
   .expanded-file-composer__pill {
     grid-template-columns: 30px minmax(0, 1fr);
+  }
+
+  .expanded-file-composer__pill-running {
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 
   .expanded-file-composer__pill-completed {

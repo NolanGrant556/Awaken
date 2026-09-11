@@ -96,9 +96,27 @@ describe("expanded file workspace shell", () => {
         forceFull: false,
         running: true,
         completed: false,
-        idleMode: "full",
+        idleMode: "compact",
       }),
     ).toBe("running");
+    expect(
+      expandedFileComposerPresentation({
+        active: true,
+        forceFull: false,
+        running: true,
+        completed: false,
+        idleMode: "full",
+      }),
+    ).toBe("full");
+    expect(
+      expandedFileComposerPresentation({
+        active: true,
+        forceFull: false,
+        running: true,
+        completed: false,
+        idleMode: "rail",
+      }),
+    ).toBe("rail");
     expect(
       expandedFileComposerPresentation({
         active: true,
@@ -136,6 +154,28 @@ describe("expanded file workspace shell", () => {
     expect(html).toContain('data-expanded-file-composer-state="compact"');
     expect(html).not.toContain("原输入框");
     expect(html).toContain("继续对话");
+  });
+
+  it("keeps stop on a dedicated button in the running pill", () => {
+    const html = renderToString(
+      <ExpandedFileComposer
+        active
+        idleMode="compact"
+        running
+        completed={false}
+        onShowCompact={() => undefined}
+        onShowFull={() => undefined}
+        onStop={() => undefined}
+      >
+        <div>原输入框</div>
+      </ExpandedFileComposer>,
+    );
+
+    expect(html).toContain('data-expanded-file-composer-state="running"');
+    expect(html).toContain("正在执行");
+    expect(html).toContain("停止运行");
+    expect(html).not.toContain("点击停止");
+    expect(html).not.toContain("原输入框");
   });
 
   it("suspends narrative and run-plan surfaces while the file surface is active", () => {
@@ -199,16 +239,14 @@ describe("expanded file workspace shell", () => {
     expect(
       shouldCollapseExpandedFileComposer({
         active: true,
-        busy: false,
         forceFull: false,
         hasDraft: false,
       }),
     ).toBe(true);
     for (const protectedState of [
-      { active: false, busy: false, forceFull: false, hasDraft: false },
-      { active: true, busy: true, forceFull: false, hasDraft: false },
-      { active: true, busy: false, forceFull: true, hasDraft: false },
-      { active: true, busy: false, forceFull: false, hasDraft: true },
+      { active: false, forceFull: false, hasDraft: false },
+      { active: true, forceFull: true, hasDraft: false },
+      { active: true, forceFull: false, hasDraft: true },
     ]) {
       expect(shouldCollapseExpandedFileComposer(protectedState)).toBe(false);
     }

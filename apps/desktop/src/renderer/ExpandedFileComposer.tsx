@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { AwakenIcon } from "@awaken/design-system";
+import { AwakenIcon, AwakenSendButton } from "@awaken/design-system";
 
 export type ExpandedFileComposerIdleMode = "rail" | "compact" | "full";
 export type ExpandedFileComposerPresentation =
@@ -30,16 +30,14 @@ export function hasExpandedFileComposerDraft({
 
 export function shouldCollapseExpandedFileComposer({
   active,
-  busy,
   forceFull,
   hasDraft,
 }: {
   active: boolean;
-  busy: boolean;
   forceFull: boolean;
   hasDraft: boolean;
 }): boolean {
-  return active && !busy && !forceFull && !hasDraft;
+  return active && !forceFull && !hasDraft;
 }
 
 export function expandedFileComposerCompletionKey({
@@ -82,8 +80,12 @@ export function expandedFileComposerPresentation({
   idleMode: ExpandedFileComposerIdleMode;
 }): ExpandedFileComposerPresentation {
   if (!active || forceFull) return "full";
-  if (running) return "running";
   if (completed) return "completed";
+  if (running) {
+    if (idleMode === "rail") return "rail";
+    if (idleMode === "full") return "full";
+    return "running";
+  }
   return idleMode;
 }
 
@@ -178,22 +180,27 @@ export function ExpandedFileComposer({
       ) : null}
 
       {presentation === "running" ? (
-        <button
-          type="button"
-          className="expanded-file-composer__pill expanded-file-composer__pill-running"
-          aria-label={onStop ? "正在执行，点击停止任务" : "正在执行"}
-          disabled={!onStop}
-          onClick={onStop}
-        >
-          <span
-            className="expanded-file-composer__icon expanded-file-composer__spinner"
-            aria-hidden="true"
+        <div className="expanded-file-composer__pill expanded-file-composer__pill-running">
+          <button
+            type="button"
+            className="expanded-file-composer__pill-main"
+            aria-label="正在执行，点击展开输入框"
+            onClick={onShowFull}
           >
-            <AwakenIcon concept="step-running" size={20} />
-          </span>
-          <span className="expanded-file-composer__label">正在执行</span>
-          <span className="expanded-file-composer__hint">点击停止</span>
-        </button>
+            <span
+              className="expanded-file-composer__icon expanded-file-composer__spinner"
+              aria-hidden="true"
+            >
+              <AwakenIcon concept="step-running" size={20} />
+            </span>
+            <span className="expanded-file-composer__label">正在执行</span>
+          </button>
+          {onStop ? (
+            <span className="expanded-file-composer__stop">
+              <AwakenSendButton mode="stop" ready onClick={onStop} />
+            </span>
+          ) : null}
+        </div>
       ) : null}
 
       {presentation === "completed" ? (

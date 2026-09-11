@@ -26,10 +26,23 @@ func TestParseIntentRequiresQuery(t *testing.T) {
 
 func TestConductorPromptRequiresTeamAndSkills(t *testing.T) {
 	prompt := ConductorPrompt(Intent{Query: "What is WebSearch?", SourceHint: SourceBoth}, nil)
-	for _, want := range []string{"editor-in-chief", "subagent", "general", "follow-up", "word", "excel", "ppt", "pdf", "artifact_publish", "已核实"} {
+	for _, want := range []string{
+		"调研主编", "subagent", "general", "followup", "wait(any)",
+		"至少派两路", "审核", "过时", "ask_user",
+		"word", "excel", "ppt", "pdf", "artifact_publish", "已核实",
+		"工作区和公开网页都要用",
+	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q: %s", want, prompt)
 		}
+	}
+	web := ConductorPrompt(Intent{Query: "Only web", SourceHint: SourceWeb}, nil)
+	if !strings.Contains(web, "优先公开网页") {
+		t.Fatalf("web source hint missing: %s", web)
+	}
+	workspace := ConductorPrompt(Intent{Query: "Only workspace", SourceHint: SourceWorkspace}, nil)
+	if !strings.Contains(workspace, "留在当前工作区") {
+		t.Fatalf("workspace source hint missing: %s", workspace)
 	}
 }
 

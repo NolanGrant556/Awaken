@@ -261,7 +261,7 @@ func TestRequestBuilderInjectsResearchTeamContract(t *testing.T) {
 	envelope := NewRequestBuilder(cfg).BuildContextEnvelope(convcontext.New(), nil)
 	found := false
 	for _, block := range envelope.SystemBlocks {
-		if block.ID == "research_team" && strings.Contains(block.Content, "editor-in-chief") && strings.Contains(block.Content, "artifact_publish") {
+		if block.ID == "research_team" && strings.Contains(block.Content, "调研主编") && strings.Contains(block.Content, "至少派两路") && strings.Contains(block.Content, "artifact_publish") {
 			found = true
 		}
 	}

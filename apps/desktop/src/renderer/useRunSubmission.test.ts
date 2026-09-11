@@ -56,6 +56,7 @@ function setup(startRun: Options["runtimeClient"]["startRun"]) {
     composerDraftKey: "thread:A",
     fileWorkspaceSurfaceActive: false,
     setExpandedFileComposerTrackedRun: vi.fn(),
+    setExpandedFileComposerIdleMode: vi.fn(),
     prepareForRunStart: vi.fn(),
     refreshThreads: vi.fn(async () => {}),
     startThreadTitlePoll: vi.fn(),

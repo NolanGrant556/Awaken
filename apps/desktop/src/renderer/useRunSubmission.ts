@@ -5,7 +5,10 @@ import type {
   StartRunRequest,
 } from "../shared/runtime";
 import { runtimeRequestIssue } from "../shared/runtime-request";
-import { type ExpandedFileComposerTrackedRun } from "./ExpandedFileComposer";
+import {
+  type ExpandedFileComposerIdleMode,
+  type ExpandedFileComposerTrackedRun,
+} from "./ExpandedFileComposer";
 import { toRunInputAttachment } from "./composerAttachments";
 import type { RunSubmissionScope } from "./projectRunScope";
 import {
@@ -40,6 +43,9 @@ type Options = {
   setExpandedFileComposerTrackedRun: (
     run: ExpandedFileComposerTrackedRun | undefined,
   ) => void;
+  setExpandedFileComposerIdleMode: (
+    mode: ExpandedFileComposerIdleMode,
+  ) => void;
   prepareForRunStart: () => void;
   refreshThreads: () => Promise<void>;
   startThreadTitlePoll: (threadId: string) => void;
@@ -61,6 +67,7 @@ export function useRunSubmission(options: Options) {
     selectedReasoningEffort,
     fileWorkspaceSurfaceActive,
     setExpandedFileComposerTrackedRun,
+    setExpandedFileComposerIdleMode,
     prepareForRunStart,
     refreshThreads,
     startThreadTitlePoll,
@@ -185,6 +192,9 @@ export function useRunSubmission(options: Options) {
     if (!threadSession.isCurrent(submissionGeneration)) return;
     const trackExpandedFileRun = fileWorkspaceSurfaceActive;
     setExpandedFileComposerTrackedRun(undefined);
+    if (trackExpandedFileRun) {
+      setExpandedFileComposerIdleMode("compact");
+    }
     const loadSeq = threadSession.begin(runtimeState.activeThreadId);
     setNotice(null);
     prepareForRunStart();
@@ -285,6 +295,9 @@ export function useRunSubmission(options: Options) {
               ),
             }
           : draftComposerState;
+      if (trackExpandedFileRun) {
+        setExpandedFileComposerIdleMode("full");
+      }
       restoreSubmissionDraft(restoredComposerState);
       if (!threadSession.isCurrent(loadSeq)) return;
       if (options?.restoreCanonicalOnFailure && runtimeState.activeThreadId) {

@@ -1308,6 +1308,7 @@ export function App() {
     selectedReasoningEffort,
     fileWorkspaceSurfaceActive,
     setExpandedFileComposerTrackedRun,
+    setExpandedFileComposerIdleMode,
     prepareForRunStart,
     refreshThreads,
     startThreadTitlePoll,

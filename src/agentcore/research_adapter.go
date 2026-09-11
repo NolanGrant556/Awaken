@@ -10,100 +10,233 @@ import (
 	"time"
 
 	convcontext "awaken/src/context"
-	"awaken/src/desktopdata"
-	"awaken/src/llm"
 	"awaken/src/researchruntime"
 	"awaken/src/subagentruntime"
 	"awaken/src/tool"
 )
 
-func (r *Runner) runDeepResearch(ctx stdcontext.Context, events *runEventEmitter) (string, error) {
-	if r.config.ResearchIntent == nil {
-		return "", fmt.Errorf("research intent is missing")
+func hostResearchTeamBlock(intent *researchruntime.Intent, prefetch []researchruntime.PrefetchedSource) (ContextBlock, bool) {
+	if intent == nil || strings.TrimSpace(intent.Query) == "" {
+		return ContextBlock{}, false
 	}
-	if r.subagentController == nil {
-		err := fmt.Errorf("deep research requires a subagent controller")
-		events.runErrored(ctx, err)
-		return "", err
-	}
-	turnState := newTurnState(events.threadID, events.runID, r.effectiveMaxThoughts(), r.config.ModelConfig.Model)
-	events.turnStarted(turnState)
+	content := researchruntime.ConductorPrompt(*intent, prefetch)
+	return ContextBlock{ID: "research_team", Content: content}, true
+}
 
-	orch := &researchruntime.Orchestrator{
-		Children: &researchChildClient{
-			controller: r.subagentController,
-			threadID:   r.threadID,
-			runID:      r.runID,
-			turnID:     events.turnID(),
-		},
-		Plan: &researchPlanWriter{
-			service: r.runPlanService,
-			identity: tool.ToolExecutionIdentity{
-				RunID:   r.runID,
-				TurnID:  events.turnID(),
-				AgentID: "root",
-			},
-		},
-		PublishFn: &researchPublisher{runner: r, events: events},
-		Synth:     &researchSynthesizer{runner: r},
-		Prefetch:  &researchSourcePrefetcher{runner: r, events: events},
-		Journal:   &researchJournal{runner: r, events: events},
-		Cancelled: func() bool { return ctx.Err() != nil },
+func (r *Runner) prepareResearchTeam(ctx stdcontext.Context, events *runEventEmitter) error {
+	if r == nil || r.config.ResearchIntent == nil || r.config.SubagentOrigin != nil {
+		return nil
 	}
-	resumeExecution := subagentruntime.SuspendExecution(ctx)
-	result, err := orch.Run(subagentruntime.WithoutExecutionLease(ctx), *r.config.ResearchIntent)
-	if resumeErr := resumeExecution(); resumeErr != nil && err == nil {
-		err = resumeErr
+	if err := r.appendResearchJournal(ctx, events, SemanticKindResearchAccepted, map[string]any{
+		"query":       r.config.ResearchIntent.Query,
+		"source_hint": string(r.config.ResearchIntent.SourceHint),
+		"phase":       "accepted",
+	}); err != nil {
+		return err
 	}
+	prefetched, err := r.prefetchResearchSources(ctx, events, *r.config.ResearchIntent)
 	if err != nil {
-		if ctx.Err() != nil {
-			events.turnFinished(ctx, TerminalReasonCancelled, "")
-			events.runErrored(ctx, ctx.Err(), TerminalReasonCancelled)
-			return "", ctx.Err()
+		return err
+	}
+	r.researchPrefetch = prefetched
+	if r.reqBuilder != nil {
+		r.reqBuilder.SetResearchPrefetch(prefetched)
+	}
+	previous := events.afterTerminal
+	events.afterTerminal = func(termCtx stdcontext.Context, status string, reason TerminalReason, resultBytes int) {
+		r.finishResearchTeam(termCtx, events, status, reason)
+		if previous != nil {
+			previous(termCtx, status, reason, resultBytes)
 		}
-		events.turnFinished(ctx, terminalReasonForError(err), "")
-		events.runErrored(ctx, err)
-		return "", err
 	}
-	if result.Outcome == researchruntime.OutcomeCancelled || result.Outcome == researchruntime.OutcomeInterrupted {
-		events.turnFinished(ctx, TerminalReasonCancelled, "")
-		events.runErrored(ctx, stdcontext.Canceled, TerminalReasonCancelled)
-		return "", stdcontext.Canceled
-	}
-	if result.Outcome == researchruntime.OutcomeFailed {
-		err := fmt.Errorf("deep research failed")
-		if notes := strings.TrimSpace(strings.Join(compactFailedNotes(result.Coverage), "; ")); notes != "" {
-			err = fmt.Errorf("deep research failed: %s", notes)
-		}
-		events.turnFinished(ctx, terminalReasonForError(err), "")
-		events.runErrored(ctx, err)
-		return "", err
-	}
+	return nil
+}
 
-	answer := strings.TrimSpace(result.Answer)
-	if answer == "" {
-		answer = strings.TrimSpace(result.Markdown)
+func (r *Runner) finishResearchTeam(ctx stdcontext.Context, events *runEventEmitter, status string, reason TerminalReason) {
+	if r == nil || r.config.ResearchIntent == nil || r.config.SubagentOrigin != nil {
+		return
 	}
-	if result.Outcome == researchruntime.OutcomePartial {
-		answer = "Partial\n\n" + answer
-	} else if result.Outcome == researchruntime.OutcomeVerified {
-		answer = "Verified\n\n" + answer
+	outcome := "finished"
+	switch {
+	case status == "cancelled" || reason == TerminalReasonCancelled:
+		outcome = "cancelled"
+	case status == "interrupted":
+		outcome = "interrupted"
+	case status != "" && status != "finished":
+		outcome = "failed"
 	}
-	if strings.TrimSpace(answer) != "" {
-		events.onLLMDelta(answer, false)
-		events.finishTextIfOpen()
-		if r.conversation != nil {
-			r.conversation.AssistantOutput(answer, nil)
+	_ = r.appendResearchJournal(ctx, events, SemanticKindResearchTerminal, map[string]any{
+		"outcome": outcome,
+		"phase":   "terminal",
+	})
+}
+
+func (r *Runner) prefetchResearchSources(ctx stdcontext.Context, events *runEventEmitter, intent researchruntime.Intent) ([]researchruntime.PrefetchedSource, error) {
+	if intent.SourceHint == researchruntime.SourceWorkspace {
+		return nil, nil
+	}
+	urls := researchruntime.ExplicitHTTPSURLs(intent.Query)
+	if len(urls) == 0 {
+		return nil, nil
+	}
+	prefetcher := &researchSourcePrefetcher{runner: r, events: events}
+	results := make([]researchruntime.PrefetchedSource, 0, len(urls))
+	for index, rawURL := range urls {
+		if ctx.Err() != nil {
+			return results, ctx.Err()
+		}
+		if index >= 4 {
+			results = append(results, researchruntime.PrefetchedSource{URL: rawURL, ErrorCode: "explicit_source_limit"})
+			continue
+		}
+		result, err := prefetcher.Fetch(ctx, rawURL)
+		if err != nil {
+			return results, err
+		}
+		results = append(results, result)
+		if result.Receipt != nil {
+			r.noteResearchReceipt(*result.Receipt)
 		}
 	}
-	finalState, snapshotErr := r.persistCurrentContextSnapshot(ctx, events)
-	if snapshotErr != nil {
-		finalState = nil
+	return results, nil
+}
+
+func (r *Runner) noteResearchReceipt(receipt subagentruntime.HostToolReceipt) {
+	if r == nil || strings.TrimSpace(receipt.ToolName) == "" {
+		return
 	}
-	events.emitTurnDiff(ctx, r.config.Workspace.Root)
-	events.turnFinished(ctx, TerminalReasonCompleted, "")
-	events.runFinished(ctx, answer, finalState, TerminalReasonCompleted)
-	return answer, nil
+	r.researchReceipts = append(r.researchReceipts, receipt)
+}
+
+func (r *Runner) recordResearchToolReceipt(result ToolExecutionResult) {
+	if r == nil || r.config.ResearchIntent == nil || result.IsError {
+		return
+	}
+	if result.Name != "WebFetch" && result.Name != "Read" {
+		return
+	}
+	details := researchReceiptDetails(result.Name, result.Outcome.Details)
+	if result.Name == "WebFetch" && strings.TrimSpace(fmt.Sprint(details["content_sha256"])) == "" {
+		return
+	}
+	if result.Name == "Read" && strings.TrimSpace(fmt.Sprint(details["sha256"])) == "" {
+		return
+	}
+	r.noteResearchReceipt(subagentruntime.HostToolReceipt{
+		ToolCallID: result.ToolCallID,
+		ToolName:   result.Name,
+		Details:    details,
+	})
+}
+
+func (r *Runner) collectResearchReceipts() []subagentruntime.HostToolReceipt {
+	out := append([]subagentruntime.HostToolReceipt(nil), r.researchReceipts...)
+	if r.subagentController == nil {
+		return out
+	}
+	for _, task := range r.subagentController.List() {
+		out = append(out, task.HostToolReceipts...)
+	}
+	return out
+}
+
+func (r *Runner) rejectResearchPublish(call convcontext.ToolCall) *ToolExecutionResult {
+	if r == nil || r.config.ResearchIntent == nil || !strings.EqualFold(call.Function.Name, "artifact_publish") {
+		return nil
+	}
+	var params struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal([]byte(call.Function.Arguments), &params); err != nil || strings.TrimSpace(params.Path) == "" {
+		return nil
+	}
+	resolved := r.resolveResearchPublishPath(params.Path)
+	data, err := os.ReadFile(resolved)
+	if err != nil {
+		result := syntheticResearchPublishResult(call, "research_citation_unreadable", "cannot read the file to check verified citations: "+err.Error())
+		return &result
+	}
+	text := researchruntime.ExtractPublishText(resolved, data)
+	if err := researchruntime.ValidateVerifiedCitations(text, r.collectResearchReceipts()); err != nil {
+		result := syntheticResearchPublishResult(call, "research_citation_ungrounded", err.Error())
+		return &result
+	}
+	return nil
+}
+
+func (r *Runner) resolveResearchPublishPath(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return raw
+	}
+	if filepath.IsAbs(raw) {
+		return filepath.Clean(raw)
+	}
+	root := strings.TrimSpace(r.config.Workspace.Root)
+	if root == "" {
+		return filepath.Clean(raw)
+	}
+	return filepath.Join(root, filepath.FromSlash(raw))
+}
+
+func (r *Runner) appendResearchJournal(ctx stdcontext.Context, events *runEventEmitter, kind SemanticKind, payload map[string]any) error {
+	if events == nil {
+		return nil
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	payload["revision"] = r.nextResearchRevision()
+	if strings.TrimSpace(fmt.Sprint(payload["phase"])) == "" {
+		payload["phase"] = researchPhaseForKind(kind)
+	}
+	record := NewSemanticRecord(kind, events.threadID, events.runID, events.turnID(), "", events.sessionID, payload)
+	if events.recorder == nil {
+		return nil
+	}
+	return events.persistDurable(ctx, string(kind), record)
+}
+
+func (r *Runner) nextResearchRevision() int {
+	r.researchRevision++
+	return r.researchRevision
+}
+
+func researchPhaseForKind(kind SemanticKind) string {
+	switch kind {
+	case SemanticKindResearchAccepted:
+		return "accepted"
+	case SemanticKindResearchTerminal:
+		return "terminal"
+	default:
+		return "investigating"
+	}
+}
+
+func syntheticResearchPublishResult(call convcontext.ToolCall, code, message string) ToolExecutionResult {
+	result := ToolExecutionResult{
+		ToolCallID: call.ID,
+		Name:       call.Function.Name,
+		StartedAt:  time.Now().UTC(),
+		Status:     ToolExecutionFailed,
+		IsError:    true,
+		ErrorCode:  code,
+		Content:    message,
+	}
+	result.Outcome = tool.ExecutionOutcome{
+		Content:         message,
+		Status:          tool.OutcomeFailed,
+		ErrorCode:       code,
+		ErrorMessage:    message,
+		Retryable:       true,
+		ErrorCategory:   tool.ErrorCategoryDomain,
+		Operation:       &tool.OperationDescriptor{Type: call.Function.Name, SideEffectState: tool.OutcomeSideEffectNotStarted},
+		RecoveryOptions: []string{"Fetch or read the cited source", "Relabel the citation as 未核实 or 部分核实"},
+	}
+	return finalizeToolResult(result)
 }
 
 type researchSourcePrefetcher struct {
@@ -111,11 +244,11 @@ type researchSourcePrefetcher struct {
 	events *runEventEmitter
 }
 
-func (p *researchSourcePrefetcher) Fetch(ctx stdcontext.Context, url string) (researchruntime.PrefetchedSource, error) {
+func (p *researchSourcePrefetcher) Fetch(ctx stdcontext.Context, rawURL string) (researchruntime.PrefetchedSource, error) {
 	if p == nil || p.runner == nil || p.runner.toolRuntime == nil {
 		return researchruntime.PrefetchedSource{}, fmt.Errorf("research source prefetcher is unavailable")
 	}
-	arguments, err := json.Marshal(map[string]any{"url": url})
+	arguments, err := json.Marshal(map[string]any{"url": rawURL})
 	if err != nil {
 		return researchruntime.PrefetchedSource{}, err
 	}
@@ -131,7 +264,7 @@ func (p *researchSourcePrefetcher) Fetch(ctx stdcontext.Context, url string) (re
 		return researchruntime.PrefetchedSource{}, fmt.Errorf("WebFetch returned no result")
 	}
 	result := results[0]
-	prefetched := researchruntime.PrefetchedSource{URL: url, Content: result.Content}
+	prefetched := researchruntime.PrefetchedSource{URL: rawURL, Content: result.Content}
 	if result.IsError {
 		prefetched.ErrorCode = firstNonEmpty(result.ErrorCode, result.Outcome.ErrorCode, "web_fetch_failed")
 		return prefetched, nil
@@ -142,367 +275,4 @@ func (p *researchSourcePrefetcher) Fetch(ctx stdcontext.Context, url string) (re
 		Details:    researchReceiptDetails(result.Name, result.Outcome.Details),
 	}
 	return prefetched, nil
-}
-
-func compactFailedNotes(values []string) []string {
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		note := strings.TrimSpace(value)
-		if note == "" {
-			continue
-		}
-		runes := []rune(note)
-		if len(runes) > 160 {
-			note = string(runes[:160]) + "…"
-		}
-		out = append(out, note)
-	}
-	return out
-}
-
-type researchChildClient struct {
-	controller subagentruntime.Controller
-	threadID   string
-	runID      string
-	turnID     string
-}
-
-func (c *researchChildClient) Run(ctx stdcontext.Context, spec researchruntime.ChildSpec) (researchruntime.ChildResult, error) {
-	if c == nil || c.controller == nil {
-		return researchruntime.ChildResult{}, fmt.Errorf("research child controller is unavailable")
-	}
-	if ctx.Err() != nil {
-		return researchruntime.ChildResult{}, ctx.Err()
-	}
-	host := spec.Host
-	if host == nil {
-		host = researchruntime.ChildHostSpawnOptions(researchruntime.SourceBoth)
-	}
-	snapshot, err := c.controller.SpawnFromHost(ctx, subagentruntime.SpawnRequest{
-		Description:   spec.Description,
-		Prompt:        spec.Prompt,
-		AgentType:     spec.AgentType,
-		WorkspaceMode: subagentruntime.WorkspaceSharedReadOnly,
-		ParentAgentID: "root",
-		ThreadID:      c.threadID,
-		RunID:         c.runID,
-		TurnID:        c.turnID,
-		Host:          host,
-	})
-	if err != nil {
-		return researchruntime.ChildResult{}, err
-	}
-	for {
-		if ctx.Err() != nil {
-			_, _ = c.controller.Cancel(ctx, snapshot.TaskID, "research_stop")
-			return researchruntime.ChildResult{}, ctx.Err()
-		}
-		wait, waitErr := c.controller.Wait(ctx, subagentruntime.WaitRequest{
-			TaskIDs:    []string{snapshot.TaskID},
-			ReturnWhen: "all",
-			Timeout:    60 * time.Second,
-		})
-		if waitErr != nil {
-			return researchruntime.ChildResult{}, waitErr
-		}
-		if wait.RetrievalStatus != subagentruntime.RetrievalCompleted || len(wait.Tasks) == 0 {
-			continue
-		}
-		task := wait.Tasks[0]
-		switch task.Status {
-		case subagentruntime.StatusCompleted:
-			output := task.ResultContent
-			if output == "" {
-				output = task.ResultPreview
-			} // legacy/stub child adapter
-			return researchruntime.ChildResult{AgentID: task.AgentID, TaskID: task.TaskID, AttemptID: task.AttemptID, Output: output, Receipts: task.HostToolReceipts}, nil
-		case subagentruntime.StatusCancelled, subagentruntime.StatusInterrupted:
-			return researchruntime.ChildResult{}, stdcontext.Canceled
-		default:
-			msg := strings.TrimSpace(task.ErrorMessage)
-			if msg == "" {
-				msg = string(task.Status)
-			}
-			return researchruntime.ChildResult{}, fmt.Errorf("%s", msg)
-		}
-	}
-}
-
-type researchPlanWriter struct {
-	service  tool.RunPlanService
-	identity tool.ToolExecutionIdentity
-	version  uint64
-}
-
-func (w *researchPlanWriter) Apply(ctx stdcontext.Context, items []researchruntime.PlanItem) error {
-	if w == nil || w.service == nil {
-		return nil
-	}
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
-	update := tool.RunPlanUpdate{
-		Explanation: "deep research",
-		BaseVersion: w.version,
-		Items:       make([]tool.RunPlanItem, 0, len(items)),
-	}
-	for _, item := range items {
-		update.Items = append(update.Items, tool.RunPlanItem{
-			Step:       item.Step,
-			ActiveForm: researchActiveForm(item.Step, item.Status),
-			Status:     tool.RunPlanStatus(item.Status),
-		})
-	}
-	result, err := w.service.ApplyUpdate(ctx, w.identity, update)
-	if err != nil {
-		return err
-	}
-	w.version = result.Snapshot.Version
-	return nil
-}
-
-func researchActiveForm(step, status string) string {
-	verb := strings.TrimSpace(step)
-	switch tool.RunPlanStatus(status) {
-	case tool.RunPlanInProgress:
-		return "正在" + verb
-	case tool.RunPlanCompleted:
-		return "已完成" + verb
-	default:
-		return "等待" + verb
-	}
-}
-
-type researchPublisher struct {
-	runner *Runner
-	events *runEventEmitter
-}
-
-func (p *researchPublisher) Publish(ctx stdcontext.Context, markdown string) (string, string, error) {
-	if p == nil || p.runner == nil || p.runner.toolRuntime == nil {
-		return "", "", fmt.Errorf("research publisher is unavailable")
-	}
-	if ctx.Err() != nil {
-		return "", "", ctx.Err()
-	}
-	runID := strings.TrimSpace(p.runner.runID)
-	relPath := filepath.ToSlash(filepath.Join("output", "research-"+runID+".md"))
-	writeArgs, err := json.Marshal(map[string]any{"file_path": relPath, "content": markdown})
-	if err != nil {
-		return "", "", err
-	}
-	writeResults := p.runner.executeToolCalls(ctx, []convcontext.ToolCall{{
-		ID:   convcontext.GenerateToolCallID(),
-		Type: "function",
-		Function: convcontext.FunctionCall{
-			Name:      "Write",
-			Arguments: string(writeArgs),
-		},
-	}}, p.events)
-	if len(writeResults) == 0 || writeResults[0].IsError {
-		msg := "write research report failed"
-		if len(writeResults) > 0 && strings.TrimSpace(writeResults[0].Content) != "" {
-			msg = writeResults[0].Content
-		}
-		return "", "", fmt.Errorf("%s", msg)
-	}
-	if ctx.Err() != nil {
-		return "", "", ctx.Err()
-	}
-	publishArgs, err := json.Marshal(map[string]any{"path": relPath, "title": "Deep Research Report"})
-	if err != nil {
-		return "", "", err
-	}
-	publishResults := p.runner.executeToolCalls(ctx, []convcontext.ToolCall{{
-		ID:   convcontext.GenerateToolCallID(),
-		Type: "function",
-		Function: convcontext.FunctionCall{
-			Name:      "artifact_publish",
-			Arguments: string(publishArgs),
-		},
-	}}, p.events)
-	if len(publishResults) == 0 || publishResults[0].IsError {
-		msg := "publish research report failed"
-		if len(publishResults) > 0 && strings.TrimSpace(publishResults[0].Content) != "" {
-			msg = publishResults[0].Content
-		}
-		return "", "", fmt.Errorf("%s", msg)
-	}
-	artifactID := ""
-	if len(publishResults[0].Outcome.Artifacts) > 0 {
-		artifactID = publishResults[0].Outcome.Artifacts[0].ID
-	}
-	return relPath, artifactID, nil
-}
-
-type researchSynthesizer struct {
-	runner *Runner
-}
-
-func (s *researchSynthesizer) Synthesize(ctx stdcontext.Context, prompt string) (string, error) {
-	if s == nil || s.runner == nil {
-		return "", fmt.Errorf("research synthesizer is unavailable")
-	}
-	if ctx.Err() != nil {
-		return "", ctx.Err()
-	}
-	model := strings.TrimSpace(s.runner.config.ModelConfig.Model)
-	if model == "" {
-		return "", fmt.Errorf("synthesis model is unavailable")
-	}
-	req := LLMRequest{Model: model, Temperature: s.runner.config.ModelConfig.Temperature, MaxTokens: s.runner.config.ModelConfig.MaxTokens}
-	capacity := s.runner.config.ModelConfig.ContextWindow
-	if maxInput := s.runner.config.ModelConfig.MaxInputTokens; maxInput > 0 && (capacity <= 0 || maxInput < capacity) {
-		capacity = maxInput
-	}
-	response, err := InvokeRecordedModel(ctx, ModelCallAuthority{
-		ThreadID: s.runner.threadID, RunID: s.runner.runID, SessionID: s.runner.sessionID,
-		Recorder: s.runner.recorder, MaxInputTokens: capacity,
-	}, s.runner.transportConfig(req), llm.Request{
-		RequestID:    newAwakenID("research_synth"),
-		SystemPrompt: "Return JSON only. Do not call tools or invent citation IDs.",
-		UserPrompt:   prompt, Model: model,
-		MaxTokens:       s.runner.config.ModelConfig.MaxTokens,
-		ReasoningPolicy: s.runner.config.ModelConfig.ReasoningEffort,
-		Purpose:         llm.RequestPurposeResearchSynthesis, AffinityScopeID: s.runner.threadID,
-	}, 0, false)
-	if err != nil {
-		return "", err
-	}
-	return response.Content, nil
-}
-
-type researchJournal struct {
-	runner   *Runner
-	events   *runEventEmitter
-	revision int
-	ledger   map[string]any
-}
-
-func (j *researchJournal) Append(ctx stdcontext.Context, kind string, payload map[string]any) error {
-	if j == nil || j.events == nil {
-		return nil
-	}
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
-	semanticKind, ok := researchSemanticKind(kind)
-	if !ok {
-		return nil
-	}
-	nextRevision := j.revision + 1
-	nextPayload := cloneResearchMap(payload)
-	if nextPayload == nil {
-		nextPayload = map[string]any{}
-	}
-	nextPayload["revision"] = nextRevision
-	nextPayload["phase"] = researchPhaseForKind(semanticKind)
-	nextLedger := cloneResearchMap(j.ledger)
-	if nextLedger == nil {
-		nextLedger = map[string]any{
-			"schema_version": 1,
-			"run_id":         j.events.runID,
-			"thread_id":      j.events.threadID,
-		}
-	}
-	for key, value := range nextPayload {
-		nextLedger[key] = value
-	}
-	record := NewSemanticRecord(semanticKind, j.events.threadID, j.events.runID, j.events.turnID(), "", j.events.sessionID, nextPayload)
-	if j.events.recorder == nil {
-		j.revision = nextRevision
-		j.ledger = nextLedger
-		writeResearchLedger(j.runner, nextLedger)
-		return nil
-	}
-	if err := j.events.persistDurable(ctx, kind, record); err != nil {
-		return err
-	}
-	j.revision = nextRevision
-	j.ledger = nextLedger
-	writeResearchLedger(j.runner, nextLedger)
-	return nil
-}
-
-func cloneResearchMap(source map[string]any) map[string]any {
-	if source == nil {
-		return nil
-	}
-	cloned := make(map[string]any, len(source))
-	for key, value := range source {
-		cloned[key] = value
-	}
-	return cloned
-}
-
-func researchSemanticKind(kind string) (SemanticKind, bool) {
-	switch strings.TrimSpace(kind) {
-	case string(SemanticKindResearchAccepted):
-		return SemanticKindResearchAccepted, true
-	case string(SemanticKindResearchPlan):
-		return SemanticKindResearchPlan, true
-	case string(SemanticKindResearchClaimBatch):
-		return SemanticKindResearchClaimBatch, true
-	case string(SemanticKindResearchVerification):
-		return SemanticKindResearchVerification, true
-	case string(SemanticKindResearchReport):
-		return SemanticKindResearchReport, true
-	case string(SemanticKindResearchTerminal):
-		return SemanticKindResearchTerminal, true
-	default:
-		return "", false
-	}
-}
-
-func researchPhaseForKind(kind SemanticKind) string {
-	switch kind {
-	case SemanticKindResearchAccepted:
-		return "accepted"
-	case SemanticKindResearchPlan:
-		return "planning"
-	case SemanticKindResearchClaimBatch:
-		return "researching"
-	case SemanticKindResearchVerification:
-		return "verifying"
-	case SemanticKindResearchReport:
-		return "reporting"
-	case SemanticKindResearchTerminal:
-		return "terminal"
-	default:
-		return ""
-	}
-}
-
-func writeResearchLedger(runner *Runner, payload map[string]any) {
-	if runner == nil {
-		return
-	}
-	home := desktopdata.AwakenHomeRoot()
-	if strings.TrimSpace(home) == "" || strings.TrimSpace(runner.threadID) == "" || strings.TrimSpace(runner.runID) == "" {
-		return
-	}
-	path := desktopdata.ResearchLedgerPath(home, runner.threadID, runner.runID)
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return
-	}
-	encoded, err := json.Marshal(payload)
-	if err != nil {
-		return
-	}
-	tmp := path + ".tmp"
-	file, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
-	if err != nil {
-		return
-	}
-	if _, err := file.Write(encoded); err != nil {
-		_ = file.Close()
-		_ = os.Remove(tmp)
-		return
-	}
-	_ = file.Sync()
-	if err := file.Close(); err != nil {
-		_ = os.Remove(tmp)
-		return
-	}
-	_ = os.Rename(tmp, path)
 }

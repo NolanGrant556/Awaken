@@ -282,9 +282,10 @@ func (m *Manager) Spawn(ctx context.Context, request SpawnRequest) (TaskSnapshot
 	return snapshot, nil
 }
 
-// SpawnFromHost is the host-owned spawn entry used by Deep Research and the
-// model-visible subagent tool. It writes the same subagent_spawned record as
-// Spawn and does not change the model schema.
+// SpawnFromHost is the host-owned spawn entry used by Skill fork and other
+// host workflows. Deep Research investigators use the ordinary subagent tool
+// instead. It writes the same subagent_spawned record as Spawn and does not
+// change the model schema.
 func (m *Manager) SpawnFromHost(ctx context.Context, request SpawnRequest) (TaskSnapshot, error) {
 	request.ParentAgentID = firstNonBlank(request.ParentAgentID, "root")
 	return m.Spawn(ctx, request)

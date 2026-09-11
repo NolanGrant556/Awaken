@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"awaken/src/subagentruntime"
 )
 
 var explicitHTTPSURLPattern = regexp.MustCompile(`https://[^\s<>"'，。；！？、（）【】]+`)
@@ -26,12 +28,7 @@ const (
 	DefaultBreadth       = 4
 	MinBreadth           = 2
 	MaxBreadth           = 4
-	MaxQueryRunes        = 4000
-	MaxClaimsPerQuestion = 6
-	MaxClaimsTotal       = 24
-	MaxEvidenceTotal     = 48
-	ChildMaxThoughts     = 12
-	ChildMaxToolCalls    = 16
+	MaxQueryRunes = 4000
 )
 
 type SourceHint string
@@ -46,6 +43,13 @@ type Intent struct {
 	Query      string
 	Breadth    int
 	SourceHint SourceHint
+}
+
+type PrefetchedSource struct {
+	URL       string
+	Content   string
+	ErrorCode string
+	Receipt   *subagentruntime.HostToolReceipt
 }
 
 type ComposerToken struct {

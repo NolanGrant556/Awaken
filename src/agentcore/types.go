@@ -190,9 +190,12 @@ type AgentConfig struct {
 	// ToolRuntime is wired with a ComputerExecutor. nil disables Computer Use.
 	ComputerRuntime *computer.Runtime
 	// ResearchIntent is a run-scoped host binding for Deep Research. When
-	// set, the root runner hands control to researchruntime before the free
-	// thought loop. Child configs never inherit it.
+	// set, the root runner stays in the free thought loop and injects the
+	// research-team contract. Child configs never inherit it.
 	ResearchIntent *researchruntime.Intent
+	// ResearchPrefetch is host-fetched user URL evidence for the current
+	// research run. It is untrusted page data, not instructions.
+	ResearchPrefetch []researchruntime.PrefetchedSource
 }
 
 type ToolResultOffloadReceipt struct {

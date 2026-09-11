@@ -1131,16 +1131,11 @@ func researchPhaseFromKind(kind agentcore.SemanticKind) string {
 	switch kind {
 	case agentcore.SemanticKindResearchAccepted:
 		return "accepted"
-	case agentcore.SemanticKindResearchPlan:
-		return "planning"
-	case agentcore.SemanticKindResearchClaimBatch:
-		return "researching"
-	case agentcore.SemanticKindResearchVerification:
-		return "verifying"
-	case agentcore.SemanticKindResearchReport:
-		return "reporting"
 	case agentcore.SemanticKindResearchTerminal:
 		return "terminal"
+	case agentcore.SemanticKindResearchPlan, agentcore.SemanticKindResearchClaimBatch,
+		agentcore.SemanticKindResearchVerification, agentcore.SemanticKindResearchReport:
+		return "investigating"
 	default:
 		return ""
 	}

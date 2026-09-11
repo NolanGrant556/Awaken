@@ -37,7 +37,7 @@ Awaken 是一个本地优先的桌面智能体产品。它以 Awaken Desktop 为
 | 移动端 | 当前不支持；已确认目标设计为 Desktop/Core 继续拥有本机执行与耐久事实，手机通过受控 Gateway 与可自托管 relay 查看和控制任务，不直接连接或暴露 loopback Core | [13 移动端](#13_移动端) |
 | 插件 | Desktop 以自动校验/digest 锁定安装管理 Agent Plugins 1.0.0、Codex、Claude Code、Cursor user-scope ZIP 包，并把随 Desktop 发布、默认关闭且不可卸载的 Awaken 内置插件投影到独立页签；首个内置插件为带官方图标和中文 Skills 的 Outlook 邮箱。统一控制台展示 Skills、MCP、Rules、Agents、Commands、Hooks、Variables、Apps，并把可运行组件接入现有 Skill/MCP/instructions/Hook/Subagent runtime。安装入口只接受点击选择或拖入的本地 ZIP，同名插件自动安全替换，不提供 URL/Git 安装、Marketplace 或插件目录聚合；另支持组件与 tool override、Variable/Secret、插件 OAuth/Device/MCP OAuth、宿主 CLI/host Connector 引用、Hook 回执、Plugin Agent/Command/Rule Composer token、升级迁移、Trash 与 run generation lease。插件进程默认保持当前用户完全访问，但不能读取宿主或其他插件凭据。Codex Apps 仍只识别不运行；project scope、跨重启 Hook receipt 索引和 Windows/Linux 实机仍不支持或未验收 | [14 插件](#14_插件) |
 | 编码工作台 | 当前不支持；已确认目标设计为 checkpoint 式代码撤回、右侧栏“变更”diff 面板、typed 只读 `git_workspace` 工具与 Git 状态条、内置 Git 防护 Hook preset，以及项目 `.awaken/coding.json` 编码环境契约；当前可用的编码相关底座（typed 文件工具、`Bash`、`git_remote`、Subagent `git_worktree`）仍由 04/02 域拥有 | [15 编码工作台](#15_编码工作台) |
-| 深度研究 | Workbench `@deep-research`（`@研究`）已支持宿主编排的只读多源研究报告（公开 HTTPS 网页 + 当前工作区），固定走规划/调研/核验/报告四阶段，以成功的 `Read`/`WebFetch` 回执约束证据并输出 Verified/Partial 报告卡；显式 URL 由宿主按原值抓取，逐跳 SSRF 检查 fail closed。任意远程 Git clone、用户 Skill 编排和不经 `WebFetch` 的 URL 核验不在范围 | [16 深度研究](#16_深度研究) |
+| 深度研究 | Workbench `@deep-research`（`@研究`）已支持主 Agent 组队调研：普通 general 分 Agent 取证，主编审稿后用 bundled Office Skill 发布 Word/Excel/PPT/PDF 或 Markdown；显式 URL 由宿主按原值预取，发布前「已核实」出处必须对上本 run 的 `Read`/`WebFetch` 回执，逐跳 SSRF fail closed。任意远程 Git clone、用户 Skill 覆盖入口、不经回执的已核实标法不在范围 | [16 深度研究](#16_深度研究) |
 
 功能文档按“板块 → 功能”组织，每个功能只保留《需求文档》和《实现方案》。下面列出全部功能入口；需求说明用户行为与限制，实现说明代码、数据、接口、恢复和验证。
 

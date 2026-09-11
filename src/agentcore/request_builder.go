@@ -7,6 +7,7 @@ import (
 
 	convcontext "awaken/src/context"
 	"awaken/src/prompt"
+	"awaken/src/researchruntime"
 	"awaken/src/tool"
 )
 
@@ -24,6 +25,9 @@ const conversationContinuityBlockID = "conversation_continuity"
 
 func NewRequestBuilder(config AgentConfig) *RequestBuilder {
 	config.ComposerSkillSelection = cloneComposerSkillSelectionContext(config.ComposerSkillSelection)
+	if len(config.ResearchPrefetch) > 0 {
+		config.ResearchPrefetch = append([]researchruntime.PrefetchedSource(nil), config.ResearchPrefetch...)
+	}
 	return &RequestBuilder{
 		config:      config,
 		runtimeInfo: prompt.NewRuntimeInfo(),
@@ -48,6 +52,13 @@ func (rb *RequestBuilder) UpdateRuntimeInfo(info prompt.RuntimeInfo) {
 // pure consumer of the callback, like MemoryContextProvider.
 func (rb *RequestBuilder) UpdateRunPlanContextProvider(provider func() (string, error)) {
 	rb.config.RunPlanContextProvider = provider
+}
+
+func (rb *RequestBuilder) SetResearchPrefetch(sources []researchruntime.PrefetchedSource) {
+	if rb == nil {
+		return
+	}
+	rb.config.ResearchPrefetch = append([]researchruntime.PrefetchedSource(nil), sources...)
 }
 
 func (rb *RequestBuilder) Build(ctx ContextProvider, tools []tool.ToolSchema) LLMRequest {
@@ -211,6 +222,14 @@ func (rb *RequestBuilder) BuildContextEnvelope(ctx ContextProvider, tools []tool
 		envelope.SystemContextItems = append(envelope.SystemContextItems, item)
 		envelope.EpochSources = append(envelope.EpochSources, ContextEpochSourceCandidate{
 			SourceKey: item.ID, Kind: ContextContributionSkillActivation, Content: item.Content, State: ContextEpochSourceUpdated,
+		})
+	}
+	if block, ok := hostResearchTeamBlock(rb.config.ResearchIntent, rb.config.ResearchPrefetch); ok {
+		block.Kind = ContextContributionRuntimeContext
+		envelope.SystemBlocks = append(envelope.SystemBlocks, block)
+		envelope.SystemContextItems = append(envelope.SystemContextItems, ContextItem{ID: block.ID, Type: "research_team", Content: block.Content})
+		envelope.EpochSources = append(envelope.EpochSources, ContextEpochSourceCandidate{
+			SourceKey: block.ID, Kind: ContextContributionRuntimeContext, Content: block.Content, State: ContextEpochSourceUpdated,
 		})
 	}
 	continuityBlock := hostConversationContinuityBlock()

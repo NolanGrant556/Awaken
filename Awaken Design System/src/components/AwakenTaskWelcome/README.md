@@ -16,7 +16,7 @@
 
 ## 规则
 
-- 固定使用设计系统 `logo-wordmark.svg` 矢量字标，呈现无底色的黑色几何 wordmark；欢迎区默认宽 220px，窄屏 200px。不接受外部 `logoSrc`。
+- 固定使用设计系统 `logo-wordmark.svg` 矢量字标，呈现无底色的黑色几何 wordmark；欢迎区默认宽 220px，窄屏 200px。不接受外部 `logoSrc`。字标是静态装饰，关闭浏览器默认图片拖拽，不能被拖出页面。
 - 默认文案是 `把任务交给 Awaken，自主执行，唤醒自由。`。
 - 保持 UI-only，不访问 runtime、Electron、AG-UI、A2UI、SSE 或文件系统。
 - 父级负责决定组件何时出现；运行开始后不应继续保留在执行叙事里。

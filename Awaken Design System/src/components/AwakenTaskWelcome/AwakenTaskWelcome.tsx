@@ -14,7 +14,13 @@ export function AwakenTaskWelcome({
 
   return (
     <section className={classNames} aria-label="Awaken task welcome">
-      <img className="aw-task-welcome__logo" src={logo} alt="" aria-hidden="true" />
+      <img
+        className="aw-task-welcome__logo"
+        src={logo}
+        alt=""
+        aria-hidden="true"
+        draggable={false}
+      />
       <p className="aw-task-welcome__message">{message}</p>
     </section>
   );

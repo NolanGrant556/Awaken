@@ -155,7 +155,7 @@ describe("Desktop composition boundaries", () => {
     expect(stopAll).toHaveBeenCalledTimes(1);
   });
 
-  it("collapses the inspector when switching away from an existing thread", async () => {
+  it("keeps inspector expand per thread and does not carry it to the next session", async () => {
     let files!: ReturnType<typeof useFileWorkspaceSession>;
     function Harness({ threadId }: { threadId?: string }) {
       const panels = useWorkbenchPanels(
@@ -190,6 +190,8 @@ describe("Desktop composition boundaries", () => {
     await act(async () => root.render(<Harness threadId="thread-b" />));
     expect(files.inspectorCollapsed).toBe(true);
     expect(files.fileWorkspaceExpanded).toBe(false);
+    await act(async () => root.render(<Harness threadId="thread-a" />));
+    expect(files.inspectorCollapsed).toBe(false);
   });
 
   it("does not collapse the inspector when a new thread first receives an id", async () => {

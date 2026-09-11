@@ -6,7 +6,7 @@ const PLUGIN_ERROR_MESSAGES: Record<string, string> = {
   PLUGIN_RECORDED_DIGEST_CHANGED: "插件记录的摘要与当前状态不一致",
   PLUGIN_TRASH_UNAVAILABLE: "系统回收站当前不可用，操作已取消",
   BUILTIN_PLUGIN_IMMUTABLE: "内置插件由 Awaken 管理，不能替换、编辑或卸载",
-  RUNTIME_GENERATION_IN_USE: "插件正在被运行任务使用，请等待或取消任务后重试",
+  RUNTIME_GENERATION_IN_USE: "当前任务正在使用这个插件，请等待或取消任务后重试",
   COMPONENT_NOT_SWITCHABLE: "此组件当前不可切换",
   MCP_TOOL_NOT_FOUND: "MCP 工具不存在或已经变化",
   MCP_SOURCE_INVALID: "MCP 源文件格式不符合要求",

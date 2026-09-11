@@ -200,12 +200,6 @@ func (s *Store) withLock(fn func() error) error {
 
 func (s *Store) withMutationLock(fn func() error) error {
 	return s.withLock(func() error {
-		s.leaseMu.Lock()
-		active := len(s.activeLeases)
-		s.leaseMu.Unlock()
-		if active > 0 {
-			return fmt.Errorf("%w: %d active run lease(s); cancel or finish them before changing plugins", ErrRuntimeLeaseActive, active)
-		}
 		if err := s.recoverPendingOperationsLocked(); err != nil {
 			return err
 		}
@@ -213,7 +207,34 @@ func (s *Store) withMutationLock(fn func() error) error {
 	})
 }
 
-func (s *Store) AcquireRuntimeLease() (RuntimeLease, error) {
+func (s *Store) withPluginMutationLock(name string, fn func() error) error {
+	name = strings.TrimSpace(name)
+	return s.withMutationLock(func() error {
+		if err := s.rejectIfLeased(name); err != nil {
+			return err
+		}
+		return fn()
+	})
+}
+
+func (s *Store) rejectIfLeased(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil
+	}
+	s.leaseMu.Lock()
+	defer s.leaseMu.Unlock()
+	for _, lease := range s.activeLeases {
+		for _, leased := range lease.Plugins {
+			if leased == name {
+				return fmt.Errorf("%w: plugin %s is in use by an active run; cancel or finish it before changing this plugin", ErrRuntimeLeaseActive, name)
+			}
+		}
+	}
+	return nil
+}
+
+func (s *Store) AcquireRuntimeLease(pluginNames []string) (RuntimeLease, error) {
 	if s == nil {
 		return RuntimeLease{}, ErrHomeRequired
 	}
@@ -223,14 +244,17 @@ func (s *Store) AcquireRuntimeLease() (RuntimeLease, error) {
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return RuntimeLease{}, err
 	}
-	encoded, err := json.Marshal(state)
+	names := canonicalizeLeasePluginNames(state, pluginNames)
+	if len(names) == 0 {
+		return RuntimeLease{}, nil
+	}
+	generation, err := pluginGenerationForNames(state, names)
 	if err != nil {
 		return RuntimeLease{}, err
 	}
-	generation := sha256.Sum256(encoded)
 	s.leaseMu.Lock()
 	s.nextLeaseID++
-	lease := RuntimeLease{ID: fmt.Sprintf("pluginlease_%d", s.nextLeaseID), Generation: fmt.Sprintf("sha256:%x", generation[:])}
+	lease := RuntimeLease{ID: fmt.Sprintf("pluginlease_%d", s.nextLeaseID), Generation: generation, Plugins: names}
 	s.activeLeases[lease.ID] = lease
 	s.leaseMu.Unlock()
 	return lease, nil
@@ -252,6 +276,81 @@ func (s *Store) ActiveRuntimeLeases() int {
 	s.leaseMu.Lock()
 	defer s.leaseMu.Unlock()
 	return len(s.activeLeases)
+}
+
+func canonicalizeLeasePluginNames(state StateFile, pluginNames []string) []string {
+	installed := make([]string, 0, len(state.Plugins))
+	for name := range state.Plugins {
+		installed = append(installed, name)
+	}
+	sort.Strings(installed)
+	seen := map[string]struct{}{}
+	var names []string
+	add := func(name string) {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return
+		}
+		if _, ok := seen[name]; ok {
+			return
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+	for _, candidate := range pluginNames {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		if _, ok := state.Plugins[candidate]; ok {
+			add(candidate)
+			continue
+		}
+		resolved := ""
+		if strings.HasPrefix(candidate, PluginIdentityPrefix) {
+			for _, name := range installed {
+				prefix := PluginIdentityPrefix + strings.ReplaceAll(name, ".", "-") + "__"
+				if strings.HasPrefix(candidate, prefix) {
+					resolved = name
+					break
+				}
+			}
+		}
+		if resolved == "" {
+			for _, name := range installed {
+				if strings.ReplaceAll(name, ".", "-") == candidate {
+					resolved = name
+					break
+				}
+			}
+		}
+		if resolved != "" {
+			add(resolved)
+			continue
+		}
+		add(candidate)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func pluginGenerationForNames(state StateFile, names []string) (string, error) {
+	pins := make([]struct {
+		Name   string `json:"name"`
+		Digest string `json:"digest"`
+	}, 0, len(names))
+	for _, name := range names {
+		pins = append(pins, struct {
+			Name   string `json:"name"`
+			Digest string `json:"digest"`
+		}{Name: name, Digest: state.Plugins[name].Digest})
+	}
+	encoded, err := json.Marshal(pins)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(encoded)
+	return fmt.Sprintf("sha256:%x", sum[:]), nil
 }
 
 func (s *Store) readStateUnlocked() (StateFile, error) {
@@ -725,7 +824,7 @@ func (s *Store) PluginMCPServers() []mcpclient.ScopedMcpServerConfig {
 // SetEnabled toggles the whole plugin.
 func (s *Store) SetEnabled(name string, enabled bool) (*InstalledPlugin, error) {
 	var plugin *InstalledPlugin
-	err := s.withMutationLock(func() error {
+	err := s.withPluginMutationLock(name, func() error {
 		state, err := s.readStateUnlocked()
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
@@ -755,7 +854,7 @@ func (s *Store) SetEnabled(name string, enabled bool) (*InstalledPlugin, error) 
 // SetServerEnabled toggles one MCP server inside an installed plugin.
 func (s *Store) SetServerEnabled(name, shortName string, enabled bool) (*InstalledPlugin, error) {
 	var plugin *InstalledPlugin
-	err := s.withMutationLock(func() error {
+	err := s.withPluginMutationLock(name, func() error {
 		state, err := s.readStateUnlocked()
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err

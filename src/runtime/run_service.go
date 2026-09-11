@@ -240,7 +240,7 @@ type RunService struct {
 	pluginHookReceipts      *hookruntime.ReceiptStore
 	asyncHookCompletions    *hookruntime.AsyncCompletionStore
 	pluginAgentResolver     func(name, digest, logicalID string) (PluginAgentSelection, error)
-	pluginLeaseAcquire      func() (generation string, release func(), err error)
+	pluginLeaseAcquire      func(pluginNames []string) (generation string, release func(), err error)
 	// computerDriverFactory creates a real Computer driver when local CUA is
 	// enabled. If nil or it returns an error, RunService falls back to the
 	// unavailable driver so run startup is not blocked.
@@ -356,7 +356,7 @@ func (s *RunService) SetPluginAgentResolver(resolver func(name, digest, logicalI
 	s.mu.Unlock()
 }
 
-func (s *RunService) SetPluginRuntimeLeaseProvider(acquire func() (generation string, release func(), err error)) {
+func (s *RunService) SetPluginRuntimeLeaseProvider(acquire func(pluginNames []string) (generation string, release func(), err error)) {
 	if s == nil {
 		return
 	}
@@ -1164,12 +1164,6 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	pluginGeneration := ""
 	pluginLeaseRelease := func() {}
 	pluginLeaseTransferred := false
-	if pluginLeaseAcquire != nil {
-		pluginGeneration, pluginLeaseRelease, err = pluginLeaseAcquire()
-		if err != nil {
-			return Run{}, fmt.Errorf("acquire Plugin runtime generation: %w", err)
-		}
-	}
 	defer func() {
 		if !pluginLeaseTransferred {
 			pluginLeaseRelease()
@@ -1214,6 +1208,16 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	resolvedComposerTokens, err = resolvePluginAgentTokens(resolvedComposerTokens, pluginAgentResolver)
 	if err != nil {
 		return Run{}, err
+	}
+	if pluginLeaseAcquire != nil {
+		bound := collectBoundPluginNames(resolvedComposerTokens, hookSnapshot, pluginRuleSources)
+		pluginGeneration, pluginLeaseRelease, err = pluginLeaseAcquire(bound)
+		if err != nil {
+			return Run{}, fmt.Errorf("acquire Plugin runtime generation: %w", err)
+		}
+		if pluginLeaseRelease == nil {
+			pluginLeaseRelease = func() {}
+		}
 	}
 	instructionSnapshot := s.instructionLoader.LoadWithExtraSources(workspace.WorkspaceRoot, workspace.SessionWorkspace, pluginRuleSources)
 	canonicalFileComments, err := validateFileLineComments(req.FileComments, workspace)

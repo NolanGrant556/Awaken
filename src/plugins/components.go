@@ -492,7 +492,7 @@ func componentResources(root, relative string) []string {
 
 func (s *Store) SetComponentDesired(name, logicalID string, enabled bool) (*InstalledPlugin, error) {
 	var plugin *InstalledPlugin
-	err := s.withMutationLock(func() error {
+	err := s.withPluginMutationLock(name, func() error {
 		state, err := s.readStateUnlocked()
 		if err != nil && !os.IsNotExist(err) {
 			return err
@@ -546,7 +546,7 @@ func (s *Store) SetMCPToolEnabled(name, logicalID, toolName string, enabled bool
 		return nil, fmt.Errorf("%w: empty tool name", ErrToolNotFound)
 	}
 	var plugin *InstalledPlugin
-	err := s.withMutationLock(func() error {
+	err := s.withPluginMutationLock(name, func() error {
 		state, err := s.readStateUnlocked()
 		if err != nil && !os.IsNotExist(err) {
 			return err
@@ -603,7 +603,7 @@ func (s *Store) SetRuleActivation(name, logicalID, activation string) (*Installe
 		return nil, fmt.Errorf("invalid Rule activation %q", activation)
 	}
 	var plugin *InstalledPlugin
-	err := s.withMutationLock(func() error {
+	err := s.withPluginMutationLock(name, func() error {
 		state, err := s.readStateUnlocked()
 		if err != nil && !os.IsNotExist(err) {
 			return err
@@ -729,7 +729,7 @@ func firstNonEmptyString(values ...string) string {
 }
 
 func (s *Store) UpdateConfiguration(name string, values map[string]any, reset []string) ([]VariableField, error) {
-	err := s.withMutationLock(func() error {
+	err := s.withPluginMutationLock(name, func() error {
 		type secretMutation struct {
 			key, ref, oldValue string
 			hadOld             bool

@@ -72,6 +72,9 @@ func (s *Store) recoverPendingOperationsLocked() error {
 			return fmt.Errorf("invalid plugin recovery at %s: %w", root, err)
 		}
 		if err := s.recoverPluginRollback(root, record); err != nil {
+			if errors.Is(err, ErrRuntimeLeaseActive) {
+				continue
+			}
 			return fmt.Errorf("plugin recovery pending at %s: %w", root, err)
 		}
 		if err := os.RemoveAll(root); err != nil {
@@ -91,6 +94,9 @@ func (s *Store) recoverPluginRollback(root string, record pluginRollback) error 
 	}
 	live := filepath.Join(s.packagesRoot, record.Name)
 	backup := filepath.Join(root, record.PackageBackup)
+	if err := s.rejectIfLeased(record.Name); err != nil {
+		return err
+	}
 	if err := s.rejectUncontrolledPath(live); err != nil {
 		return err
 	}

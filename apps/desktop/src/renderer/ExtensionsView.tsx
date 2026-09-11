@@ -824,12 +824,14 @@ export function ExtensionsView({
   const [installingPlugin, setInstallingPlugin] = useState(false);
   const [selectedPlugin, setSelectedPlugin] = useState<RuntimePlugin | null>(null);
   const [pendingPluginUninstall, setPendingPluginUninstall] = useState<RuntimePlugin | null>(null);
+  const [pluginUninstallError, setPluginUninstallError] = useState<string | null>(null);
   const [busyPluginName, setBusyPluginName] = useState<string | null>(null);
 
   useEffect(() => {
     setSelectedPlugin(null);
     setPluginDialogOpen(false);
     setPendingPluginUninstall(null);
+    setPluginUninstallError(null);
   }, [navigationEpoch]);
 
   useEffect(() => {
@@ -2160,7 +2162,10 @@ export function ExtensionsView({
                 current.map((item) => (item.name === next.name ? next : item)),
               );
             }}
-            onUninstall={() => setPendingPluginUninstall(selectedPlugin)}
+            onUninstall={() => {
+              setPluginUninstallError(null);
+              setPendingPluginUninstall(selectedPlugin);
+            }}
             onUsePlugin={onUsePlugin}
             onUsePluginComponent={onUsePluginComponent}
             onNotice={onNotice}
@@ -2168,9 +2173,20 @@ export function ExtensionsView({
           <Dialog
             open={pendingPluginUninstall !== null}
             title="卸载插件"
-            onOpenChange={(open) => { if (!open) setPendingPluginUninstall(null); }}
+            onOpenChange={(open) => {
+              if (!open) {
+                setPendingPluginUninstall(null);
+                setPluginUninstallError(null);
+              }
+            }}
             footer={pendingPluginUninstall ? <>
-              <Button variant="ghost" onClick={() => setPendingPluginUninstall(null)}>取消</Button>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setPendingPluginUninstall(null);
+                  setPluginUninstallError(null);
+                }}
+              >取消</Button>
               <Button
                 variant="primary"
                 loading={busyPluginName === pendingPluginUninstall.name}
@@ -2178,14 +2194,16 @@ export function ExtensionsView({
                   const plugin = pendingPluginUninstall;
                   void (async () => {
                     setBusyPluginName(plugin.name);
+                    setPluginUninstallError(null);
                     try {
                       await runtimeClient.uninstallPlugin(plugin.name);
                       setPendingPluginUninstall(null);
+                      setPluginUninstallError(null);
                       setSelectedPlugin(null);
                       onNotice("插件已移入回收站");
                       await refresh(false);
                     } catch (error) {
-                      setErrorMessage(pluginErrorMessage(error));
+                      setPluginUninstallError(pluginErrorMessage(error));
                     } finally {
                       setBusyPluginName(null);
                     }
@@ -2194,7 +2212,12 @@ export function ExtensionsView({
               >确认卸载</Button>
             </> : undefined}
           >
-            <p>卸载「{pendingPluginUninstall?.name}」会把插件包和数据目录移入回收站，可从系统回收站恢复。</p>
+            <div className="extension-dialog-body">
+              <p>卸载「{pendingPluginUninstall?.name}」会把插件包和数据目录移入回收站，可从系统回收站恢复。</p>
+              {pluginUninstallError ? (
+                <div className="extension-message" role="alert">{pluginUninstallError}</div>
+              ) : null}
+            </div>
           </Dialog>
         </>
       );

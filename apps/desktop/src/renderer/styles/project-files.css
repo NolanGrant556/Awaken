@@ -1506,19 +1506,45 @@ body.is-project-file-list-resizing .project-files-workspace__body {
   min-width: 32px;
 }
 
+/* Own the expand/inspector pair with the 44px chrome, not the tab
+   baseline and not the width-animating .workbench-chrome-right. The
+   top/right values must stay identical to .workbench-chrome-panel-toggle
+   so both 22px buttons share one horizontal centerline. */
 .project-files-chrome-actions {
+  position: absolute;
+  z-index: 1;
+  top: calc(50% - 11px + var(--aw-window-control-top-offset, -1px));
+  right: 12px;
   display: flex;
   flex: 0 0 auto;
   align-items: center;
   gap: 8px;
-  margin-left: 8px;
-  margin-bottom: 5px;
+  height: 22px;
   -webkit-app-region: no-drag;
 }
 
 .project-files-chrome-actions > span {
   display: inline-flex;
   flex: 0 0 auto;
+  align-items: center;
+  height: 22px;
+}
+
+.project-files-chrome-actions .workbench-chrome-icon {
+  top: 0;
+}
+
+.project-files-chrome-actions .workbench-chrome-panel-toggle {
+  position: relative;
+  top: 0;
+  right: auto;
+}
+
+.desktop-root-inspector-expanded
+  .workbench-chrome-right:has(
+    .project-files-chrome-actions .workbench-chrome-expand-toggle
+  ) {
+  padding-right: 72px;
 }
 
 .workbench-conversation-tabs {

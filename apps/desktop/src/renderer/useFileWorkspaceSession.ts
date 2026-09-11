@@ -147,18 +147,38 @@ export function useFileWorkspaceSession(options: Options) {
   } = workbenchLayout;
 
   const previousThreadIdRef = useRef(runtimeState.activeThreadId);
+  const inspectorCollapsedRef = useRef(inspectorCollapsed);
+  inspectorCollapsedRef.current = inspectorCollapsed;
+  const inspectorCollapsedByThreadRef = useRef(new Map<string, boolean>());
   useEffect(() => {
     const previous = previousThreadIdRef.current;
     const next = runtimeState.activeThreadId;
     if (previous === next) return;
+    if (previous) {
+      inspectorCollapsedByThreadRef.current.set(
+        previous,
+        inspectorCollapsedRef.current,
+      );
+    }
     previousThreadIdRef.current = next;
-    if (!previous) return;
+    if (!previous) {
+      if (next) {
+        inspectorCollapsedByThreadRef.current.set(
+          next,
+          inspectorCollapsedRef.current,
+        );
+      }
+      return;
+    }
     setFileWorkspaceExpanded(false);
     setExpandedWorkspaceSurface("file");
     setExpandedFileComposerIdleMode("full");
-    setInspectorCollapsed(true);
+    const nextCollapsed = next
+      ? (inspectorCollapsedByThreadRef.current.get(next) ?? true)
+      : true;
+    setInspectorCollapsed(nextCollapsed);
     if (inspectorCollapsedBeforeResponsiveRef.current !== null) {
-      inspectorCollapsedBeforeResponsiveRef.current = true;
+      inspectorCollapsedBeforeResponsiveRef.current = nextCollapsed;
     }
   }, [runtimeState.activeThreadId, setInspectorCollapsed]);
 

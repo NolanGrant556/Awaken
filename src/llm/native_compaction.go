@@ -32,7 +32,7 @@ var nativeCompactionCapabilities = []NativeCompactionCapability{
 		ProviderID: "openai", BaseURL: "https://api.openai.com/v1",
 		ProtocolFamily:     ProtocolOpenAIResponses,
 		EndpointContractID: EndpointContractOpenAIResponses,
-		Models:             stringSet("gpt-5.2", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"),
+		Models:             stringSet("gpt-5.2", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-astra"),
 	},
 }
 

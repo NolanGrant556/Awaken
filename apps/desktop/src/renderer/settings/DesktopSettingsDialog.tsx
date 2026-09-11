@@ -275,28 +275,40 @@ export function modelCandidatesForProtocol(
   });
 }
 
+export function preferredCompatibleModelId(
+  candidates: string[],
+  currentModelId: string,
+  defaultModel = "",
+): string {
+  if (candidates.includes(currentModelId)) {
+    return currentModelId;
+  }
+  if (defaultModel && candidates.includes(defaultModel)) {
+    return defaultModel;
+  }
+  return candidates[0] ?? currentModelId;
+}
+
 function selectedModelsAfterCatalogRefresh(
-  previousProvider: ModelProvider,
   refreshedProvider: ModelProvider,
   protocol: string,
   selectedModelIds: string[],
 ): string[] {
-  const previousCandidates = modelCandidatesForProtocol(
-    previousProvider,
-    protocol,
-  );
   const refreshedCandidates = modelCandidatesForProtocol(
     refreshedProvider,
     protocol,
   );
-  const previouslySelectedAll =
-    previousCandidates.length > 0 &&
-    previousCandidates.every((modelId) => selectedModelIds.includes(modelId));
-  return previouslySelectedAll
-    ? refreshedCandidates
-    : refreshedCandidates.filter((modelId) =>
-        selectedModelIds.includes(modelId),
-      );
+  const kept = refreshedCandidates.filter((modelId) =>
+    selectedModelIds.includes(modelId),
+  );
+  if (kept.length > 0) return kept;
+  if (
+    refreshedProvider.defaultModel &&
+    refreshedCandidates.includes(refreshedProvider.defaultModel)
+  ) {
+    return [refreshedProvider.defaultModel];
+  }
+  return refreshedCandidates[0] ? [refreshedCandidates[0]] : [];
 }
 
 function contextWindowMaxForProfile(
@@ -968,7 +980,6 @@ export function DesktopSettingsDialog({
               draft.protocol,
             ).filter((modelId) => discovered.has(modelId));
             const selectedAfterRefresh = selectedModelsAfterCatalogRefresh(
-              provider,
               refreshed.provider,
               draft.protocol,
               draft.selectedModelIds,
@@ -1111,7 +1122,6 @@ export function DesktopSettingsDialog({
         if (!current || current.providerId !== result.provider.id)
           return current;
         const selectedModelIds = selectedModelsAfterCatalogRefresh(
-          provider,
           result.provider,
           current.protocol,
           current.selectedModelIds,
@@ -1719,8 +1729,11 @@ export function DesktopSettingsDialog({
                         selectedProvider,
                         protocol,
                       );
-                      const nextModelId =
-                        selectedModelIds[0] ?? selectedProviderDraft.modelId;
+                      const nextModelId = preferredCompatibleModelId(
+                        selectedModelIds,
+                        selectedProviderDraft.modelId,
+                        selectedProvider.defaultModel,
+                      );
                       const knownOfficialBaseURLs = new Set([
                         selectedProvider.baseURL.replace(/\/+$/, ""),
                         ...Object.values(selectedProvider.protocolBaseURLs).map(

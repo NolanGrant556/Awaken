@@ -167,7 +167,9 @@ func prepareOpenAIRequest(cfg Config, req Request, stream bool) (PreparedRequest
 		Stream:      stream,
 	}
 	applyOpenAIReasoningControls(&chatReq, cfg, req)
-	chatReq.ReasoningEffort = nativeReasoningEffort(cfg, req)
+	if !omitsEffortWhenThinkingDisabled(cfg, req) {
+		chatReq.ReasoningEffort = nativeReasoningEffort(cfg, req)
+	}
 	if usesMiniMaxReasoningSplit(cfg) {
 		enabled := true
 		chatReq.ReasoningSplit = &enabled
@@ -528,8 +530,8 @@ func applyOpenAIReasoningControls(chatReq *openaiChatRequest, cfg Config, req Re
 	}
 	provider := normalizeProviderID(cfg.ProviderID)
 	model := strings.ToLower(resolveModel(cfg, req))
-	if (provider == "qwen" && model == "qwen3.8-max") ||
-		(provider == "qwen-token-plan" && model == "qwen3.8-max-preview") {
+	if (provider == "qwen" && (model == "qwen3.8-max" || model == "qwen3.8-flash")) ||
+		(provider == "qwen-token-plan" && (model == "qwen3.8-max-preview" || model == "qwen3.8-max" || model == "qwen3.8-flash")) {
 		// These contracts are reasoning-only. Auxiliary purposes omit effort but
 		// must not attempt to disable thinking, otherwise title/compact probes fail.
 		return
@@ -545,6 +547,14 @@ func applyOpenAIReasoningControls(chatReq *openaiChatRequest, cfg Config, req Re
 		disabled := false
 		chatReq.EnableThinking = &disabled
 	}
+}
+
+func omitsEffortWhenThinkingDisabled(cfg Config, req Request) bool {
+	if !req.DisableReasoning {
+		return false
+	}
+	capability, ok := ResolveReasoningControlCapability(cfg, req)
+	return ok && capability.WireStrategy == ReasoningControlThinkingType
 }
 
 func contextToolCallsToOpenAI(toolCalls []context.ToolCall) []openaiToolCall {

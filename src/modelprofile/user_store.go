@@ -397,8 +397,8 @@ func (s *UserStore) loadReady() ([]ResolvedProfile, error) {
 func normalizeStoredProfile(stored storedProfile, provider Provider, cached *cachedModelCapability) ResolvedProfile {
 	id := strings.TrimSpace(stored.ID)
 	capabilityModelID := strings.TrimSpace(stored.ModelID)
-	if provider.ID == "doubao" && capabilityModelID == "doubao-seed-2.1-pro" {
-		capabilityModelID = "doubao-seed-2-1-pro-260628"
+	if provider.ID == "doubao" {
+		capabilityModelID = canonicalizeDoubaoModelID(capabilityModelID)
 	}
 	if capabilityModelID == "" || (!provider.EndpointModel && !provider.AllowCustomModel && !slices.Contains(provider.Models, capabilityModelID)) {
 		capabilityModelID = provider.DefaultModel
@@ -805,4 +805,21 @@ func decodeEnvValue(raw string) (string, error) {
 		return strings.TrimSuffix(strings.TrimPrefix(value, "'"), "'"), nil
 	}
 	return value, nil
+}
+
+func canonicalizeDoubaoModelID(modelID string) string {
+	switch strings.TrimSpace(modelID) {
+	case "doubao-seed-2.1-pro":
+		return "doubao-seed-2-1-pro-260628"
+	case "deepseek-v4-pro":
+		return "deepseek-v4-pro-ga-260813"
+	case "deepseek-v4-flash":
+		return "deepseek-v4-flash-ga-260731"
+	case "glm-5.3-flash":
+		return "glm-5-3-flash-260828"
+	case "glm-5.2":
+		return "glm-5-2-260617"
+	default:
+		return modelID
+	}
 }

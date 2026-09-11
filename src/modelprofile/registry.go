@@ -53,6 +53,12 @@ func effortWithLabels(levels []string, defaultLevel string, displayLabels map[st
 	return &ReasoningEffortCapability{Levels: levels, DefaultLevel: defaultLevel, DisplayLabels: displayLabels}
 }
 
+func doubaoSeedEffort(defaultLevel string) *ReasoningEffortCapability {
+	return effortWithLabels([]string{"low", "high", "max"}, defaultLevel, map[string]string{
+		"low": "low", "high": "medium", "max": "high",
+	})
+}
+
 func allLLMProtocols() []string {
 	return []string{"openai_chat", "openai_responses", "anthropic_messages"}
 }
@@ -63,10 +69,15 @@ func BuiltinProviders() []Provider {
 			ID: "openai", DisplayName: "OpenAI", BaseURL: "https://api.openai.com/v1",
 			Protocol: "openai_responses", SupportedProtocols: []string{"openai_chat", "openai_responses"},
 			CatalogStrategy: "openai", AuthScheme: "bearer", KeyEnvName: "OPENAI_API_KEY",
-			DefaultModel: "gpt-5.6-sol", Models: []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"},
+			DefaultModel: "gpt-6-astra", Models: []string{"gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"},
 			DocsURL: "https://platform.openai.com/docs/models", APIDocsURL: "https://platform.openai.com/api-keys",
 			AccessType: "api", AllowCustomModel: true,
 			ModelCapabilities: map[string]ModelCapability{
+				"gpt-6-astra": {
+					SupportedProtocols: []string{"openai_chat", "openai_responses"},
+					ContextWindow:      1050000, MaxOutputTokens: 128000, DefaultMaxTokens: 32768,
+					SupportsVision: true, SupportsTools: "ready", SupportsPromptCache: true, ReasoningEffort: effort([]string{"low", "high", "max"}, "high"),
+				},
 				"gpt-5.1": {
 					SupportedProtocols: []string{"openai_chat", "openai_responses"},
 					ContextWindow:      400000, MaxOutputTokens: 128000, DefaultMaxTokens: 32768,
@@ -98,7 +109,7 @@ func BuiltinProviders() []Provider {
 			ID: "anthropic", DisplayName: "Anthropic", BaseURL: "https://api.anthropic.com",
 			Protocol: "anthropic_messages", SupportedProtocols: []string{"anthropic_messages"},
 			CatalogStrategy: "anthropic", AuthScheme: "x-api-key", KeyEnvName: "ANTHROPIC_API_KEY",
-			DefaultModel: "claude-fable-5", Models: []string{"claude-fable-5", "claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"},
+			DefaultModel: "claude-fable-5-1", Models: []string{"claude-fable-5-1", "claude-fable-5", "claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"},
 			DocsURL: "https://docs.anthropic.com/en/docs/about-claude/models/overview", APIDocsURL: "https://console.anthropic.com/settings/keys",
 			AccessType: "api", AllowCustomModel: true,
 			ModelCapabilities: map[string]ModelCapability{
@@ -108,6 +119,11 @@ func BuiltinProviders() []Provider {
 					SupportsVision: true, SupportsNativePDF: true, SupportsTools: "ready", SupportsPromptCache: true, ReasoningEffort: effort([]string{"low", "high", "max"}, "high"),
 				},
 				"claude-opus-4-6": {
+					SupportedProtocols: []string{"anthropic_messages"},
+					MaxInputTokens:     1000000, MaxOutputTokens: 128000, DefaultMaxTokens: 32000,
+					SupportsVision: true, SupportsNativePDF: true, SupportsTools: "ready", SupportsPromptCache: true, ReasoningEffort: effort([]string{"low", "high", "max"}, "high"),
+				},
+				"claude-fable-5-1": {
 					SupportedProtocols: []string{"anthropic_messages"},
 					MaxInputTokens:     1000000, MaxOutputTokens: 128000, DefaultMaxTokens: 32000,
 					SupportsVision: true, SupportsNativePDF: true, SupportsTools: "ready", SupportsPromptCache: true, ReasoningEffort: effort([]string{"low", "high", "max"}, "high"),
@@ -137,8 +153,8 @@ func BuiltinProviders() []Provider {
 		{
 			ID: "google", DisplayName: "Google Gemini", BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai",
 			Protocol: "openai_chat", SupportedProtocols: []string{"openai_chat"}, CatalogStrategy: "google",
-			AuthScheme: "bearer", KeyEnvName: "GEMINI_API_KEY", DefaultModel: "gemini-3.6-flash",
-			Models:  []string{"gemini-3.6-flash", "gemini-3.5-flash-lite"},
+			AuthScheme: "bearer", KeyEnvName: "GEMINI_API_KEY", DefaultModel: "gemini-3.8-flash",
+			Models:  []string{"gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite"},
 			DocsURL: "https://ai.google.dev/gemini-api/docs/openai", APIDocsURL: "https://aistudio.google.com/apikey",
 			AccessType: "api", AllowCustomModel: true,
 			ModelCapabilities: map[string]ModelCapability{
@@ -148,6 +164,21 @@ func BuiltinProviders() []Provider {
 					SupportsVision: true, SupportsTools: "ready", ReasoningEffort: effort([]string{"low", "high"}, "high"),
 				},
 				"gemini-2.5-flash": {
+					SupportedProtocols: []string{"openai_chat"},
+					MaxInputTokens:     1048576, MaxOutputTokens: 65536, DefaultMaxTokens: 32768,
+					SupportsVision: true, SupportsTools: "ready", ReasoningEffort: effort([]string{"low", "high"}, "high"),
+				},
+				"gemini-3.8-flash": {
+					SupportedProtocols: []string{"openai_chat"},
+					MaxInputTokens:     1048576, MaxOutputTokens: 65536, DefaultMaxTokens: 32768,
+					SupportsVision: true, SupportsTools: "ready", ReasoningEffort: effort([]string{"low", "high"}, "high"),
+				},
+				"gemini-3.7-flash": {
+					SupportedProtocols: []string{"openai_chat"},
+					MaxInputTokens:     1048576, MaxOutputTokens: 65536, DefaultMaxTokens: 32768,
+					SupportsVision: true, SupportsTools: "ready", ReasoningEffort: effort([]string{"low", "high"}, "high"),
+				},
+				"gemini-3.5-flash": {
 					SupportedProtocols: []string{"openai_chat"},
 					MaxInputTokens:     1048576, MaxOutputTokens: 65536, DefaultMaxTokens: 32768,
 					SupportsVision: true, SupportsTools: "ready", ReasoningEffort: effort([]string{"low", "high"}, "high"),
@@ -179,15 +210,25 @@ func BuiltinProviders() []Provider {
 			CatalogStrategy:    "openai",
 			AuthScheme:         "bearer",
 			KeyEnvName:         "DEEPSEEK_API_KEY",
-			DefaultModel:       "deepseek-v4-pro",
+			DefaultModel:       "deepseek-flash",
 			Models: []string{
+				"deepseek-flash",
 				"deepseek-v4-pro",
-				"deepseek-v4-flash",
 			},
 			DocsURL:    "https://api-docs.deepseek.com/",
 			APIDocsURL: "https://platform.deepseek.com/api_keys",
 			AccessType: "api",
 			ModelCapabilities: map[string]ModelCapability{
+				"deepseek-flash": {
+					SupportedProtocols: allLLMProtocols(),
+					ContextWindow:      1000000,
+					MaxOutputTokens:    384000,
+					DefaultMaxTokens:   8192,
+					SupportsVision:     true,
+					SupportsVideo:      false,
+					SupportsTools:      "ready",
+					ReasoningEffort:    effort([]string{"high", "max"}, "high"),
+				},
 				"deepseek-v4-pro": {
 					SupportedProtocols: allLLMProtocols(),
 					ContextWindow:      1000000,
@@ -222,6 +263,9 @@ func BuiltinProviders() []Provider {
 			DefaultModel:       "kimi-k3",
 			Models: []string{
 				"kimi-k3",
+				"kimi-k2.7-code",
+				"kimi-k2.7-code-highspeed",
+				"kimi-k2.6",
 			},
 			DocsURL:    "https://platform.kimi.com/docs",
 			APIDocsURL: "https://platform.kimi.com/console/api-keys",
@@ -347,7 +391,7 @@ func BuiltinProviders() []Provider {
 			AuthScheme:         "bearer",
 			KeyEnvName:         "MINIMAX_TOKEN_PLAN_API_KEY",
 			DefaultModel:       "MiniMax-M3",
-			Models:             []string{"MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.5"},
+			Models:             []string{"MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed"},
 			DocsURL:            "https://platform.minimaxi.com/docs/token-plan/quickstart",
 			APIDocsURL:         "https://platform.minimaxi.com/subscribe/token-plan",
 			AccessType:         "coding_plan",
@@ -359,6 +403,10 @@ func BuiltinProviders() []Provider {
 					SupportsVision: true, SupportsVideo: true, SupportsTools: "ready", SupportsPromptCache: true,
 				},
 				"MiniMax-M2.7": {
+					ContextWindow: 200000, MaxOutputTokens: 128000, DefaultMaxTokens: 32000,
+					SupportsTools: "ready", SupportsPromptCache: true,
+				},
+				"MiniMax-M2.7-highspeed": {
 					ContextWindow: 200000, MaxOutputTokens: 128000, DefaultMaxTokens: 32000,
 					SupportsTools: "ready", SupportsPromptCache: true,
 				},
@@ -377,14 +425,22 @@ func BuiltinProviders() []Provider {
 			CatalogStrategy:    "none",
 			AuthScheme:         "bearer",
 			KeyEnvName:         "GLM_CODING_PLAN_API_KEY",
-			DefaultModel:       "glm-5.2",
-			Models:             []string{"glm-5.2", "glm-5-turbo", "glm-4.7"},
+			DefaultModel:       "glm-5.3",
+			Models:             []string{"glm-5.3", "glm-5.3-flash"},
 			DocsURL:            "https://docs.bigmodel.cn/cn/coding-plan/quick-start",
 			APIDocsURL:         "https://bigmodel.cn/usercenter/proj-mgmt/apikeys",
 			AccessType:         "coding_plan",
 			CodingPreset:       true,
 			AllowCustomModel:   true,
 			ModelCapabilities: map[string]ModelCapability{
+				"glm-5.3": {
+					ContextWindow: 1000000, MaxOutputTokens: 128000, DefaultMaxTokens: 32000,
+					SupportsTools: "ready", ReasoningEffort: effort([]string{"low", "high", "max"}, "max"),
+				},
+				"glm-5.3-flash": {
+					ContextWindow: 1000000, MaxOutputTokens: 128000, DefaultMaxTokens: 32000,
+					SupportsVision: true, SupportsTools: "ready", ReasoningEffort: effort([]string{"low", "high", "max"}, "max"),
+				},
 				"glm-5.2": {
 					ContextWindow: 1000000, MaxOutputTokens: 128000, DefaultMaxTokens: 32000,
 					SupportsTools: "ready", ReasoningEffort: effort([]string{"high", "max"}, "max"),
@@ -411,22 +467,15 @@ func BuiltinProviders() []Provider {
 			DefaultModel:       "ark-code-latest",
 			Models: []string{
 				"ark-code-latest",
-				"doubao-seed-code",
-				"doubao-seed-2.0-code",
-				"doubao-seed-2.0-pro",
 				"doubao-seed-2.0-lite",
-				"minimax-m2.5",
-				"minimax-m2.7",
 				"minimax-m3",
-				"glm-4.7",
-				"glm-5.2",
+				"glm-5.3",
 				"glm-latest",
-				"deepseek-v3.2",
 				"deepseek-v4-flash",
 				"deepseek-v4-pro",
-				"kimi-k2.5",
-				"kimi-k2.6",
 				"kimi-k2.7-code",
+				"kimi-k3",
+				"doubao-seed-evolving",
 			},
 			DocsURL:          "https://www.volcengine.com/docs/82379/2188958",
 			APIDocsURL:       "https://www.volcengine.com/docs/82379/1541594",
@@ -504,8 +553,15 @@ func BuiltinProviders() []Provider {
 					SupportsVision:   false,
 					SupportsVideo:    false,
 				},
+				"glm-5.3": {
+					ContextWindow:    1000000,
+					MaxOutputTokens:  32000,
+					DefaultMaxTokens: 32000,
+					SupportsVision:   false,
+					SupportsVideo:    false,
+				},
 				"glm-latest": {
-					ContextWindow:    256000,
+					ContextWindow:    1000000,
 					MaxOutputTokens:  32000,
 					DefaultMaxTokens: 32000,
 					SupportsVision:   false,
@@ -553,54 +609,87 @@ func BuiltinProviders() []Provider {
 					SupportsVision:   true,
 					SupportsVideo:    true,
 				},
+				"kimi-k3": {
+					ContextWindow:    256000,
+					MaxOutputTokens:  32000,
+					DefaultMaxTokens: 32000,
+					SupportsVision:   true,
+					SupportsVideo:    true,
+				},
+				"doubao-seed-evolving": {
+					ContextWindow:    1024000,
+					MaxOutputTokens:  256000,
+					DefaultMaxTokens: 32000,
+					SupportsVision:   true,
+					SupportsVideo:    false,
+				},
 			},
 		},
 		{
 			ID: "qwen-token-plan", DisplayName: "Qwen Token Plan",
 			BaseURL:  "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
 			Protocol: "openai_chat", SupportedProtocols: allLLMProtocols(), CatalogStrategy: "openai", AuthScheme: "bearer", KeyEnvName: "DASHSCOPE_TOKEN_PLAN_API_KEY",
-			DefaultModel: "qwen3.8-max-preview", Models: []string{"qwen3.8-max-preview"},
+			DefaultModel: "qwen3.8-max", Models: []string{"qwen3.8-max", "qwen3.8-flash", "qwen3.7-max", "qwen3.7-plus", "qwen3.6-flash"},
 			DocsURL: "https://help.aliyun.com/zh/model-studio/token-plan", APIDocsURL: "https://bailian.console.aliyun.com/",
 			AccessType: "coding_plan", CodingPreset: true, AllowCustomModel: true,
 			ModelCapabilities: map[string]ModelCapability{
+				"qwen3.8-max": {SupportedProtocols: allLLMProtocols(), MaxInputTokens: 983616, ContextWindow: 1024 * 1024, MaxOutputTokens: 64000, DefaultMaxTokens: 32000, SupportsVision: true, SupportsVideo: true, SupportsTools: "ready", ReasoningEffort: effortWithLabels([]string{"low", "high", "max"}, "max", map[string]string{"low": "low", "high": "medium", "max": "xhigh"})},
+				"qwen3.8-flash": {SupportedProtocols: allLLMProtocols(), MaxInputTokens: 983616, ContextWindow: 1000000, MaxOutputTokens: 131072, DefaultMaxTokens: 32000, SupportsVision: true, SupportsVideo: true, SupportsTools: "ready", ReasoningEffort: effortWithLabels([]string{"low", "high", "max"}, "max", map[string]string{"low": "low", "high": "medium", "max": "xhigh"})},
+				"qwen3.7-max": {ContextWindow: 256000, MaxOutputTokens: 64000, DefaultMaxTokens: 32000, SupportsVision: true, SupportsVideo: true, SupportsTools: "ready"},
+				"qwen3.7-plus": {SupportedProtocols: allLLMProtocols(), MaxInputTokens: 983616, ContextWindow: 1000000, MaxOutputTokens: 131072, DefaultMaxTokens: 32000, SupportsVision: true, SupportsVideo: true, SupportsTools: "ready"},
+				"qwen3.6-flash": {SupportsVision: true, SupportsVideo: true, SupportsTools: "ready"},
 				"qwen3.8-max-preview": {SupportedProtocols: allLLMProtocols(), ContextWindow: 1024 * 1024, MaxOutputTokens: 64000, DefaultMaxTokens: 32000, SupportsVision: true, SupportsVideo: true, SupportsTools: "ready", ReasoningEffort: effortWithLabels([]string{"low", "high", "max"}, "max", map[string]string{"low": "low", "high": "medium", "max": "xhigh"})},
 			},
 		},
 		{
 			ID: "minimax", DisplayName: "MiniMax API", BaseURL: "https://api.minimaxi.com/v1",
 			Protocol: "openai_chat", SupportedProtocols: allLLMProtocols(), CatalogStrategy: "openai", AuthScheme: "bearer", KeyEnvName: "MINIMAX_API_KEY",
-			DefaultModel: "MiniMax-M3", Models: []string{"MiniMax-M3"},
+			DefaultModel: "MiniMax-M3", Models: []string{"MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed"},
 			DocsURL: "https://platform.minimaxi.com/docs/api-reference/api-overview", APIDocsURL: "https://platform.minimaxi.com/console/access?tab=api-keys", AccessType: "api",
-			ModelCapabilities: map[string]ModelCapability{"MiniMax-M3": {SupportedProtocols: allLLMProtocols(), ContextWindow: 1000000, MaxOutputTokens: 128000, DefaultMaxTokens: 32000, SupportsVision: true, SupportsVideo: true, SupportsTools: "ready", SupportsPromptCache: true}},
+			ModelCapabilities: map[string]ModelCapability{
+				"MiniMax-M3": {SupportedProtocols: allLLMProtocols(), ContextWindow: 1000000, MaxOutputTokens: 128000, DefaultMaxTokens: 32000, SupportsVision: true, SupportsVideo: true, SupportsTools: "ready", SupportsPromptCache: true},
+				"MiniMax-M2.7": {ContextWindow: 200000, MaxOutputTokens: 128000, DefaultMaxTokens: 32000, SupportsTools: "ready", SupportsPromptCache: true},
+				"MiniMax-M2.7-highspeed": {ContextWindow: 200000, MaxOutputTokens: 128000, DefaultMaxTokens: 32000, SupportsTools: "ready", SupportsPromptCache: true},
+			},
 		},
 		{
 			ID: "glm", DisplayName: "GLM API", BaseURL: "https://open.bigmodel.cn/api/paas/v4",
 			Protocol: "openai_chat", SupportedProtocols: []string{"openai_chat", "anthropic_messages"}, CatalogStrategy: "openai", AuthScheme: "bearer", KeyEnvName: "ZHIPU_API_KEY",
-			DefaultModel: "glm-5.2", Models: []string{"glm-5.2"},
-			DocsURL: "https://docs.bigmodel.cn/cn/guide/models/text/glm-5.2", APIDocsURL: "https://open.bigmodel.cn/usercenter/apikeys", AccessType: "api",
-			ModelCapabilities: map[string]ModelCapability{"glm-5.2": {ContextWindow: 1000000, MaxOutputTokens: 128000, DefaultMaxTokens: 32000, SupportsTools: "ready", ReasoningEffort: effort([]string{"high", "max"}, "max")}},
+			DefaultModel: "glm-5.3", Models: []string{"glm-5.3", "glm-5.3-flash", "glm-5.2"},
+			DocsURL: "https://docs.bigmodel.cn/cn/guide/models/text/glm-5.3", APIDocsURL: "https://open.bigmodel.cn/usercenter/apikeys", AccessType: "api",
+			ModelCapabilities: map[string]ModelCapability{
+				"glm-5.3": {ContextWindow: 1000000, MaxOutputTokens: 128000, DefaultMaxTokens: 32000, SupportsTools: "ready", ReasoningEffort: effort([]string{"low", "high", "max"}, "max")},
+				"glm-5.3-flash": {ContextWindow: 1000000, MaxOutputTokens: 128000, DefaultMaxTokens: 32000, SupportsVision: true, SupportsTools: "ready", ReasoningEffort: effort([]string{"low", "high", "max"}, "max")},
+				"glm-5.2": {ContextWindow: 1000000, MaxOutputTokens: 128000, DefaultMaxTokens: 32000, SupportsTools: "ready", ReasoningEffort: effort([]string{"high", "max"}, "max")},
+			},
 		},
 		{
 			ID: "qwen", DisplayName: "Qwen API", BaseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
 			Protocol: "openai_chat", SupportedProtocols: allLLMProtocols(), CatalogStrategy: "openai", AuthScheme: "bearer", KeyEnvName: "DASHSCOPE_API_KEY",
-			DefaultModel: "qwen3.8-max", Models: []string{"qwen3.7-plus", "qwen3.8-max"}, AllowCustomModel: true,
+			DefaultModel: "qwen3.8-max", Models: []string{"qwen3.8-max", "qwen3.8-flash", "qwen3.7-plus"}, AllowCustomModel: true,
 			DocsURL: "https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions", APIDocsURL: "https://bailian.console.aliyun.com/", AccessType: "api",
 			ModelCapabilities: map[string]ModelCapability{
 				"qwen3.7-plus": {SupportedProtocols: allLLMProtocols(), MaxInputTokens: 983616, ContextWindow: 1000000, MaxOutputTokens: 131072, DefaultMaxTokens: 32000, SupportsVision: true, SupportsVideo: true, SupportsTools: "ready"},
-				"qwen3.8-max":  {SupportedProtocols: allLLMProtocols(), MaxInputTokens: 983616, ContextWindow: 1024 * 1024, MaxOutputTokens: 64000, DefaultMaxTokens: 32000, SupportsVision: true, SupportsVideo: false, SupportsTools: "ready", ReasoningEffort: effortWithLabels([]string{"low", "high", "max"}, "max", map[string]string{"low": "low", "high": "medium", "max": "xhigh"})},
+				"qwen3.8-max":   {SupportedProtocols: allLLMProtocols(), MaxInputTokens: 983616, ContextWindow: 1024 * 1024, MaxOutputTokens: 64000, DefaultMaxTokens: 32000, SupportsVision: true, SupportsVideo: false, SupportsTools: "ready", ReasoningEffort: effortWithLabels([]string{"low", "high", "max"}, "max", map[string]string{"low": "low", "high": "medium", "max": "xhigh"})},
+				"qwen3.8-flash": {SupportedProtocols: allLLMProtocols(), MaxInputTokens: 983616, ContextWindow: 1000000, MaxOutputTokens: 131072, DefaultMaxTokens: 32000, SupportsVision: true, SupportsVideo: false, SupportsTools: "ready", ReasoningEffort: effortWithLabels([]string{"low", "high", "max"}, "max", map[string]string{"low": "low", "high": "medium", "max": "xhigh"})},
 				"qwen3.7-max":  {ContextWindow: 256000, MaxOutputTokens: 64000, DefaultMaxTokens: 32000, SupportsVision: true, SupportsVideo: true, SupportsTools: "ready"},
 			},
 		},
 		{
-			ID: "doubao", DisplayName: "Doubao Ark API", BaseURL: "https://ark.cn-beijing.volces.com/api/v3",
+			ID: "doubao", DisplayName: "火山方舟", BaseURL: "https://ark.cn-beijing.volces.com/api/v3",
 			Protocol: "openai_chat", SupportedProtocols: []string{"openai_chat", "openai_responses"}, CatalogStrategy: "none", AuthScheme: "bearer", KeyEnvName: "ARK_API_KEY",
 			DefaultModel: "doubao-seed-2-1-pro-260628", Models: []string{
-				"doubao-seed-evolving",
 				"doubao-seed-2-1-pro-260628",
 				"doubao-seed-2-1-turbo-260628",
+				"doubao-seed-evolving",
 				"doubao-seed-2-0-code-preview-260215",
 				"doubao-seed-2-0-pro-260215",
 				"doubao-seed-2-0-lite-260428",
+				"doubao-seed-2-0-mini-260428",
+				"deepseek-v4-pro-ga-260813",
+				"deepseek-v4-flash-ga-260731",
+				"glm-5-3-flash-260828",
+				"glm-5-2-260617",
 			}, ModelDisplayNames: map[string]string{
 				"doubao-seed-evolving":                "Doubao-Seed-Evolving",
 				"doubao-seed-2-1-pro-260628":          "Doubao-Seed-2.1-Pro",
@@ -608,12 +697,36 @@ func BuiltinProviders() []Provider {
 				"doubao-seed-2-0-code-preview-260215": "Doubao-Seed-2.0-Code",
 				"doubao-seed-2-0-pro-260215":          "Doubao-Seed-2.0-Pro",
 				"doubao-seed-2-0-lite-260428":         "Doubao-Seed-2.0-Lite",
+				"doubao-seed-2-0-mini-260428":         "Doubao-Seed-2.0-Mini",
+				"deepseek-v4-pro-ga-260813":          "DeepSeek-V4-Pro",
+				"deepseek-v4-flash-ga-260731":        "DeepSeek-V4-Flash",
+				"glm-5-3-flash-260828":               "GLM-5.3-Flash",
+				"glm-5-2-260617":                     "GLM-5.2",
 			}, EndpointModel: true,
 			DocsURL: "https://www.volcengine.com/product/doubao", APIDocsURL: "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey", AccessType: "api",
 			ModelCapabilities: map[string]ModelCapability{
-				"doubao-seed-2-1-pro-260628": {SupportedProtocols: []string{"openai_chat", "openai_responses"}, ContextWindow: 256000, MaxOutputTokens: 128000, DefaultMaxTokens: 32000, SupportsVision: true, SupportsVideo: true, SupportsTools: "ready", ReasoningEffort: effort([]string{"low", "high", "max"}, "high")},
+				"doubao-seed-evolving": {SupportedProtocols: []string{"openai_chat", "openai_responses"}, ContextWindow: 1024000, MaxInputTokens: 1024000, MaxOutputTokens: 256000, DefaultMaxTokens: 32000, SupportsVision: true, SupportsTools: "ready", ReasoningEffort: doubaoSeedEffort("max")},
+				"doubao-seed-2-1-pro-260628": {SupportedProtocols: []string{"openai_chat", "openai_responses"}, ContextWindow: 256000, MaxInputTokens: 256000, MaxOutputTokens: 256000, DefaultMaxTokens: 32000, SupportsVision: true, SupportsVideo: true, SupportsTools: "ready", ReasoningEffort: doubaoSeedEffort("max")},
+				"doubao-seed-2-1-turbo-260628": {SupportedProtocols: []string{"openai_chat", "openai_responses"}, ContextWindow: 256000, MaxInputTokens: 256000, MaxOutputTokens: 256000, DefaultMaxTokens: 32000, SupportsVision: true, SupportsVideo: true, SupportsTools: "ready", ReasoningEffort: doubaoSeedEffort("max")},
 				// Compatibility for profiles saved before exact Ark Model IDs were exposed.
-				"doubao-seed-2.1-pro": {SupportedProtocols: []string{"openai_chat", "openai_responses"}, ContextWindow: 256000, MaxOutputTokens: 128000, DefaultMaxTokens: 32000, SupportsVision: true, SupportsVideo: true, SupportsTools: "ready", ReasoningEffort: effort([]string{"low", "high", "max"}, "high")},
+				"doubao-seed-2.1-pro": {SupportedProtocols: []string{"openai_chat", "openai_responses"}, ContextWindow: 256000, MaxInputTokens: 256000, MaxOutputTokens: 256000, DefaultMaxTokens: 32000, SupportsVision: true, SupportsVideo: true, SupportsTools: "ready", ReasoningEffort: doubaoSeedEffort("max")},
+				"doubao-seed-2-0-code-preview-260215": {SupportedProtocols: []string{"openai_chat", "openai_responses"}, ContextWindow: 256000, MaxInputTokens: 224000, MaxOutputTokens: 128000, DefaultMaxTokens: 32000, SupportsVision: true, SupportsTools: "ready", ReasoningEffort: doubaoSeedEffort("high")},
+				"doubao-seed-2-0-pro-260215": {SupportedProtocols: []string{"openai_chat", "openai_responses"}, ContextWindow: 256000, MaxInputTokens: 224000, MaxOutputTokens: 128000, DefaultMaxTokens: 32000, SupportsVision: true, SupportsTools: "ready", ReasoningEffort: doubaoSeedEffort("high")},
+				"doubao-seed-2-0-lite-260428": {SupportedProtocols: []string{"openai_chat", "openai_responses"}, ContextWindow: 256000, MaxInputTokens: 224000, MaxOutputTokens: 128000, DefaultMaxTokens: 32000, SupportsVision: true, SupportsTools: "ready", ReasoningEffort: doubaoSeedEffort("high")},
+				"doubao-seed-2-0-mini-260428": {SupportedProtocols: []string{"openai_chat", "openai_responses"}, ContextWindow: 256000, MaxInputTokens: 224000, MaxOutputTokens: 128000, DefaultMaxTokens: 32000, SupportsVision: true, SupportsTools: "ready", ReasoningEffort: doubaoSeedEffort("high")},
+				// Hosted third-party inference IDs from official 模型列表 / 深度思考.
+				// Pricing-page short names stay as read aliases only.
+				"deepseek-v4-pro-ga-260813": {SupportedProtocols: []string{"openai_chat", "openai_responses"}, ContextWindow: 1024000, MaxInputTokens: 1024000, MaxOutputTokens: 384000, DefaultMaxTokens: 32000, SupportsTools: "ready", ReasoningEffort: effort([]string{"low", "high"}, "high")},
+				"deepseek-v4-flash-ga-260731": {SupportedProtocols: []string{"openai_chat", "openai_responses"}, ContextWindow: 1024000, MaxInputTokens: 1024000, MaxOutputTokens: 384000, DefaultMaxTokens: 32000, SupportsTools: "ready", ReasoningEffort: effort([]string{"low", "high"}, "high")},
+				"deepseek-v4-pro-260425": {SupportedProtocols: []string{"openai_chat", "openai_responses"}, ContextWindow: 1024000, MaxInputTokens: 1024000, MaxOutputTokens: 384000, DefaultMaxTokens: 32000, SupportsTools: "ready", ReasoningEffort: effort([]string{"high", "max"}, "high")},
+				"deepseek-v4-flash-260425": {SupportedProtocols: []string{"openai_chat", "openai_responses"}, ContextWindow: 1024000, MaxInputTokens: 1024000, MaxOutputTokens: 384000, DefaultMaxTokens: 32000, SupportsTools: "ready", ReasoningEffort: effort([]string{"high", "max"}, "high")},
+				"glm-5-3-flash-260828": {SupportedProtocols: []string{"openai_chat", "openai_responses"}, ContextWindow: 1024000, MaxInputTokens: 1024000, MaxOutputTokens: 128000, DefaultMaxTokens: 32000, SupportsTools: "ready"},
+				"glm-5-2-260617": {SupportedProtocols: []string{"openai_chat", "openai_responses"}, ContextWindow: 1024000, MaxInputTokens: 1024000, MaxOutputTokens: 128000, DefaultMaxTokens: 32000, SupportsTools: "ready", ReasoningEffort: effort([]string{"high", "max"}, "high")},
+				"deepseek-v4-pro":   {SupportedProtocols: []string{"openai_chat", "openai_responses"}, ContextWindow: 1024000, MaxInputTokens: 1024000, MaxOutputTokens: 384000, DefaultMaxTokens: 32000, SupportsTools: "ready", ReasoningEffort: effort([]string{"low", "high"}, "high")},
+				"deepseek-v4-flash": {SupportedProtocols: []string{"openai_chat", "openai_responses"}, ContextWindow: 1024000, MaxInputTokens: 1024000, MaxOutputTokens: 384000, DefaultMaxTokens: 32000, SupportsTools: "ready", ReasoningEffort: effort([]string{"low", "high"}, "high")},
+				"glm-5.3-flash":     {SupportedProtocols: []string{"openai_chat", "openai_responses"}, ContextWindow: 1024000, MaxInputTokens: 1024000, MaxOutputTokens: 128000, DefaultMaxTokens: 32000, SupportsTools: "ready"},
+				"glm-5.2":           {SupportedProtocols: []string{"openai_chat", "openai_responses"}, ContextWindow: 1024000, MaxInputTokens: 1024000, MaxOutputTokens: 128000, DefaultMaxTokens: 32000, SupportsTools: "ready", ReasoningEffort: effort([]string{"high", "max"}, "high")},
+				"glm-4.7":           {SupportedProtocols: []string{"openai_chat"}, ContextWindow: 200000, MaxOutputTokens: 128000, DefaultMaxTokens: 32000, SupportsTools: "ready"},
 			},
 		},
 		{

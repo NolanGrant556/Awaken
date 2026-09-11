@@ -14,7 +14,7 @@ const PROVIDER_BRAND_BY_ID: Record<string, AwakenProviderBrand> = {
   minimax: "minimax",
   "glm-coding-plan": "glm",
   glm: "glm",
-  doubao: "doubao",
+  doubao: "volcengine",
   deepseek: "deepseek",
 };
 

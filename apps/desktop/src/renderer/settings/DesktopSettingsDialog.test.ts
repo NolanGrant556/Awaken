@@ -17,6 +17,7 @@ import {
   DesktopSettingsDialog,
   draftFromExistingProfile,
   modelCandidatesForProtocol,
+  preferredCompatibleModelId,
   toSaveRequest,
 } from "./DesktopSettingsDialog";
 
@@ -233,7 +234,7 @@ describe("model credential recovery draft", () => {
   it("keeps direct Ark Model IDs separate from optional ep-* selectors", () => {
     const provider = {
       id: "doubao",
-      displayName: "Doubao Ark",
+      displayName: "火山方舟",
       baseURL: "https://ark.cn-beijing.volces.com/api/v3",
       protocol: "openai_chat",
       supportedProtocols: ["openai_chat", "openai_responses"],
@@ -257,7 +258,7 @@ describe("model credential recovery draft", () => {
     const directProfile = {
       id: "doubao-direct",
       providerId: "doubao",
-      displayName: "Doubao Ark",
+      displayName: "火山方舟",
       modelId: "doubao-seed-2-1-pro-260628",
       baseURL: provider.baseURL,
       protocol: "openai_chat",
@@ -319,6 +320,61 @@ describe("model protocol recommendations", () => {
       "responses-ready",
       "future-model",
     ]);
+  });
+
+  it("keeps Ark hosted DeepSeek and GLM visible on both Chat and Responses", () => {
+    const provider = {
+      id: "doubao",
+      displayName: "火山方舟",
+      baseURL: "https://ark.cn-beijing.volces.com/api/v3",
+      protocol: "openai_chat",
+      supportedProtocols: ["openai_chat", "openai_responses"],
+      officialProtocols: ["openai_chat", "openai_responses"],
+      protocolBaseURLs: {},
+      protocolAuthSchemes: {},
+      catalogStrategy: "none",
+      catalogSource: "official_manifest",
+      authScheme: "bearer",
+      keyEnvName: "ARK_API_KEY",
+      defaultModel: "doubao-seed-2-1-pro-260628",
+      models: [
+        "doubao-seed-2-1-pro-260628",
+        "deepseek-v4-pro-ga-260813",
+        "glm-5-3-flash-260828",
+        "glm-5-2-260617",
+      ],
+      docsURL: "",
+      apiDocsURL: "",
+      codingPreset: false,
+      endpointModel: true,
+      allowCustomModel: true,
+      modelCapabilities: {
+        "doubao-seed-2-1-pro-260628": { supportedProtocols: ["openai_chat", "openai_responses"] },
+        "deepseek-v4-pro-ga-260813": { supportedProtocols: ["openai_chat", "openai_responses"] },
+        "glm-5-3-flash-260828": { supportedProtocols: ["openai_chat", "openai_responses"] },
+        "glm-5-2-260617": { supportedProtocols: ["openai_chat", "openai_responses"] },
+      },
+    } satisfies ModelProvider;
+
+    expect(modelCandidatesForProtocol(provider, "openai_chat")).toEqual(provider.models);
+    expect(modelCandidatesForProtocol(provider, "openai_responses")).toEqual(provider.models);
+  });
+
+  it("keeps the current or default model when switching protocol instead of the first candidate", () => {
+    expect(
+      preferredCompatibleModelId(
+        ["doubao-seed-evolving", "doubao-seed-2-1-pro-260628"],
+        "doubao-seed-2-1-pro-260628",
+        "doubao-seed-2-1-pro-260628",
+      ),
+    ).toBe("doubao-seed-2-1-pro-260628");
+    expect(
+      preferredCompatibleModelId(
+        ["doubao-seed-2-1-pro-260628", "doubao-seed-evolving"],
+        "deepseek-v4-pro",
+        "doubao-seed-2-1-pro-260628",
+      ),
+    ).toBe("doubao-seed-2-1-pro-260628");
   });
 });
 

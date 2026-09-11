@@ -29,6 +29,7 @@ type openAIResponsesRequest struct {
 	Temperature          *float64                  `json:"temperature,omitempty"`
 	MaxOutputTokens      int                       `json:"max_output_tokens,omitempty"`
 	Reasoning            *openAIResponsesReasoning `json:"reasoning,omitempty"`
+	Thinking             *openaiThinkingConfig     `json:"thinking,omitempty"`
 	PromptCacheKey       string                    `json:"prompt_cache_key,omitempty"`
 	PromptCacheRetention string                    `json:"prompt_cache_retention,omitempty"`
 	Stream               bool                      `json:"stream,omitempty"`
@@ -135,6 +136,7 @@ func prepareOpenAIResponsesRequest(cfg Config, req Request, stream bool) (Prepar
 		Tools: convertToolsToOpenAIResponses(req.Tools), Temperature: resolveTemperature(cfg, req),
 		MaxOutputTokens: resolveMaxTokens(cfg, req), Stream: stream, Store: false,
 	}
+	body.Thinking = openAIResponsesThinkingForRequest(cfg, req)
 	body.Reasoning = openAIResponsesReasoningForRequest(cfg, req)
 	if affinityKey != "" {
 		body.PromptCacheKey = affinityKey
@@ -148,11 +150,25 @@ func prepareOpenAIResponsesRequest(cfg Config, req Request, stream bool) (Prepar
 	return prepared, nil
 }
 
+func openAIResponsesThinkingForRequest(cfg Config, req Request) *openaiThinkingConfig {
+	if !req.DisableReasoning {
+		return nil
+	}
+	capability, ok := ResolveReasoningControlCapability(cfg, req)
+	if ok && capability.WireStrategy == ReasoningControlThinkingType {
+		return &openaiThinkingConfig{Type: "disabled"}
+	}
+	return nil
+}
+
 func openAIResponsesReasoningForRequest(cfg Config, req Request) *openAIResponsesReasoning {
 	if req.DisableReasoning {
 		capability, ok := ResolveReasoningControlCapability(cfg, req)
 		if ok && capability.WireStrategy == ReasoningControlResponsesEffortNone {
 			return &openAIResponsesReasoning{Effort: "none"}
+		}
+		if ok && capability.WireStrategy == ReasoningControlThinkingType {
+			return nil
 		}
 	}
 	if effort := nativeReasoningEffort(cfg, req); effort != "" {

@@ -66,12 +66,17 @@ const CONNECTION_TEST_TIMEOUT_MS = 30_000;
 const MINIMAX_CN_OPENAI_BASE_URL = "https://api.minimaxi.com/v1";
 const MINIMAX_CN_ANTHROPIC_BASE_URL = "https://api.minimaxi.com/anthropic";
 const DOUBAO_API_MODELS = [
-  "doubao-seed-evolving",
   "doubao-seed-2-1-pro-260628",
   "doubao-seed-2-1-turbo-260628",
+  "doubao-seed-evolving",
   "doubao-seed-2-0-code-preview-260215",
   "doubao-seed-2-0-pro-260215",
   "doubao-seed-2-0-lite-260428",
+  "doubao-seed-2-0-mini-260428",
+  "deepseek-v4-pro-ga-260813",
+  "deepseek-v4-flash-ga-260731",
+  "glm-5-3-flash-260828",
+  "glm-5-2-260617",
 ];
 const DOUBAO_API_MODEL_DISPLAY_NAMES: Record<string, string> = {
   "doubao-seed-evolving": "Doubao-Seed-Evolving",
@@ -80,6 +85,18 @@ const DOUBAO_API_MODEL_DISPLAY_NAMES: Record<string, string> = {
   "doubao-seed-2-0-code-preview-260215": "Doubao-Seed-2.0-Code",
   "doubao-seed-2-0-pro-260215": "Doubao-Seed-2.0-Pro",
   "doubao-seed-2-0-lite-260428": "Doubao-Seed-2.0-Lite",
+  "doubao-seed-2-0-mini-260428": "Doubao-Seed-2.0-Mini",
+  "deepseek-v4-pro-ga-260813": "DeepSeek-V4-Pro",
+  "deepseek-v4-flash-ga-260731": "DeepSeek-V4-Flash",
+  "glm-5-3-flash-260828": "GLM-5.3-Flash",
+  "glm-5-2-260617": "GLM-5.2",
+};
+const DOUBAO_API_MODEL_ID_ALIASES: Record<string, string> = {
+  "doubao-seed-2.1-pro": "doubao-seed-2-1-pro-260628",
+  "deepseek-v4-pro": "deepseek-v4-pro-ga-260813",
+  "deepseek-v4-flash": "deepseek-v4-flash-ga-260731",
+  "glm-5.3-flash": "glm-5-3-flash-260828",
+  "glm-5.2": "glm-5-2-260617",
 };
 const THREE_LLM_PROTOCOLS = [
   "openai_chat",
@@ -102,8 +119,8 @@ export const BUILTIN_MODEL_PROVIDERS: ModelProviderWire[] = [
       openai_responses: "bearer",
     },
     key_env_name: "OPENAI_API_KEY",
-    default_model: "gpt-5.6-sol",
-    models: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
+    default_model: "gpt-6-astra",
+    models: ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
     docs_url: "https://platform.openai.com/docs/models",
     api_docs_url: "https://platform.openai.com/api-keys",
     access_type: "api",
@@ -125,8 +142,8 @@ export const BUILTIN_MODEL_PROVIDERS: ModelProviderWire[] = [
       anthropic_messages: "x-api-key",
     },
     key_env_name: "ANTHROPIC_API_KEY",
-    default_model: "claude-fable-5",
-    models: ["claude-fable-5", "claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"],
+    default_model: "claude-fable-5-1",
+    models: ["claude-fable-5-1", "claude-fable-5", "claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"],
     docs_url: "https://docs.anthropic.com/en/docs/about-claude/models/overview",
     api_docs_url: "https://console.anthropic.com/settings/keys",
     access_type: "api",
@@ -143,8 +160,14 @@ export const BUILTIN_MODEL_PROVIDERS: ModelProviderWire[] = [
     auth_scheme: "bearer",
     protocol_auth_schemes: { openai_chat: "bearer" },
     key_env_name: "GEMINI_API_KEY",
-    default_model: "gemini-3.6-flash",
-    models: ["gemini-3.6-flash", "gemini-3.5-flash-lite"],
+    default_model: "gemini-3.8-flash",
+    models: [
+      "gemini-3.8-flash",
+      "gemini-3.7-flash",
+      "gemini-3.6-flash",
+      "gemini-3.5-flash",
+      "gemini-3.5-flash-lite",
+    ],
     docs_url: "https://ai.google.dev/gemini-api/docs/openai",
     api_docs_url: "https://aistudio.google.com/apikey",
     access_type: "api",
@@ -217,7 +240,7 @@ export const BUILTIN_MODEL_PROVIDERS: ModelProviderWire[] = [
     },
     key_env_name: "MINIMAX_TOKEN_PLAN_API_KEY",
     default_model: "MiniMax-M3",
-    models: ["MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.5"],
+    models: ["MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed"],
     docs_url: "https://platform.minimaxi.com/docs/token-plan/quickstart",
     api_docs_url: "https://platform.minimaxi.com/subscribe/token-plan",
     access_type: "coding_plan",
@@ -242,8 +265,8 @@ export const BUILTIN_MODEL_PROVIDERS: ModelProviderWire[] = [
       anthropic_messages: "x-api-key",
     },
     key_env_name: "GLM_CODING_PLAN_API_KEY",
-    default_model: "glm-5.2",
-    models: ["glm-5.2", "glm-5-turbo", "glm-4.7"],
+    default_model: "glm-5.3",
+    models: ["glm-5.3", "glm-5.3-flash"],
     docs_url: "https://docs.bigmodel.cn/cn/coding-plan/quick-start",
     api_docs_url: "https://bigmodel.cn/usercenter/proj-mgmt/apikeys",
     access_type: "coding_plan",
@@ -271,22 +294,15 @@ export const BUILTIN_MODEL_PROVIDERS: ModelProviderWire[] = [
     default_model: "ark-code-latest",
     models: [
       "ark-code-latest",
-      "doubao-seed-code",
-      "doubao-seed-2.0-code",
-      "doubao-seed-2.0-pro",
       "doubao-seed-2.0-lite",
-      "minimax-m2.5",
-      "minimax-m2.7",
       "minimax-m3",
-      "glm-4.7",
-      "glm-5.2",
+      "glm-5.3",
       "glm-latest",
-      "deepseek-v3.2",
       "deepseek-v4-flash",
       "deepseek-v4-pro",
-      "kimi-k2.5",
-      "kimi-k2.6",
       "kimi-k2.7-code",
+      "kimi-k3",
+      "doubao-seed-evolving",
     ],
     docs_url: "https://www.volcengine.com/docs/82379/2188958",
     api_docs_url: "https://www.volcengine.com/docs/82379/1541594",
@@ -315,8 +331,14 @@ export const BUILTIN_MODEL_PROVIDERS: ModelProviderWire[] = [
       anthropic_messages: "x-api-key",
     },
     key_env_name: "DASHSCOPE_TOKEN_PLAN_API_KEY",
-    default_model: "qwen3.8-max-preview",
-    models: ["qwen3.8-max-preview"],
+    default_model: "qwen3.8-max",
+    models: [
+      "qwen3.8-max",
+      "qwen3.8-flash",
+      "qwen3.7-max",
+      "qwen3.7-plus",
+      "qwen3.6-flash",
+    ],
     docs_url: "https://help.aliyun.com/zh/model-studio/token-plan",
     api_docs_url: "https://bailian.console.aliyun.com/",
     access_type: "coding_plan",
@@ -334,7 +356,7 @@ export const BUILTIN_MODEL_PROVIDERS: ModelProviderWire[] = [
     auth_scheme: "bearer",
     key_env_name: "MOONSHOT_API_KEY",
     default_model: "kimi-k3",
-    models: ["kimi-k3"],
+    models: ["kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6"],
     docs_url: "https://platform.kimi.com/docs",
     api_docs_url: "https://platform.kimi.com/console/api-keys",
     access_type: "api",
@@ -359,7 +381,7 @@ export const BUILTIN_MODEL_PROVIDERS: ModelProviderWire[] = [
     },
     key_env_name: "MINIMAX_API_KEY",
     default_model: "MiniMax-M3",
-    models: ["MiniMax-M3"],
+    models: ["MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed"],
     docs_url: "https://platform.minimaxi.com/docs/api-reference/api-overview",
     api_docs_url: "https://platform.minimaxi.com/console/access?tab=api-keys",
     access_type: "api",
@@ -385,9 +407,9 @@ export const BUILTIN_MODEL_PROVIDERS: ModelProviderWire[] = [
       anthropic_messages: "x-api-key",
     },
     key_env_name: "ZHIPU_API_KEY",
-    default_model: "glm-5.2",
-    models: ["glm-5.2"],
-    docs_url: "https://docs.bigmodel.cn/cn/guide/models/text/glm-5.2",
+    default_model: "glm-5.3",
+    models: ["glm-5.3", "glm-5.3-flash", "glm-5.2"],
+    docs_url: "https://docs.bigmodel.cn/cn/guide/models/text/glm-5.3",
     api_docs_url: "https://open.bigmodel.cn/usercenter/apikeys",
     access_type: "api",
   },
@@ -413,7 +435,7 @@ export const BUILTIN_MODEL_PROVIDERS: ModelProviderWire[] = [
     },
     key_env_name: "DASHSCOPE_API_KEY",
     default_model: "qwen3.8-max",
-    models: ["qwen3.7-plus", "qwen3.8-max"],
+    models: ["qwen3.8-max", "qwen3.8-flash", "qwen3.7-plus"],
     docs_url: "https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions",
     api_docs_url: "https://bailian.console.aliyun.com/",
     access_type: "api",
@@ -421,7 +443,7 @@ export const BUILTIN_MODEL_PROVIDERS: ModelProviderWire[] = [
   },
   {
     id: "doubao",
-    display_name: "Doubao Ark",
+    display_name: "火山方舟",
     base_url: "https://ark.cn-beijing.volces.com/api/v3",
     protocol: "openai_chat",
     supported_protocols: ["openai_chat", "openai_responses"],
@@ -467,8 +489,8 @@ export const BUILTIN_MODEL_PROVIDERS: ModelProviderWire[] = [
       anthropic_messages: "x-api-key",
     },
     key_env_name: "DEEPSEEK_API_KEY",
-    default_model: "deepseek-v4-pro",
-    models: ["deepseek-v4-pro", "deepseek-v4-flash"],
+    default_model: "deepseek-flash",
+    models: ["deepseek-flash", "deepseek-v4-pro"],
     docs_url: "https://api-docs.deepseek.com/",
     api_docs_url: "https://platform.deepseek.com/api_keys",
     access_type: "api",
@@ -535,6 +557,23 @@ function providerById(providerId: string): ModelProviderWire | undefined {
   return BUILTIN_MODEL_PROVIDERS.find((provider) => provider.id === providerId);
 }
 
+function uniqueSortedModelIds(modelIds: string[]): string[] {
+  return Array.from(
+    new Set(modelIds.map((modelId) => modelId.trim()).filter(Boolean)),
+  ).sort();
+}
+
+function livePickerModels(
+  provider: ModelProviderWire,
+  catalogModels: string[],
+): string[] {
+  if (provider.id === "volcengine-agent-plan") {
+    return [...provider.models];
+  }
+  const live = uniqueSortedModelIds(catalogModels);
+  return live.length > 0 ? live : [...provider.models];
+}
+
 function trimTrailingSlash(value: string): string {
   return value.trim().replace(/\/+$/, "");
 }
@@ -579,8 +618,8 @@ function normalizeAuthScheme(provider: ModelProviderWire | undefined, value: str
 function normalizeProviderModelId(provider: ModelProviderWire | undefined, modelId: string): string {
   const trimmed = modelId.trim();
   if (!provider) return trimmed;
-  if (provider.id === "doubao" && trimmed === "doubao-seed-2.1-pro") {
-    return "doubao-seed-2-1-pro-260628";
+  if (provider.id === "doubao") {
+    return DOUBAO_API_MODEL_ID_ALIASES[trimmed] ?? trimmed;
   }
   // Provider catalogs can expose exact model IDs that are newer than the
   // versioned built-in manifest. Never collapse such an observed selector to
@@ -850,9 +889,25 @@ function providerErrorDetail(body: unknown): string | undefined {
   return parts.length > 0 ? parts.join(": ") : undefined;
 }
 
+function isArkModelNotOpen(body?: unknown): boolean {
+  const detail = providerErrorDetail(body) ?? "";
+  return /ModelNotOpen/i.test(detail) || /has not activated the model/i.test(detail);
+}
+
+function isArkInvalidEndpointOrModel(body?: unknown): boolean {
+  const detail = providerErrorDetail(body) ?? "";
+  return /InvalidEndpointOrModel/i.test(detail);
+}
+
 function providerTestStatusMessage(status: number, provider?: ModelProviderWire, body?: unknown): string {
   const detail = providerErrorDetail(body);
   const withDetail = (message: string) => detail ? `${message}（供应商：${detail}）` : message;
+  if (isArkModelNotOpen(body)) {
+    return withDetail("连接测试失败：当前账号尚未开通该模型。请到火山方舟控制台开通后再测，或改选已开通的模型。");
+  }
+  if (provider?.id === "doubao" && isArkInvalidEndpointOrModel(body)) {
+    return withDetail("连接测试失败：方舟未识别该模型或接入点。请使用模型列表中的精确 Model ID，并确认控制台已开通；计价页短名不能直接调用。");
+  }
   if (provider?.id === "kimi-coding-plan") {
     switch (status) {
       case 401:
@@ -965,13 +1020,17 @@ function agentPlanReasoningCandidate(modelId: string): AgentPlanReasoningCandida
         nativeByLevel: { low: "low", high: "high", max: "max" },
       };
     case "glm-5.2":
+    case "glm-5.3":
     case "deepseek-v4-pro":
+    case "deepseek-flash":
       return {
-        levels: ["high", "max"],
-        defaultLevel: "high",
+        levels: modelId === "glm-5.3" ? ["low", "high", "max"] : ["high", "max"],
+        defaultLevel: modelId === "glm-5.3" ? "max" : "high",
         nativeByLevel: { low: "low", high: "high", max: "max" },
       };
     case "qwen3.8-max-preview":
+    case "qwen3.8-max":
+    case "qwen3.8-flash":
       return {
         levels: ["low", "high", "max"],
         defaultLevel: "max",
@@ -981,7 +1040,7 @@ function agentPlanReasoningCandidate(modelId: string): AgentPlanReasoningCandida
     case "doubao-seed-2-1-pro-260628":
       return {
         levels: ["low", "high", "max"],
-        defaultLevel: "high",
+        defaultLevel: "max",
         nativeByLevel: { low: "low", high: "medium", max: "high" },
       };
     default:
@@ -1533,12 +1592,13 @@ export class ModelProfileStore {
       return {
         provider: {
           ...builtin,
-          models: Array.from(new Set([...provider.models, ...catalog.models])).sort(),
+          models: livePickerModels(provider, catalog.models),
           model_capabilities: {
             ...(builtin.model_capabilities ?? {}),
             ...catalog.capabilities,
           },
-          catalog_source: "provider_api",
+          catalog_source:
+            catalog.models.length > 0 ? "provider_api" : "official_manifest",
           catalog_observed_at: catalog.observedAt,
         },
         message: catalog.models.length > 0
@@ -1558,26 +1618,11 @@ export class ModelProfileStore {
 
   listProviders(): ModelProviderWire[] {
     return BUILTIN_MODEL_PROVIDERS.map((provider) => {
-      const cachedCatalogs = this.capabilityOverrides.filter(
-        (entry) => entry.scope.provider_id === provider.id,
-      );
-      const latestObservedAt = cachedCatalogs
-        .map((entry) => entry.observed_at)
-        .filter((value): value is string => Boolean(value))
-        .sort()
-        .at(-1);
       return withModelCapabilities({
         ...provider,
-        models:
-          provider.id === "volcengine-agent-plan"
-            ? [...provider.models]
-            : Array.from(new Set([
-                ...provider.models,
-                ...cachedCatalogs.flatMap((entry) => entry.catalog_models ?? []),
-              ])).sort(),
-        catalog_source:
-          cachedCatalogs.length > 0 ? "provider_api" : "official_manifest",
-        catalog_observed_at: latestObservedAt,
+        models: [...provider.models],
+        catalog_source: "official_manifest",
+        catalog_observed_at: undefined,
         allow_custom_model:
           provider.id === "volcengine-agent-plan"
             ? false

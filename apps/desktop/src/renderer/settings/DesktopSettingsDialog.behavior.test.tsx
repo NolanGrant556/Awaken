@@ -491,7 +491,7 @@ describe("DesktopSettingsDialog model connection feedback", () => {
     expect(runtimeClient.refreshModelCatalog).toHaveBeenCalledTimes(1);
   });
 
-  it("defaults discovered models to checked and saves only the checked models", async () => {
+  it("keeps previously selected models after catalog refresh and saves only the checked models", async () => {
     const discoveredProvider: ModelProvider = {
       ...deepSeekProvider,
       models: ["deepseek-v4-pro", "deepseek-v4-flash", "responses-only"],
@@ -571,8 +571,8 @@ describe("DesktopSettingsDialog model connection feedback", () => {
       ),
     );
     expect(modelCheckboxes).toHaveLength(2);
-    expect(modelCheckboxes.every((checkbox) => checkbox.checked)).toBe(true);
-    await act(async () => modelCheckboxes[1]?.click());
+    expect(modelCheckboxes.filter((checkbox) => checkbox.checked)).toHaveLength(1);
+    expect(modelCheckboxes[0]?.checked).toBe(true);
 
     const saveButton = Array.from(
       document.querySelectorAll<HTMLButtonElement>("button"),

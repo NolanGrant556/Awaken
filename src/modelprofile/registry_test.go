@@ -93,10 +93,13 @@ func TestBuiltinProvidersIncludeRequiredDefaults(t *testing.T) {
 	if got := google.ReasoningEffort; got == nil || !reflect.DeepEqual(got.Levels, []string{"low", "high"}) || got.DefaultLevel != "high" {
 		t.Fatalf("Google reasoning effort contract mismatch: %+v", got)
 	}
-	if got := seen["glm"].ModelCapabilities["glm-5.2"].ReasoningEffort; got == nil || !reflect.DeepEqual(got.Levels, []string{"high", "max"}) || got.DefaultLevel != "max" {
+	if got := seen["glm"].ModelCapabilities["glm-5.3"].ReasoningEffort; got == nil || !reflect.DeepEqual(got.Levels, []string{"low", "high", "max"}) || got.DefaultLevel != "max" {
 		t.Fatalf("GLM API reasoning effort contract mismatch: %+v", got)
 	}
-	if got := seen["glm-coding-plan"].ModelCapabilities["glm-5.2"].ReasoningEffort; got == nil || !reflect.DeepEqual(got.Levels, []string{"high", "max"}) || got.DefaultLevel != "max" {
+	if got := seen["glm"].ModelCapabilities["glm-5.2"].ReasoningEffort; got == nil || !reflect.DeepEqual(got.Levels, []string{"high", "max"}) || got.DefaultLevel != "max" {
+		t.Fatalf("GLM 5.2 compatibility effort contract mismatch: %+v", got)
+	}
+	if got := seen["glm-coding-plan"].ModelCapabilities["glm-5.3"].ReasoningEffort; got == nil || !reflect.DeepEqual(got.Levels, []string{"low", "high", "max"}) || got.DefaultLevel != "max" {
 		t.Fatalf("GLM Coding Plan reasoning effort contract mismatch: %+v", got)
 	}
 	if got := seen["deepseek"].ModelCapabilities["deepseek-v4-pro"].SupportedProtocols; !reflect.DeepEqual(got, allLLMProtocols()) {
@@ -118,7 +121,7 @@ func TestBuiltinProvidersIncludeRequiredDefaults(t *testing.T) {
 	if !qwen37Plus.SupportsVision || !qwen37Plus.SupportsVideo || qwen37Plus.SupportsTools != "ready" || qwen37Plus.ReasoningEffort != nil {
 		t.Fatalf("Qwen 3.7 Plus capability contract mismatch: %+v", qwen37Plus)
 	}
-	if got := seen["qwen"].Models; !reflect.DeepEqual(got, []string{"qwen3.7-plus", "qwen3.8-max"}) {
+	if got := seen["qwen"].Models; !reflect.DeepEqual(got, []string{"qwen3.8-max", "qwen3.8-flash", "qwen3.7-plus"}) {
 		t.Fatalf("Qwen built-in models mismatch: %v", got)
 	}
 	if seen["openai"].CatalogStrategy != "openai" {
@@ -159,8 +162,21 @@ func TestBuiltinProvidersIncludeRequiredDefaults(t *testing.T) {
 	if got := volc.ModelCapabilities["glm-5.2"].DefaultMaxTokens; got != 32000 {
 		t.Fatalf("expected GLM 5.2 default output metadata, got %d", got)
 	}
+	if got := volc.ModelCapabilities["glm-5.3"].ContextWindow; got != 1000000 {
+		t.Fatalf("expected GLM 5.3 context metadata, got %d", got)
+	}
+	for _, retired := range []string{"glm-4.7", "glm-5.2", "kimi-k2.6", "deepseek-v3.2", "doubao-seed-code"} {
+		for _, model := range volc.Models {
+			if model == retired {
+				t.Fatalf("Coding Plan picker still lists retired model %q", retired)
+			}
+		}
+	}
 	if got := volc.ModelCapabilities["deepseek-v4-pro"].ContextWindow; got != 128000 {
 		t.Fatalf("expected DeepSeek V4 Pro context metadata, got %d", got)
+	}
+	if got := volc.ModelCapabilities["doubao-seed-evolving"].ContextWindow; got != 1024000 {
+		t.Fatalf("expected Coding Plan Evolving context metadata, got %d", got)
 	}
 }
 
@@ -175,21 +191,73 @@ func TestProviderByID(t *testing.T) {
 	if provider, ok := ProviderByID("doubao"); !ok || !provider.EndpointModel {
 		t.Fatal("doubao must resolve as a dual Model ID / Endpoint ID provider")
 	} else {
+		if provider.DisplayName != "火山方舟" {
+			t.Fatalf("unexpected Doubao display name %q", provider.DisplayName)
+		}
 		if provider.DefaultModel != "doubao-seed-2-1-pro-260628" {
 			t.Fatalf("unexpected Doubao default model %q", provider.DefaultModel)
 		}
 		if !reflect.DeepEqual(provider.Models, []string{
-			"doubao-seed-evolving",
 			"doubao-seed-2-1-pro-260628",
 			"doubao-seed-2-1-turbo-260628",
+			"doubao-seed-evolving",
 			"doubao-seed-2-0-code-preview-260215",
 			"doubao-seed-2-0-pro-260215",
 			"doubao-seed-2-0-lite-260428",
+			"doubao-seed-2-0-mini-260428",
+			"deepseek-v4-pro-ga-260813",
+			"deepseek-v4-flash-ga-260731",
+			"glm-5-3-flash-260828",
+			"glm-5-2-260617",
 		}) {
 			t.Fatalf("unexpected Doubao model manifest: %v", provider.Models)
 		}
 		if got := provider.ModelDisplayNames["doubao-seed-2-1-pro-260628"]; got != "Doubao-Seed-2.1-Pro" {
 			t.Fatalf("unexpected Doubao model display name %q", got)
+		}
+		if got := provider.ModelDisplayNames["deepseek-v4-pro-ga-260813"]; got != "DeepSeek-V4-Pro" {
+			t.Fatalf("unexpected Doubao hosted DeepSeek display name %q", got)
+		}
+		if got := provider.ModelDisplayNames["glm-5-3-flash-260828"]; got != "GLM-5.3-Flash" {
+			t.Fatalf("unexpected Doubao hosted GLM-5.3-Flash display name %q", got)
+		}
+		if got := provider.ModelCapabilities["doubao-seed-evolving"].ContextWindow; got != 1024000 {
+			t.Fatalf("expected Doubao Evolving context metadata, got %d", got)
+		}
+		if got := provider.ModelCapabilities["doubao-seed-evolving"].ReasoningEffort; got == nil ||
+			!reflect.DeepEqual(got.Levels, []string{"low", "high", "max"}) ||
+			got.DefaultLevel != "max" ||
+			got.DisplayLabels["max"] != "high" {
+			t.Fatalf("unexpected Doubao Evolving effort: %+v", got)
+		}
+		if got := provider.ModelCapabilities["doubao-seed-2-1-turbo-260628"].ReasoningEffort; got == nil ||
+			got.DefaultLevel != "max" {
+			t.Fatalf("unexpected Doubao 2.1 Turbo effort: %+v", got)
+		}
+		if got := provider.ModelCapabilities["doubao-seed-2-0-lite-260428"].ReasoningEffort; got == nil ||
+			got.DefaultLevel != "high" {
+			t.Fatalf("unexpected Doubao 2.0 Lite effort: %+v", got)
+		}
+		if got := provider.ModelCapabilities["deepseek-v4-pro-ga-260813"].ReasoningEffort; got == nil ||
+			!reflect.DeepEqual(got.Levels, []string{"low", "high"}) {
+			t.Fatalf("unexpected hosted DeepSeek effort: %+v", got)
+		}
+		if got := provider.ModelCapabilities["doubao-seed-2-1-turbo-260628"].ContextWindow; got != 256000 {
+			t.Fatalf("expected Doubao 2.1 Turbo context metadata, got %d", got)
+		}
+		if got := provider.ModelCapabilities["glm-5-3-flash-260828"].ContextWindow; got != 1024000 {
+			t.Fatalf("expected Doubao hosted GLM-5.3-Flash context metadata, got %d", got)
+		}
+		if got := provider.ModelCapabilities["glm-5-2-260617"].ContextWindow; got != 1024000 {
+			t.Fatalf("expected Doubao hosted GLM-5.2 context metadata, got %d", got)
+		}
+		if got := provider.ModelCapabilities["deepseek-v4-pro-ga-260813"].SupportedProtocols; !reflect.DeepEqual(got, []string{"openai_chat", "openai_responses"}) {
+			t.Fatalf("hosted DeepSeek must keep Chat + Responses: %v", got)
+		}
+		for _, model := range provider.Models {
+			if model == "glm-5.3" {
+				t.Fatal("pay-as-you-go picker must not list Coding Plan glm-5.3")
+			}
 		}
 	}
 }

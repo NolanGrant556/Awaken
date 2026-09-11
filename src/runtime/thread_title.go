@@ -249,7 +249,7 @@ func threadTitleGenerationTimeoutForProfile(_ *ModelProfileConfig) time.Duration
 	return threadTitleGenerationTimeout
 }
 
-func localThreadTitle(firstUserMessage string, attachments []RunInputAttachment, composerTokens []ComposerToken) string {
+func localThreadTitle(_ string, attachments []RunInputAttachment, composerTokens []ComposerToken) string {
 	if tokens := skillComposerTokens(composerTokens); len(tokens) > 0 {
 		for _, token := range tokens {
 			if title := trimThreadLabel(firstNonEmpty(token.Label, token.ID)); title != "" {
@@ -262,28 +262,6 @@ func localThreadTitle(firstUserMessage string, attachments []RunInputAttachment,
 		if name != "" && name != "." {
 			return trimThreadLabel(name)
 		}
-	}
-
-	value := strings.TrimSpace(firstUserMessage)
-	if value == "" || strings.ContainsAny(value, "\r\n?？") {
-		return ""
-	}
-	hasHan := false
-	hanCount := 0
-	for _, r := range value {
-		if r >= '\u4e00' && r <= '\u9fff' {
-			hasHan = true
-			hanCount++
-		}
-	}
-	if hasHan {
-		if hanCount <= 12 && len([]rune(value)) <= 16 {
-			return trimThreadLabel(value)
-		}
-		return ""
-	}
-	if words := strings.Fields(value); len(words) > 0 && len(words) <= 8 {
-		return trimThreadLabel(value)
 	}
 	return ""
 }

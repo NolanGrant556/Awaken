@@ -403,12 +403,15 @@ func TestGeneratedTitlePersistsForNewThread(t *testing.T) {
 	}
 }
 
-func TestLocalThreadTitleUsesShortInputSkillAndAttachmentWithoutModelCall(t *testing.T) {
-	if got := localThreadTitle("整理订单风险", nil, nil); got != "整理订单风险" {
-		t.Fatalf("short Chinese title=%q", got)
+func TestLocalThreadTitleUsesSkillAndAttachmentWithoutCopyingFirstMessage(t *testing.T) {
+	if got := localThreadTitle("现在需要你介绍一下我", nil, nil); got != "" {
+		t.Fatalf("short first message must still request a generated title, got %q", got)
 	}
-	if got := localThreadTitle("summarize quarterly sales", nil, nil); got != "summarize quarterly sales" {
-		t.Fatalf("short English title=%q", got)
+	if got := localThreadTitle("整理订单风险", nil, nil); got != "" {
+		t.Fatalf("short Chinese first message must still request a generated title, got %q", got)
+	}
+	if got := localThreadTitle("summarize quarterly sales", nil, nil); got != "" {
+		t.Fatalf("short English first message must still request a generated title, got %q", got)
 	}
 	if got := localThreadTitle("这份材料具体说明了什么？", nil, nil); got != "" {
 		t.Fatalf("question should require auxiliary title, got %q", got)
@@ -418,6 +421,48 @@ func TestLocalThreadTitleUsesShortInputSkillAndAttachmentWithoutModelCall(t *tes
 	}
 	if got := localThreadTitle("long input", []RunInputAttachment{{DisplayName: "季度报告.xlsx"}}, nil); got != "季度报告.xlsx" {
 		t.Fatalf("attachment title=%q", got)
+	}
+}
+
+func TestShortFirstUserMessageStillRequestsGeneratedTitle(t *testing.T) {
+	setRuntimeUserDataDir(t)
+	originalGenerate := generateThreadTitleWithProfileFn
+	var calls atomic.Int32
+	generateThreadTitleWithProfileFn = func(ctx context.Context, profile *ModelProfileConfig, prompt string, _ agentcore.ModelCallAuthority, _ int) (string, error) {
+		calls.Add(1)
+		if !strings.Contains(prompt, "现在需要你介绍一下我") {
+			t.Fatalf("expected first user message in title prompt, got %q", prompt)
+		}
+		return "自我介绍", nil
+	}
+	t.Cleanup(func() {
+		generateThreadTitleWithProfileFn = originalGenerate
+	})
+
+	root := t.TempDir()
+	service := newProfileTitleTestService()
+	run, err := service.StartRun(StartRunRequest{
+		Input:     "现在需要你介绍一下我",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+		Client:    ClientInfo{EntryPoint: "desktop"},
+		ModelProfile: &ModelProfileConfig{
+			ProfileID:  "profile-title",
+			ProviderID: "mock",
+			ModelID:    "mock-title-model",
+			Protocol:   "openai_chat",
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, service, run.RunID)
+
+	stored := waitForStoredThreadTitle(t, run.ThreadID, "自我介绍", ThreadTitleSourceLLM, ThreadTitleStatusReady)
+	if stored.TitleSeedRunID != run.RunID {
+		t.Fatalf("expected title seed run id %q, got %q", run.RunID, stored.TitleSeedRunID)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("expected 1 title generation attempt, got %d", got)
 	}
 }
 

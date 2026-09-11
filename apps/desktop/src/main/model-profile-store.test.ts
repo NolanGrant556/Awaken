@@ -173,10 +173,30 @@ describe("ModelProfileStore", () => {
       catalog_url:
         "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/models",
       allow_custom_model: true,
+      default_model: "qwen3.8-max",
+      models: [
+        "qwen3.8-max",
+        "qwen3.8-flash",
+        "qwen3.7-max",
+        "qwen3.7-plus",
+        "qwen3.6-flash",
+      ],
+    });
+    expect(providers.find((provider) => provider.id === "openai")).toMatchObject({
+      default_model: "gpt-6-astra",
+      models: ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
+    });
+    expect(providers.find((provider) => provider.id === "glm-coding-plan")).toMatchObject({
+      default_model: "glm-5.3",
+      models: ["glm-5.3", "glm-5.3-flash"],
+    });
+    expect(providers.find((provider) => provider.id === "deepseek")).toMatchObject({
+      default_model: "deepseek-flash",
+      models: ["deepseek-flash", "deepseek-v4-pro"],
     });
     expect(providers.find((provider) => provider.id === "qwen")).toMatchObject({
       default_model: "qwen3.8-max",
-      models: ["qwen3.7-plus", "qwen3.8-max"],
+      models: ["qwen3.8-max", "qwen3.8-flash", "qwen3.7-plus"],
       model_capabilities: {
         "qwen3.7-plus": expect.objectContaining({
           supported_protocols: THREE_LLM_PROTOCOLS,
@@ -189,6 +209,7 @@ describe("ModelProfileStore", () => {
       },
     });
     expect(providers.find((provider) => provider.id === "doubao")).toMatchObject({
+      display_name: "火山方舟",
       base_url: "https://ark.cn-beijing.volces.com/api/v3",
       default_model: "doubao-seed-2-1-pro-260628",
       models: expect.arrayContaining([
@@ -198,6 +219,11 @@ describe("ModelProfileStore", () => {
         "doubao-seed-2-0-code-preview-260215",
         "doubao-seed-2-0-pro-260215",
         "doubao-seed-2-0-lite-260428",
+        "doubao-seed-2-0-mini-260428",
+        "deepseek-v4-pro-ga-260813",
+        "deepseek-v4-flash-ga-260731",
+        "glm-5-3-flash-260828",
+        "glm-5-2-260617",
       ]),
       model_display_names: {
         "doubao-seed-evolving": "Doubao-Seed-Evolving",
@@ -206,6 +232,11 @@ describe("ModelProfileStore", () => {
         "doubao-seed-2-0-code-preview-260215": "Doubao-Seed-2.0-Code",
         "doubao-seed-2-0-pro-260215": "Doubao-Seed-2.0-Pro",
         "doubao-seed-2-0-lite-260428": "Doubao-Seed-2.0-Lite",
+        "doubao-seed-2-0-mini-260428": "Doubao-Seed-2.0-Mini",
+        "deepseek-v4-pro-ga-260813": "DeepSeek-V4-Pro",
+        "deepseek-v4-flash-ga-260731": "DeepSeek-V4-Flash",
+        "glm-5-3-flash-260828": "GLM-5.3-Flash",
+        "glm-5-2-260617": "GLM-5.2",
       },
       protocol_base_urls: {
         openai_chat: "https://ark.cn-beijing.volces.com/api/v3",
@@ -214,9 +245,38 @@ describe("ModelProfileStore", () => {
       model_capabilities: {
         "doubao-seed-2-1-pro-260628": expect.objectContaining({
           supported_protocols: ["openai_chat", "openai_responses"],
+          context_window: 256_000,
+        }),
+        "doubao-seed-evolving": expect.objectContaining({
+          supported_protocols: ["openai_chat", "openai_responses"],
+          context_window: 1_024_000,
+          reasoning_effort: expect.objectContaining({
+            levels: ["low", "high", "max"],
+            default_level: "max",
+            display_labels: { low: "low", high: "medium", max: "high" },
+          }),
+        }),
+        "doubao-seed-2-1-turbo-260628": expect.objectContaining({
+          context_window: 256_000,
+        }),
+        "doubao-seed-2-0-lite-260428": expect.objectContaining({
+          context_window: 256_000,
+          max_input_tokens: 224_000,
+        }),
+        "deepseek-v4-pro-ga-260813": expect.objectContaining({
+          supported_protocols: ["openai_chat", "openai_responses"],
+          context_window: 1_024_000,
+        }),
+        "glm-5-2-260617": expect.objectContaining({
+          supported_protocols: ["openai_chat", "openai_responses"],
+          context_window: 1_024_000,
         }),
       },
     });
+    expect(providers.find((provider) => provider.id === "doubao")?.models).not.toContain("glm-4.7");
+    expect(providers.find((provider) => provider.id === "doubao")?.models).not.toContain("glm-5.3");
+    expect(providers.find((provider) => provider.id === "doubao")?.models).not.toContain("deepseek-v4-pro");
+    expect(providers.find((provider) => provider.id === "doubao")?.models).not.toContain("glm-5.2");
   });
 
   it("migrates stored MiniMax international endpoints to the China service", async () => {
@@ -511,11 +571,28 @@ describe("ModelProfileStore", () => {
     expect(volcengine?.models).toEqual(
       expect.arrayContaining([
         "deepseek-v4-pro",
-        "glm-5.2",
+        "glm-5.3",
+        "glm-latest",
         "kimi-k2.7-code",
+        "kimi-k3",
+        "doubao-seed-evolving",
         "minimax-m3",
       ]),
     );
+    for (const retired of [
+      "glm-4.7",
+      "glm-5.2",
+      "kimi-k2.5",
+      "kimi-k2.6",
+      "deepseek-v3.2",
+      "minimax-m2.5",
+      "minimax-m2.7",
+      "doubao-seed-code",
+      "doubao-seed-2.0-code",
+      "doubao-seed-2.0-pro",
+    ]) {
+      expect(volcengine?.models).not.toContain(retired);
+    }
   });
 
   it("returns an accurate Chinese message for an unauthorized provider test", async () => {
@@ -614,6 +691,119 @@ describe("ModelProfileStore", () => {
       ok: false,
       message:
         "连接测试失败：API key 无效，或当前会员套餐无权访问所选 Kimi Code 模型（K3 需 Moderato 及以上，高速版需 Allegretto 及以上）。",
+    });
+  });
+
+  it("explains Ark ModelNotOpen as an unactivated model, not a missing endpoint", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        ({
+          ok: false,
+          status: 404,
+          json: async () => ({
+            error: {
+              code: "ModelNotOpen",
+              message:
+                "Your account 2101545555 has not activated the model doubao-seed-evolving. Please activate the model service in the Ark Console.",
+            },
+          }),
+        }) as Response,
+      ),
+    );
+
+    const store = new ModelProfileStore(configDir);
+    const result = await store.testProfile({
+      providerId: "doubao",
+      displayName: "火山方舟",
+      modelId: "doubao-seed-evolving",
+      baseURL: "https://ark.cn-beijing.volces.com/api/v3",
+      protocol: "openai_chat",
+      authScheme: "bearer",
+      apiKey: "test-key",
+      enabled: true,
+      isDefault: true,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      message:
+        "连接测试失败：当前账号尚未开通该模型。请到火山方舟控制台开通后再测，或改选已开通的模型。（供应商：ModelNotOpen: Your account 2101545555 has not activated the model doubao-seed-evolving. Please activate the model service in the Ark Console.）",
+    });
+  });
+
+  it("explains Ark InvalidEndpointOrModel as an unrecognized model ID, not a missing protocol", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        ({
+          ok: false,
+          status: 404,
+          json: async () => ({
+            error: {
+              code: "InvalidEndpointOrModel.NotFound",
+              message:
+                "The model or endpoint deepseek-v4-pro does not exist or you do not have access to it.",
+            },
+          }),
+        }) as Response,
+      ),
+    );
+
+    const store = new ModelProfileStore(configDir);
+    const result = await store.testProfile({
+      providerId: "doubao",
+      displayName: "火山方舟",
+      modelId: "deepseek-v4-pro",
+      baseURL: "https://ark.cn-beijing.volces.com/api/v3",
+      protocol: "openai_chat",
+      authScheme: "bearer",
+      apiKey: "test-key",
+      enabled: true,
+      isDefault: true,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      message:
+        "连接测试失败：方舟未识别该模型或接入点。请使用模型列表中的精确 Model ID，并确认控制台已开通；计价页短名不能直接调用。（供应商：InvalidEndpointOrModel.NotFound: The model or endpoint deepseek-v4-pro does not exist or you do not have access to it.）",
+    });
+  });
+
+  it("keeps the generic missing-endpoint message when a 404 has no Ark activation code", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        ({
+          ok: false,
+          status: 404,
+          json: async () => ({
+            error: {
+              code: "model_not_found",
+              message: "The model does not exist.",
+            },
+          }),
+        }) as Response,
+      ),
+    );
+
+    const store = new ModelProfileStore(configDir);
+    const result = await store.testProfile({
+      providerId: "deepseek",
+      displayName: "DeepSeek",
+      modelId: "missing-model",
+      baseURL: "https://api.deepseek.com",
+      protocol: "openai_chat",
+      authScheme: "bearer",
+      apiKey: "test-key",
+      enabled: true,
+      isDefault: true,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      message:
+        "连接测试失败：推理端点或模型不存在，请检查协议、模型 ID 与服务地址。（供应商：model_not_found: The model does not exist.）",
     });
   });
 
@@ -731,7 +921,7 @@ describe("ModelProfileStore", () => {
 
     const result = await new ModelProfileStore(configDir).testProfile({
       providerId: "doubao",
-      displayName: "Doubao Ark",
+      displayName: "火山方舟",
       modelId: "doubao-seed-2-1-pro-260628",
       baseURL: "https://ark.cn-beijing.volces.com/api/v3",
       protocol: "openai_chat",
@@ -764,7 +954,7 @@ describe("ModelProfileStore", () => {
 
     const result = await new ModelProfileStore(configDir).testProfile({
       providerId: "doubao",
-      displayName: "Doubao Ark",
+      displayName: "火山方舟",
       modelId: "doubao-seed-2-1-pro-260628",
       baseURL: "https://ark.cn-beijing.volces.com/api/v3",
       protocol: "openai_responses",
@@ -848,6 +1038,27 @@ describe("ModelProfileStore", () => {
     await expect(store.resolveRunProfile(saved.id)).resolves.toMatchObject({
       modelId: "doubao-seed-2-1-pro-260628",
       capabilityModelId: "doubao-seed-2-1-pro-260628",
+      modelSelectorKind: "model",
+    });
+  });
+
+  it("migrates Ark hosted pricing aliases to exact Model IDs", async () => {
+    const store = new ModelProfileStore(configDir);
+    const saved = await store.saveProfile({
+      providerId: "doubao",
+      modelId: "deepseek-v4-pro",
+      protocol: "openai_responses",
+      authScheme: "bearer",
+      apiKey: "hosted-key",
+    });
+
+    expect(saved).toMatchObject({
+      model_id: "deepseek-v4-pro-ga-260813",
+      model_display_name: "DeepSeek-V4-Pro",
+    });
+    await expect(store.resolveRunProfile(saved.id)).resolves.toMatchObject({
+      modelId: "deepseek-v4-pro-ga-260813",
+      capabilityModelId: "deepseek-v4-pro-ga-260813",
       modelSelectorKind: "model",
     });
   });
@@ -977,7 +1188,7 @@ describe("ModelProfileStore", () => {
     });
   });
 
-  it("merges refreshed provider models, fails closed without a key, and marks catalog_strategy none unavailable", async () => {
+  it("replaces the picker with live catalog models, fails closed without a key, and marks catalog_strategy none unavailable", async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
       if (url.endsWith("/models")) {
@@ -1025,7 +1236,7 @@ describe("ModelProfileStore", () => {
       message: "已从 OpenAI API 同步 2 个模型。",
       provider: expect.objectContaining({
         catalog_source: "provider_api",
-        models: expect.arrayContaining(["gpt-5.1", "gpt-5.2"]),
+        models: ["gpt-5.1", "gpt-5.2"],
         model_capabilities: expect.objectContaining({
           "gpt-5.2": expect.objectContaining({ context_window: 256000 }),
         }),
@@ -1043,7 +1254,7 @@ describe("ModelProfileStore", () => {
     await expect(
       store.refreshProviderCatalog({
         providerId: "doubao",
-        displayName: "Doubao Ark",
+        displayName: "火山方舟",
         modelId: "doubao-seed-2-1-pro-260628",
         baseURL: "https://ark.cn-beijing.volces.com/api/v3",
         protocol: "openai_chat",
@@ -1051,7 +1262,7 @@ describe("ModelProfileStore", () => {
       }),
     ).resolves.toMatchObject({
       message:
-        "Doubao Ark 未提供可由当前推理凭据调用的模型目录 API，请使用官方清单或手填模型 ID。",
+        "火山方舟 未提供可由当前推理凭据调用的模型目录 API，请使用官方清单或手填模型 ID。",
       provider: expect.objectContaining({
         catalog_source: "unavailable",
       }),

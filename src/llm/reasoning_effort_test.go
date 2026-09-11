@@ -13,7 +13,12 @@ func TestReasoningEffortProviderMapping(t *testing.T) {
 		{"kimi max", "kimi-cn", "kimi-k3", "", "", "max", "max"},
 		{"kimi coding high", "kimi-coding-plan", "k3-256k", "", "", "high", "high"},
 		{"glm high", "glm", "glm-5.2", "", "", "high", "high"},
+		{"glm 5.3 low", "glm", "glm-5.3", "", "", "low", "low"},
 		{"glm coding max", "glm-coding-plan", "glm-5.2", "", "", "max", "max"},
+		{"glm coding 5.3 max", "glm-coding-plan", "glm-5.3", "", "", "max", "max"},
+		{"deepseek flash max", "deepseek", "deepseek-flash", "", "", "max", "max"},
+		{"qwen token max official", "qwen-token-plan", "qwen3.8-max", "", "", "max", "xhigh"},
+		{"qwen flash high", "qwen", "qwen3.8-flash", "", "", "high", "medium"},
 		{"google low", "google", "gemini-3.6-flash", "", "", "low", "low"},
 		{"google high", "google", "gemini-3.5-flash-lite", "", "", "high", "high"},
 		{"google unsupported max hidden", "google", "gemini-3.6-flash", "", "", "max", ""},
@@ -26,6 +31,13 @@ func TestReasoningEffortProviderMapping(t *testing.T) {
 		{"doubao high exact family", "doubao", "ep-test", "doubao-seed-2.1-pro", "endpoint", "high", "medium"},
 		{"doubao max exact family", "doubao", "ep-test", "doubao-seed-2.1-pro", "endpoint", "max", "high"},
 		{"doubao direct exact model", "doubao", "doubao-seed-2-1-pro-260628", "", "model", "high", "medium"},
+		{"doubao evolving max", "doubao", "doubao-seed-evolving", "", "model", "max", "high"},
+		{"doubao turbo high", "doubao", "doubao-seed-2-1-turbo-260628", "", "model", "high", "medium"},
+		{"doubao 2.0 lite low", "doubao", "doubao-seed-2-0-lite-260428", "", "model", "low", "low"},
+		{"doubao hosted deepseek ga max", "doubao", "deepseek-v4-pro-ga-260813", "", "model", "max", "high"},
+		{"doubao hosted deepseek ga low", "doubao", "deepseek-v4-flash-ga-260731", "", "model", "low", "low"},
+		{"doubao hosted glm 5.2 max", "doubao", "glm-5-2-260617", "", "model", "max", "max"},
+		{"doubao hosted glm flash hidden", "doubao", "glm-5-3-flash-260828", "", "model", "max", ""},
 		{"doubao opaque endpoint hidden", "doubao", "ep-test", "", "endpoint", "max", ""},
 		{"qwen 3.7 api hidden", "qwen", "qwen3.7-max", "", "", "max", ""},
 		{"minimax hidden", "minimax", "MiniMax-M3", "", "", "max", ""},
@@ -116,26 +128,116 @@ func TestKimiK3CompactSummaryUsesLowEffortWhenDisableReasoningContractUnavailabl
 	}
 }
 
-func TestDoubaoResponsesCompactSummaryUsesLowEffortWhenDisableContractUnavailable(t *testing.T) {
-	prepared, err := PrepareRequest(Config{
-		APIKey: "test", BaseURL: "https://ark.cn-beijing.volces.com/api/v3",
-		Protocol: ProtocolOpenAIResponses, ProviderID: "doubao",
-		Model: "doubao-seed-2-1-pro-260628", ReasoningEffort: "max",
-	}, Request{Purpose: RequestPurposeCompactSummary, DisableReasoning: true, ReasoningPolicy: "max"}, false)
-	if err != nil {
-		t.Fatal(err)
+func TestDoubaoSeedResponsesAuxiliaryRequestDisablesThinking(t *testing.T) {
+	for _, model := range []string{"doubao-seed-evolving", "doubao-seed-2-1-pro-260628"} {
+		prepared, err := PrepareRequest(Config{
+			APIKey: "test", BaseURL: "https://ark.cn-beijing.volces.com/api/v3",
+			Protocol: ProtocolOpenAIResponses, ProviderID: "doubao",
+			Model: model, ReasoningEffort: "max",
+		}, Request{Purpose: RequestPurposeCompactSummary, DisableReasoning: true, ReasoningPolicy: "max"}, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if prepared.ReasoningPolicy != "disabled" {
+			t.Fatalf("%s compact summary policy = %q, want disabled", model, prepared.ReasoningPolicy)
+		}
+		var body struct {
+			Thinking  *openaiThinkingConfig     `json:"thinking"`
+			Reasoning *openAIResponsesReasoning `json:"reasoning"`
+		}
+		if err := json.Unmarshal(prepared.Body, &body); err != nil {
+			t.Fatal(err)
+		}
+		if body.Thinking == nil || body.Thinking.Type != "disabled" {
+			t.Fatalf("%s compact summary must send thinking.type disabled: %s", model, prepared.Body)
+		}
+		if body.Reasoning != nil {
+			t.Fatalf("%s compact summary must not also send reasoning effort: %s", model, prepared.Body)
+		}
 	}
-	if prepared.ReasoningPolicy != "low" {
-		t.Fatalf("prepared reasoning policy = %q, want low so omit is not recorded as disabled", prepared.ReasoningPolicy)
+}
+
+func TestDoubaoSeedChatTitleAndRecallDisableThinking(t *testing.T) {
+	for _, purpose := range []RequestPurpose{RequestPurposeThreadTitle, RequestPurposeMemoryRecall} {
+		prepared, err := PrepareRequest(Config{
+			APIKey: "test", BaseURL: "https://ark.cn-beijing.volces.com/api/v3",
+			Protocol: ProtocolOpenAIChat, ProviderID: "doubao",
+			Model: "doubao-seed-2-1-pro-260628",
+		}, Request{Purpose: purpose, DisableReasoning: true}, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var body map[string]json.RawMessage
+		if err := json.Unmarshal(prepared.Body, &body); err != nil {
+			t.Fatal(err)
+		}
+		var thinking openaiThinkingConfig
+		if err := json.Unmarshal(body["thinking"], &thinking); err != nil || thinking.Type != "disabled" {
+			t.Fatalf("%s must send thinking.type disabled: %s", purpose, prepared.Body)
+		}
+		if raw, exists := body["reasoning_effort"]; exists {
+			t.Fatalf("%s must not send reasoning_effort with thinking disabled: %s", purpose, raw)
+		}
 	}
-	var body struct {
-		Reasoning *openAIResponsesReasoning `json:"reasoning"`
+}
+
+func TestDoubaoPaygHostedModelsDisableThinkingOnAuxiliaryRequests(t *testing.T) {
+	models := []string{
+		"deepseek-v4-pro-ga-260813",
+		"deepseek-v4-flash-ga-260731",
+		"deepseek-v4-pro-260425",
+		"glm-5-2-260617",
 	}
-	if err := json.Unmarshal(prepared.Body, &body); err != nil {
-		t.Fatal(err)
+	purposes := []RequestPurpose{
+		RequestPurposeThreadTitle,
+		RequestPurposeCompactSummary,
+		RequestPurposeMemoryRecall,
 	}
-	if body.Reasoning == nil || body.Reasoning.Effort != "low" {
-		t.Fatalf("Doubao compact summary must send lowest effort instead of omitting reasoning: %s", prepared.Body)
+	for _, model := range models {
+		for _, purpose := range purposes {
+			prepared, err := PrepareRequest(Config{
+				APIKey: "test", BaseURL: "https://ark.cn-beijing.volces.com/api/v3",
+				Protocol: ProtocolOpenAIResponses, ProviderID: "doubao",
+				Model: model, ReasoningEffort: "max",
+			}, Request{Purpose: purpose, DisableReasoning: true, ReasoningPolicy: "max"}, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var body struct {
+				Thinking  *openaiThinkingConfig     `json:"thinking"`
+				Reasoning *openAIResponsesReasoning `json:"reasoning"`
+			}
+			if err := json.Unmarshal(prepared.Body, &body); err != nil {
+				t.Fatal(err)
+			}
+			if body.Thinking == nil || body.Thinking.Type != "disabled" {
+				t.Fatalf("%s %s must send thinking.type disabled: %s", model, purpose, prepared.Body)
+			}
+			if body.Reasoning != nil {
+				t.Fatalf("%s %s must not also send reasoning effort: %s", model, purpose, prepared.Body)
+			}
+		}
+	}
+}
+
+func TestDoubaoPaygThinkingTypeModelsStayAlignedWithOfficialEffortTable(t *testing.T) {
+	for _, model := range doubaoPaygThinkingTypeModels {
+		if !supportsDoubaoPaygReasoningEffort(model) {
+			t.Fatalf("%s is in the thinking.type list but not the official 深度思考 effort table", model)
+		}
+	}
+	for _, model := range []string{
+		"doubao-seed-evolving", "doubao-seed-2.1-pro", "doubao-seed-2-1-pro-260628",
+		"doubao-seed-2-1-turbo-260628", "doubao-seed-2-0-code-preview-260215",
+		"doubao-seed-2-0-pro-260215", "doubao-seed-2-0-lite-260428", "doubao-seed-2-0-mini-260428",
+		"deepseek-v4-pro-ga-260813", "deepseek-v4-flash-ga-260731",
+		"deepseek-v4-pro-260425", "deepseek-v4-flash-260425",
+		"deepseek-v4-pro", "deepseek-v4-flash",
+		"glm-5-2-260617", "glm-5.2",
+	} {
+		if !reasoningControlModelMatches(doubaoPaygThinkingTypeModels, model) {
+			t.Fatalf("%s is on the official 深度思考 effort table but missing from thinking.type", model)
+		}
 	}
 }
 
@@ -237,8 +339,32 @@ func TestDisableReasoningCapabilityIsIndependentFromPromptCache(t *testing.T) {
 			cfg:  Config{ProviderID: "glm", BaseURL: "https://open.bigmodel.cn/api/paas/v4", Protocol: ProtocolOpenAIChat, Model: "glm-5.2"},
 		},
 		{
+			name:             "doubao seed uses published thinking.type disabled",
+			cfg:              Config{ProviderID: "doubao", BaseURL: "https://ark.cn-beijing.volces.com/api/v3", Protocol: ProtocolOpenAIChat, Model: "doubao-seed-2-1-pro-260628"},
+			wantCapability:   true,
+			wantThinkingType: true,
+		},
+		{
+			name:             "doubao hosted deepseek ga uses published thinking.type disabled",
+			cfg:              Config{ProviderID: "doubao", BaseURL: "https://ark.cn-beijing.volces.com/api/v3", Protocol: ProtocolOpenAIChat, Model: "deepseek-v4-pro-ga-260813"},
+			wantCapability:   true,
+			wantThinkingType: true,
+		},
+		{
+			name:             "doubao hosted glm 5.2 uses published thinking.type disabled",
+			cfg:              Config{ProviderID: "doubao", BaseURL: "https://ark.cn-beijing.volces.com/api/v3", Protocol: ProtocolOpenAIChat, Model: "glm-5-2-260617"},
+			wantCapability:   true,
+			wantThinkingType: true,
+		},
+		{
 			name: "doubao endpoint model remains fail closed without confirmed disable contract",
 			cfg:  Config{ProviderID: "doubao", BaseURL: "https://ark.cn-beijing.volces.com/api/v3", Protocol: ProtocolOpenAIChat, Model: "ep-test"},
+		},
+		{
+			name:             "doubao endpoint bound to seed uses published thinking.type disabled",
+			cfg:              Config{ProviderID: "doubao", BaseURL: "https://ark.cn-beijing.volces.com/api/v3", Protocol: ProtocolOpenAIChat, Model: "ep-test", ModelSelectorKind: "endpoint", CapabilityModelID: "doubao-seed-2-1-pro-260628"},
+			wantCapability:   true,
+			wantThinkingType: true,
 		},
 		{
 			name: "agent plan remains fail closed without fixed routed model contract",

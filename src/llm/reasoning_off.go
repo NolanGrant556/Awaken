@@ -75,16 +75,7 @@ func supportsLowestEffortReasoningFallback(cfg Config, req Request) bool {
 		return true
 	case provider == "kimi-coding-plan" && (model == "k3" || model == "k3-256k"):
 		return true
-	case provider == "doubao" && isDoubaoSeed21Pro(model):
-		return true
-	default:
-		return false
-	}
-}
-
-func isDoubaoSeed21Pro(model string) bool {
-	switch strings.ToLower(strings.TrimSpace(model)) {
-	case "doubao-seed-2.1-pro", "doubao-seed-2-1-pro-260628":
+	case provider == "doubao" && (isDoubaoSeedReasoningEffortModel(model) || isDoubaoHostedDeepSeekGAModel(model)):
 		return true
 	default:
 		return false

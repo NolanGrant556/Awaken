@@ -32,8 +32,8 @@ func nativeReasoningEffort(cfg Config, req Request) string {
 		if effort == "low" || effort == "high" {
 			return effort
 		}
-	case (provider == "qwen-token-plan" && model == "qwen3.8-max-preview") ||
-		(provider == "qwen" && model == "qwen3.8-max"):
+	case (provider == "qwen-token-plan" && (model == "qwen3.8-max-preview" || model == "qwen3.8-max" || model == "qwen3.8-flash")) ||
+		(provider == "qwen" && (model == "qwen3.8-max" || model == "qwen3.8-flash")):
 		switch effort {
 		case "low":
 			return "low"
@@ -42,8 +42,7 @@ func nativeReasoningEffort(cfg Config, req Request) string {
 		case "max":
 			return "xhigh"
 		}
-	case provider == "doubao" &&
-		(model == "doubao-seed-2.1-pro" || model == "doubao-seed-2-1-pro-260628"):
+	case provider == "doubao" && isDoubaoSeedReasoningEffortModel(model):
 		switch effort {
 		case "low":
 			return "low"
@@ -52,15 +51,32 @@ func nativeReasoningEffort(cfg Config, req Request) string {
 		case "max":
 			return "high"
 		}
+	case provider == "doubao" && isDoubaoHostedDeepSeekGAModel(model):
+		if effort == "low" {
+			return "low"
+		}
+		if effort == "high" || effort == "max" {
+			return "high"
+		}
+	case provider == "doubao" && isDoubaoHostedGlm52Model(model):
+		if effort == "high" || effort == "max" {
+			return effort
+		}
+	case provider == "doubao" && isDoubaoHostedDeepSeekPreviewModel(model):
+		if effort == "high" || effort == "max" {
+			return effort
+		}
 	case provider == "kimi-cn" && model == "kimi-k3":
 		return effort
 	case provider == "kimi-coding-plan" && (model == "k3" || model == "k3-256k"):
+		return effort
+	case (provider == "glm" || provider == "glm-coding-plan") && (model == "glm-5.3" || model == "glm-5.3-flash"):
 		return effort
 	case (provider == "glm" || provider == "glm-coding-plan") && model == "glm-5.2":
 		if effort == "high" || effort == "max" {
 			return effort
 		}
-	case provider == "deepseek" && strings.HasPrefix(model, "deepseek-v4"):
+	case provider == "deepseek" && (strings.HasPrefix(model, "deepseek-v4") || model == "deepseek-flash"):
 		if effort == "high" || effort == "max" {
 			return effort
 		}
@@ -68,11 +84,13 @@ func nativeReasoningEffort(cfg Config, req Request) string {
 		switch model {
 		case "kimi-k3":
 			return effort
-		case "glm-5.2", "deepseek-v4-pro":
+		case "glm-5.3":
+			return effort
+		case "glm-5.2", "deepseek-v4-pro", "deepseek-flash":
 			if effort == "high" || effort == "max" {
 				return effort
 			}
-		case "qwen3.8-max-preview":
+		case "qwen3.8-max-preview", "qwen3.8-max", "qwen3.8-flash":
 			if effort == "low" {
 				return "low"
 			}
@@ -191,6 +209,57 @@ func isKimiK27Code(model string) bool {
 		model == "kimi-k2.7-code-highspeed" ||
 		model == "kimi-for-coding" ||
 		model == "kimi-for-coding-highspeed"
+}
+
+func isDoubaoSeedReasoningEffortModel(model string) bool {
+	switch strings.ToLower(strings.TrimSpace(model)) {
+	case "doubao-seed-evolving",
+		"doubao-seed-2.1-pro",
+		"doubao-seed-2-1-pro-260628",
+		"doubao-seed-2-1-turbo-260628",
+		"doubao-seed-2-0-code-preview-260215",
+		"doubao-seed-2-0-pro-260215",
+		"doubao-seed-2-0-lite-260428",
+		"doubao-seed-2-0-mini-260428":
+		return true
+	default:
+		return false
+	}
+}
+
+func isDoubaoHostedDeepSeekGAModel(model string) bool {
+	switch strings.ToLower(strings.TrimSpace(model)) {
+	case "deepseek-v4-pro-ga-260813", "deepseek-v4-flash-ga-260731",
+		"deepseek-v4-pro", "deepseek-v4-flash":
+		return true
+	default:
+		return false
+	}
+}
+
+func isDoubaoHostedDeepSeekPreviewModel(model string) bool {
+	switch strings.ToLower(strings.TrimSpace(model)) {
+	case "deepseek-v4-pro-260425", "deepseek-v4-flash-260425":
+		return true
+	default:
+		return false
+	}
+}
+
+func isDoubaoHostedGlm52Model(model string) bool {
+	switch strings.ToLower(strings.TrimSpace(model)) {
+	case "glm-5-2-260617", "glm-5.2":
+		return true
+	default:
+		return false
+	}
+}
+
+func supportsDoubaoPaygReasoningEffort(model string) bool {
+	return isDoubaoSeedReasoningEffortModel(model) ||
+		isDoubaoHostedDeepSeekGAModel(model) ||
+		isDoubaoHostedDeepSeekPreviewModel(model) ||
+		isDoubaoHostedGlm52Model(model)
 }
 
 func isDeepSeekProvider(key string) bool {

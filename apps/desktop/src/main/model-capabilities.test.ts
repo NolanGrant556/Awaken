@@ -192,6 +192,14 @@ describe("model capabilities", () => {
       max_output_tokens: 32_000,
       default_max_tokens: 32_000,
     });
+    expect(capabilityForModel("volcengine", "glm-5.3")).toMatchObject({
+      context_window: 1_000_000,
+      max_output_tokens: 32_000,
+    });
+    expect(capabilityForModel("volcengine", "doubao-seed-evolving")).toMatchObject({
+      context_window: 1_024_000,
+      max_output_tokens: 256_000,
+    });
   });
 
   it("fills profile defaults from the selected model without replacing user overrides", () => {
@@ -214,6 +222,32 @@ describe("model capabilities", () => {
       contextWindow: 200_000,
       maxTokens: 12_000,
     });
+
+    expect(
+      normalizeAdvancedWithModelCapability(undefined, "doubao", "doubao-seed-evolving"),
+    ).toMatchObject({
+      contextWindow: 1_024_000,
+      maxInputTokens: 1_024_000,
+      maxTokens: 32_000,
+      defaultReasoningEffort: "max",
+    });
+    expect(
+      normalizeAdvancedWithModelCapability(
+        { contextWindow: 512_000, maxTokens: 8_000 },
+        "doubao",
+        "doubao-seed-evolving",
+      ),
+    ).toMatchObject({
+      contextWindow: 512_000,
+      maxTokens: 8_000,
+    });
+    expect(
+      normalizeAdvancedWithModelCapability(
+        { contextWindow: 2_000_000 },
+        "doubao",
+        "doubao-seed-evolving",
+      ).contextWindow,
+    ).toBe(1_024_000);
   });
 
   it("defaults custom visual input off and only accepts an explicit custom override", () => {
@@ -302,8 +336,16 @@ describe("model capabilities", () => {
       levels: ["low", "high", "max"],
       default_level: "max",
     });
+    expect(capabilityForModel("glm", "glm-5.3")?.reasoning_effort).toEqual({
+      levels: ["low", "high", "max"],
+      default_level: "max",
+    });
     expect(capabilityForModel("glm", "glm-5.2")?.reasoning_effort).toEqual({
       levels: ["high", "max"],
+      default_level: "max",
+    });
+    expect(capabilityForModel("glm-coding-plan", "glm-5.3")?.reasoning_effort).toEqual({
+      levels: ["low", "high", "max"],
       default_level: "max",
     });
     expect(capabilityForModel("glm-coding-plan", "glm-5.2")?.reasoning_effort).toEqual({
@@ -319,6 +361,18 @@ describe("model capabilities", () => {
     expect(capabilityForModel("qwen", "qwen3.7-plus")?.reasoning_effort)
       .toBeUndefined();
     expect(capabilityForModel("qwen", "qwen3.8-max")?.reasoning_effort)
+      .toEqual({
+        levels: ["low", "high", "max"],
+        default_level: "max",
+        display_labels: { low: "low", high: "medium", max: "xhigh" },
+      });
+    expect(capabilityForModel("qwen", "qwen3.8-flash")?.reasoning_effort)
+      .toEqual({
+        levels: ["low", "high", "max"],
+        default_level: "max",
+        display_labels: { low: "low", high: "medium", max: "xhigh" },
+      });
+    expect(capabilityForModel("qwen-token-plan", "qwen3.8-max")?.reasoning_effort)
       .toEqual({
         levels: ["low", "high", "max"],
         default_level: "max",
@@ -349,8 +403,57 @@ describe("model capabilities", () => {
     expect(capabilityForModel("doubao", "ep-arbitrary")?.reasoning_effort).toBeUndefined();
     expect(capabilityForModel("doubao", "doubao-seed-2-1-pro-260628")?.reasoning_effort).toEqual({
       levels: ["low", "high", "max"],
-      default_level: "high",
+      default_level: "max",
+      display_labels: { low: "low", high: "medium", max: "high" },
     });
+    expect(capabilityForModel("doubao", "doubao-seed-evolving")?.reasoning_effort).toEqual({
+      levels: ["low", "high", "max"],
+      default_level: "max",
+      display_labels: { low: "low", high: "medium", max: "high" },
+    });
+    expect(capabilityForModel("doubao", "doubao-seed-2-1-turbo-260628")?.reasoning_effort).toEqual({
+      levels: ["low", "high", "max"],
+      default_level: "max",
+      display_labels: { low: "low", high: "medium", max: "high" },
+    });
+    expect(capabilityForModel("doubao", "doubao-seed-2-0-lite-260428")?.reasoning_effort).toEqual({
+      levels: ["low", "high", "max"],
+      default_level: "high",
+      display_labels: { low: "low", high: "medium", max: "high" },
+    });
+    expect(capabilityForModel("volcengine", "doubao-seed-evolving")?.reasoning_effort)
+      .toBeUndefined();
+  });
+
+  it("models Ark pay-as-you-go hosted DeepSeek and GLM from official versioned IDs", () => {
+    expect(capabilityForModel("doubao", "deepseek-v4-pro-ga-260813")).toMatchObject({
+      supported_protocols: ["openai_chat", "openai_responses"],
+      context_window: 1_024_000,
+      max_output_tokens: 384_000,
+      supports_tools: "ready",
+      reasoning_effort: { levels: ["low", "high"], default_level: "high" },
+    });
+    expect(capabilityForModel("doubao", "deepseek-v4-pro-ga-260813")?.supports_vision).toBeFalsy();
+    expect(capabilityForModel("doubao", "glm-5-2-260617")).toMatchObject({
+      supported_protocols: ["openai_chat", "openai_responses"],
+      context_window: 1_024_000,
+      max_output_tokens: 128_000,
+      reasoning_effort: { levels: ["high", "max"], default_level: "high" },
+    });
+    expect(capabilityForModel("doubao", "glm-5-3-flash-260828")).toMatchObject({
+      supported_protocols: ["openai_chat", "openai_responses"],
+      context_window: 1_024_000,
+      max_output_tokens: 128_000,
+      supports_tools: "ready",
+    });
+    expect(capabilityForModel("doubao", "glm-5-3-flash-260828")?.reasoning_effort).toBeUndefined();
+    expect(capabilityForModel("doubao", "glm-5-3-flash-260828")?.supports_vision).toBeFalsy();
+    expect(capabilityForModel("doubao", "glm-4.7")?.context_window).toBe(200_000);
+    expect(capabilityForModel("doubao", "glm-5.3")).toBeUndefined();
+    expect(capabilityForModel("doubao", "deepseek-v4-pro")?.supported_protocols).toEqual([
+      "openai_chat",
+      "openai_responses",
+    ]);
   });
 
   it("does not reuse official dynamic metadata for a custom base URL", () => {

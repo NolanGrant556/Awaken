@@ -338,6 +338,24 @@ func TestUserStoreMigratesLegacyDoubaoDisplayAlias(t *testing.T) {
 	}
 }
 
+func TestUserStoreMigratesArkHostedPricingAlias(t *testing.T) {
+	root := t.TempDir()
+	writeUserStoreFixture(t, root, `{
+  "version": 3,
+  "profiles": [
+    {"id":"doubao-hosted","providerId":"doubao","modelId":"deepseek-v4-pro","protocol":"openai_chat","enabled":true,"isDefault":true}
+  ]
+}`, "AWAKEN_API_KEY_doubao-hosted=hosted-key\n")
+
+	hosted, err := NewUserStore(root).Resolve("doubao-hosted")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hosted.ModelID != "deepseek-v4-pro-ga-260813" || hosted.CapabilityModelID != hosted.ModelID {
+		t.Fatalf("hosted Doubao alias was not normalized: %+v", hosted)
+	}
+}
+
 func writeUserStoreFixture(t *testing.T, root, models, env string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Join(root, "config"), 0o700); err != nil {

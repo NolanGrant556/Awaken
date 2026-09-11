@@ -4852,7 +4852,7 @@ describe("App workbench presentation", () => {
     const doubaoProfile = {
       modelId: "doubao-seed-2-1-pro-260628",
       modelDisplayName: "Doubao-Seed-2.1-Pro",
-      displayName: "Doubao Ark",
+      displayName: "火山方舟",
       protocol: "openai_chat",
     };
 

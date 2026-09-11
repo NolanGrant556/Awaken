@@ -29,7 +29,7 @@ describe("providerBrandForId", () => {
       qwen: "qwen",
       minimax: "minimax",
       glm: "glm",
-      doubao: "doubao",
+      doubao: "volcengine",
       deepseek: "deepseek",
     });
   });

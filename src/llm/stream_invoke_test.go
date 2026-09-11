@@ -277,6 +277,9 @@ func TestStreamInvokeOpenAIDisableReasoningWithThinkingTypeDisabledProviders(t *
 	}{
 		{name: "deepseek", providerID: "deepseek", baseURL: "https://api.deepseek.com", model: "deepseek-v4-pro"},
 		{name: "kimi cn", providerID: "kimi-cn", baseURL: "https://api.moonshot.cn/v1", model: "kimi-k2.6"},
+		{name: "doubao seed", providerID: "doubao", baseURL: "https://ark.cn-beijing.volces.com/api/v3", model: "doubao-seed-2-1-pro-260628"},
+		{name: "doubao hosted deepseek", providerID: "doubao", baseURL: "https://ark.cn-beijing.volces.com/api/v3", model: "deepseek-v4-pro-ga-260813"},
+		{name: "doubao hosted glm 5.2", providerID: "doubao", baseURL: "https://ark.cn-beijing.volces.com/api/v3", model: "glm-5-2-260617"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

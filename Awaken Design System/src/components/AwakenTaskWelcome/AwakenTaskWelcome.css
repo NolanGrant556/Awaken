@@ -20,6 +20,7 @@
   filter: var(--aw-brand-wordmark-filter, none);
   image-rendering: auto;
   user-select: none;
+  -webkit-user-drag: none;
 }
 
 .aw-task-welcome__message {

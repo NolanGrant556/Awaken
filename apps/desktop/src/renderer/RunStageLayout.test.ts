@@ -81,6 +81,9 @@ describe("RunStage layout", () => {
     expect(cssRule(designSystemStyles, ".aw-task-welcome")).toContain(
       "gap: 14px;",
     );
+    expect(cssRule(designSystemStyles, ".aw-task-welcome__logo")).toContain(
+      "-webkit-user-drag: none;",
+    );
     expect(cssRule(designSystemStyles, ".aw-task-welcome__message")).toContain(
       "font-size: var(--aw-font-size-lg);",
     );

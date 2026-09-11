@@ -4916,7 +4916,9 @@ describe("App workbench presentation", () => {
     expect(html).toContain("desktop-root-inspector-expanded");
     expect(html).toContain('aria-label="Collapse inspector"');
     expect(html).toContain('aria-label="Resize inspector"');
-    expect(html).toContain("aw-task-welcome__logo");
+    expect(html).toMatch(
+      /aw-task-welcome__logo"[^>]*draggable="false"/,
+    );
     expect(html).toContain("把任务交给 Awaken，自主执行，唤醒自由。");
     expect(html).toContain(
       'placeholder="描述任务，或 / 选择 Skill、@ 选择内置功能或插件"',

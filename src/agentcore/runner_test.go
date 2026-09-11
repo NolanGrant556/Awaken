@@ -2683,6 +2683,49 @@ func TestRunnerDoesNotRetryAfterToolStreamStarts(t *testing.T) {
 	}
 }
 
+func TestRunnerRetriesStreamDisconnectAfterUnexecutedToolStream(t *testing.T) {
+	var events []AwakenEvent
+	emitter := newRunEventEmitter("thread-tools-disconnect", EventSinkFunc(func(event AwakenEvent) {
+		events = append(events, event)
+	}))
+	runner := NewRunner(testAgentConfig("http://unused", 2), convcontext.NewConversation(nil), nil)
+	runner.llmRetrySleep = func(context.Context, time.Duration) error { return nil }
+	calls := 0
+	var secondPreferNonStreaming bool
+	response, err := runner.streamLLMWithTransientRetry(context.Background(), emitter, func(_ context.Context, current *runEventEmitter) (*llm.Response, error) {
+		calls++
+		if calls == 1 {
+			current.onLLMStreamEvent(llm.StreamEvent{Type: llm.StreamEventToolCallStart})
+			current.onLLMDelta("partial", false)
+			return nil, &llm.StreamDisconnectedError{Reason: "stream eof"}
+		}
+		secondPreferNonStreaming = current.preferNonStreaming
+		return &llm.Response{Content: "fresh"}, nil
+	})
+	if err != nil || response == nil || response.Content != "fresh" || calls != 2 {
+		t.Fatalf("unexecuted tool stream disconnect must retry, calls=%d response=%+v err=%v", calls, response, err)
+	}
+	if !secondPreferNonStreaming {
+		t.Fatal("retry after unexecuted tool stream must switch to non-streaming")
+	}
+	if emitter.toolStreamStarted {
+		t.Fatal("failed tool stream must be discarded before retry")
+	}
+	if emitter.hasEphemeralStreamOutput() {
+		t.Fatal("failed partial stream must be discarded before retry")
+	}
+	var retryEvent *AwakenEvent
+	for index := range events {
+		if events[index].Type == ProviderReconnectEventType && events[index].ProviderReconnect != nil &&
+			events[index].ProviderReconnect.Phase == ProviderReconnectRetrying {
+			retryEvent = &events[index]
+		}
+	}
+	if retryEvent == nil || !retryEvent.ProviderReconnect.ResetInProgress || retryEvent.ProviderReconnect.Attempt != 1 {
+		t.Fatalf("expected reconnecting event with reset, got %+v", retryEvent)
+	}
+}
+
 func TestRunEventEmitterRunErroredTransportErrorDoesNotLeakURL(t *testing.T) {
 	var gotEvents []AwakenEvent
 	emitter := newRunEventEmitter("thread-test", EventSinkFunc(func(event AwakenEvent) {

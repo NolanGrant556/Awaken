@@ -189,6 +189,7 @@ func (e *runEventEmitter) resetTurn() {
 	e.reasoningOpen = false
 	e.textStartedThisTurn = false
 	e.toolStreamStarted = false
+	e.preferNonStreaming = false
 	e.reasoningText.Reset()
 	e.assistantText.Reset()
 	e.toolArgumentProgress.reset()
@@ -198,11 +199,11 @@ func (e *runEventEmitter) hasEphemeralStreamOutput() bool {
 	if e == nil {
 		return false
 	}
-	return e.textOpen || e.reasoningOpen || e.assistantText.Len() > 0 || e.reasoningText.Len() > 0
+	return e.textOpen || e.reasoningOpen || e.assistantText.Len() > 0 || e.reasoningText.Len() > 0 || e.toolStreamStarted
 }
 
 func (e *runEventEmitter) discardEphemeralStreamOutput() {
-	if e == nil || e.toolStreamStarted {
+	if e == nil {
 		return
 	}
 	e.currentAssistantID = ""
@@ -211,8 +212,10 @@ func (e *runEventEmitter) discardEphemeralStreamOutput() {
 	e.textOpen = false
 	e.reasoningOpen = false
 	e.textStartedThisTurn = false
+	e.toolStreamStarted = false
 	e.assistantText.Reset()
 	e.reasoningText.Reset()
+	e.toolArgumentProgress.reset()
 }
 
 func (e *runEventEmitter) providerReconnect(phase string, attempt, maxAttempts int, err error, reset bool) {

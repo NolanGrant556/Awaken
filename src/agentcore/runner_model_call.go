@@ -89,6 +89,10 @@ const (
 
 func llmRetryKind(err error, events *runEventEmitter) (kind string, reset bool) {
 	if events != nil && events.toolStreamStarted {
+		if llm.IsStreamDisconnectedError(err) {
+			events.preferNonStreaming = true
+			return llmRetryTransient, true
+		}
 		return llmRetryNone, false
 	}
 	reset = events != nil && events.hasEphemeralStreamOutput()
@@ -144,7 +148,8 @@ func (r *Runner) streamLLM(ctx stdcontext.Context, events *runEventEmitter) (*ll
 		ReasoningPolicy:       r.config.ModelConfig.ReasoningEffort,
 		NativeCompactionState: nativeCompactionStateFromBundle(r.config.ModelConfig, r.config.RestoredContextBundleV2),
 	}
-	prepared, err := llm.PrepareRequest(config, request, true)
+	useStream := events == nil || !events.preferNonStreaming
+	prepared, err := llm.PrepareRequest(config, request, useStream)
 	if err != nil {
 		return nil, err
 	}
@@ -159,14 +164,28 @@ func (r *Runner) streamLLM(ctx stdcontext.Context, events *runEventEmitter) (*ll
 		}
 	}
 	r.contextGovernor.RecordSentRequestEstimate(snapshot.EstimatedInputTokens)
-	observer := llm.StreamObserver{}
-	if events != nil {
-		observer.OnContent = llm.StreamCallback(events.onLLMDelta)
-		observer.OnToolCallDelta = events.onToolCallArgsDelta
-		observer.OnEvent = events.onLLMStreamEvent
-	}
 	started := time.Now()
-	response, streamErr := llm.StreamPreparedWithObserver(ctx, config, prepared, observer)
+	var response *llm.Response
+	var streamErr error
+	if useStream {
+		observer := llm.StreamObserver{}
+		if events != nil {
+			observer.OnContent = llm.StreamCallback(events.onLLMDelta)
+			observer.OnToolCallDelta = events.onToolCallArgsDelta
+			observer.OnEvent = events.onLLMStreamEvent
+		}
+		response, streamErr = llm.StreamPreparedWithObserver(ctx, config, prepared, observer)
+	} else {
+		response, streamErr = llm.InvokePrepared(ctx, config, prepared)
+		if streamErr == nil && response != nil && events != nil {
+			if strings.TrimSpace(response.Thinking) != "" {
+				events.onLLMDelta(response.Thinking, true)
+			}
+			if strings.TrimSpace(response.Content) != "" {
+				events.onLLMDelta(response.Content, false)
+			}
+		}
+	}
 	if response != nil {
 		if response.ProviderOpaqueState == nil && prepared.Cache.ReasoningReplay && strings.TrimSpace(response.Thinking) != "" {
 			revision := config.CredentialRevision

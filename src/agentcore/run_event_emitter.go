@@ -32,6 +32,7 @@ type runEventEmitter struct {
 	reasoningOpen         bool
 	textStartedThisTurn   bool
 	toolStreamStarted     bool
+	preferNonStreaming    bool
 	mutationOccurred      bool
 	reasoningText         strings.Builder
 	assistantText         strings.Builder

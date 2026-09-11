@@ -100,6 +100,11 @@ func IsConnectionError(err error) bool {
 	return errors.As(err, &transportError)
 }
 
+func IsStreamDisconnectedError(err error) bool {
+	var streamError *StreamDisconnectedError
+	return errors.As(err, &streamError)
+}
+
 // SafeRetryDetail returns a URL-free phrase for reconnect UI and diagnostics.
 func SafeRetryDetail(err error) string {
 	var transportError *TransportError

@@ -620,20 +620,54 @@ func TestInstalledDigestDriftFailsClosed(t *testing.T) {
 
 func TestRuntimeLeaseBlocksPluginGenerationMutation(t *testing.T) {
 	store := testStore(t)
-	sourceRoot := t.TempDir()
-	writePluginFixture(t, sourceRoot, "leased.plugin", false)
-	if _, err := store.Install(context.Background(), InstallRequest{Source: Source{Kind: SourceLocalPath, Path: sourceRoot}}); err != nil {
+	leasedRoot := t.TempDir()
+	otherRoot := t.TempDir()
+	freshRoot := t.TempDir()
+	replaceRoot := t.TempDir()
+	writePluginFixture(t, leasedRoot, "leased.plugin", false)
+	writePluginFixture(t, otherRoot, "other.plugin", false)
+	writePluginFixture(t, freshRoot, "fresh.plugin", false)
+	writePluginFixture(t, replaceRoot, "leased.plugin", true)
+	if _, err := store.Install(context.Background(), InstallRequest{Source: Source{Kind: SourceLocalPath, Path: leasedRoot}}); err != nil {
 		t.Fatal(err)
 	}
-	lease, err := store.AcquireRuntimeLease()
+	if _, err := store.Install(context.Background(), InstallRequest{Source: Source{Kind: SourceLocalPath, Path: otherRoot}}); err != nil {
+		t.Fatal(err)
+	}
+	empty, err := store.AcquireRuntimeLease(nil)
+	if err != nil || empty.ID != "" || empty.Generation != "" || store.ActiveRuntimeLeases() != 0 {
+		t.Fatalf("empty lease=%#v count=%d err=%v", empty, store.ActiveRuntimeLeases(), err)
+	}
+	if _, err := store.SetEnabled("other.plugin", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SetEnabled("other.plugin", true); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := store.AcquireRuntimeLease([]string{"leased.plugin", "leased.plugin", " "})
 	if err != nil || lease.Generation == "" || store.ActiveRuntimeLeases() != 1 {
 		t.Fatalf("lease=%#v count=%d err=%v", lease, store.ActiveRuntimeLeases(), err)
+	}
+	if len(lease.Plugins) != 1 || lease.Plugins[0] != "leased.plugin" {
+		t.Fatalf("leased plugins=%v", lease.Plugins)
+	}
+	if _, err := store.SetEnabled("other.plugin", false); err != nil {
+		t.Fatalf("unused plugin mutation err=%v", err)
+	}
+	if _, err := store.Uninstall("other.plugin"); err != nil {
+		t.Fatalf("unused plugin uninstall err=%v", err)
+	}
+	if _, err := store.Install(context.Background(), InstallRequest{Source: Source{Kind: SourceLocalPath, Path: freshRoot}}); err != nil {
+		t.Fatalf("new install while other plugin leased err=%v", err)
 	}
 	if _, err := store.SetEnabled("leased.plugin", false); !errors.Is(err, ErrRuntimeLeaseActive) {
 		t.Fatalf("mutation while leased err=%v", err)
 	}
 	if _, err := store.Uninstall("leased.plugin"); !errors.Is(err, ErrRuntimeLeaseActive) {
 		t.Fatalf("uninstall while leased err=%v", err)
+	}
+	if _, err := store.Install(context.Background(), InstallRequest{Source: Source{Kind: SourceLocalPath, Path: replaceRoot}, Replace: true}); !errors.Is(err, ErrRuntimeLeaseActive) {
+		t.Fatalf("replace while leased err=%v", err)
 	}
 	store.ReleaseRuntimeLease(lease.ID)
 	store.ReleaseRuntimeLease(lease.ID)
@@ -643,6 +677,26 @@ func TestRuntimeLeaseBlocksPluginGenerationMutation(t *testing.T) {
 	if _, err := store.SetEnabled("leased.plugin", false); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestRuntimeLeaseResolvesSkillCatalogIdentity(t *testing.T) {
+	store := testStore(t)
+	sourceRoot := t.TempDir()
+	writePluginFixture(t, sourceRoot, "acme.tools", false)
+	if _, err := store.Install(context.Background(), InstallRequest{Source: Source{Kind: SourceLocalPath, Path: sourceRoot}}); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := store.AcquireRuntimeLease([]string{"plugin__acme-tools__lint"})
+	if err != nil || store.ActiveRuntimeLeases() != 1 {
+		t.Fatalf("lease=%#v count=%d err=%v", lease, store.ActiveRuntimeLeases(), err)
+	}
+	if len(lease.Plugins) != 1 || lease.Plugins[0] != "acme.tools" {
+		t.Fatalf("canonical lease plugins=%v", lease.Plugins)
+	}
+	if _, err := store.SetEnabled("acme.tools", false); !errors.Is(err, ErrRuntimeLeaseActive) {
+		t.Fatalf("catalog identity lease err=%v", err)
+	}
+	store.ReleaseRuntimeLease(lease.ID)
 }
 
 func TestManagedPluginDataSymlinkFailsClosed(t *testing.T) {

@@ -122,7 +122,7 @@ func TestRunServicePinsAndReleasesPluginGeneration(t *testing.T) {
 			return "done", nil
 		})
 	})
-	service.SetPluginRuntimeLeaseProvider(func() (string, func(), error) {
+	service.SetPluginRuntimeLeaseProvider(func([]string) (string, func(), error) {
 		return "generation-1", func() { released.Add(1) }, nil
 	})
 	run, err := service.StartRun(StartRunRequest{Input: "hello", Workspace: WorkspaceConfig{WorkspaceRoot: t.TempDir()}})
@@ -139,6 +139,55 @@ func TestRunServicePinsAndReleasesPluginGeneration(t *testing.T) {
 	if released.Load() != 1 {
 		t.Fatalf("release count=%d", released.Load())
 	}
+}
+
+func TestRunServiceAcquiresPluginLeaseForBoundPluginsOnly(t *testing.T) {
+	var got atomic.Value
+	var calls atomic.Int32
+	service := NewRunService(nil, func(*agentcore.Agent) Executor {
+		return ExecutorFunc(func(context.Context, string, agentcore.EventSink) (string, error) {
+			return "done", nil
+		})
+	})
+	service.SetComposerPluginValidator(func(name, digest string) error { return nil })
+	service.SetPluginRuntimeLeaseProvider(func(names []string) (string, func(), error) {
+		calls.Add(1)
+		got.Store(append([]string(nil), names...))
+		return "generation-bound", func() {}, nil
+	})
+	plain, err := service.StartRun(StartRunRequest{Input: "hello", Workspace: WorkspaceConfig{WorkspaceRoot: t.TempDir()}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("unbound run lease calls=%d", calls.Load())
+	}
+	if names, _ := got.Load().([]string); len(names) != 0 {
+		t.Fatalf("unbound run lease names=%v", names)
+	}
+	waitForRunTerminal(t, service, plain.RunID)
+
+	pluginRun, err := service.StartRun(StartRunRequest{
+		Input:     "use plugin",
+		Workspace: WorkspaceConfig{WorkspaceRoot: t.TempDir()},
+		ComposerTokens: []ComposerToken{{
+			ID: "plugin:acme.tools:digest-v1", Type: "plugin", Label: "acme.tools",
+			Payload: ComposerTokenPayload{PluginName: "acme.tools", PluginDigest: "digest-v1"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("bound run lease calls=%d", calls.Load())
+	}
+	if names, _ := got.Load().([]string); !reflect.DeepEqual(names, []string{"acme.tools"}) {
+		t.Fatalf("bound run lease names=%v", names)
+	}
+	if snapshot, _ := service.GetRun(pluginRun.RunID); snapshot.PluginGeneration != "generation-bound" {
+		t.Fatalf("plugin generation=%q", snapshot.PluginGeneration)
+	}
+	waitForRunTerminal(t, service, pluginRun.RunID)
 }
 
 func TestRunServiceUsesModelProfileForNewAndExistingThreads(t *testing.T) {

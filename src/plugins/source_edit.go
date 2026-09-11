@@ -30,7 +30,7 @@ func (s *Store) UpdateMCPSource(name, logicalID, expectedRecordedDigest, source 
 
 	var result UpdateComponentSourceResult
 	changed := false
-	err := s.withMutationLock(func() (operationErr error) {
+	err := s.withPluginMutationLock(name, func() (operationErr error) {
 		state, err := s.readStateUnlocked()
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err

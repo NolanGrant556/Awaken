@@ -29,7 +29,7 @@ func (s *Store) commitInstalledChanges(name, expectedRecordedDigest string, befo
 	}
 
 	var result CommitInstalledChangesResult
-	err := s.withMutationLock(func() error {
+	err := s.withPluginMutationLock(name, func() error {
 		state, err := s.readStateUnlocked()
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err

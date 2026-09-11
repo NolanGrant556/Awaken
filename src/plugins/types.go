@@ -47,8 +47,9 @@ var (
 )
 
 type RuntimeLease struct {
-	ID         string `json:"id"`
-	Generation string `json:"generation"`
+	ID         string   `json:"id"`
+	Generation string   `json:"generation"`
+	Plugins    []string `json:"plugins,omitempty"`
 }
 
 // Diagnostic is the additive v2 component finding shared with dialect IR.

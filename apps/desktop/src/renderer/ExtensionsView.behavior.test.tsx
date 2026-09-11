@@ -1094,6 +1094,105 @@ describe("ExtensionsView behavior", () => {
 
   });
 
+  it("keeps an occupied uninstall error inside the Plugin Console dialog", async () => {
+    const plugin: RuntimePlugin = {
+      name: "cli-for-agents",
+      version: "1.0.0",
+      description: "CLI-backed repo compatibility",
+      dialect: "cursor",
+      compatibilityState: "compatible",
+      enabled: true,
+      source: { kind: "local_path", path: "/tmp/cli-for-agents.zip" },
+      digest: "digest-cli-v1",
+      skillCount: 1,
+      serverCount: 0,
+      componentTotals: {
+        total: 1,
+        runnable: 1,
+        needsConfiguration: 0,
+        unsupported: 0,
+        ignored: 0,
+        invalid: 0,
+      },
+    };
+    const uninstallPlugin = vi.fn(async () => {
+      throw new Error("RUNTIME_GENERATION_IN_USE: plugin cli-for-agents is in use");
+    });
+    const runtimeClient = {
+      getPluginSetup: vi.fn(async () => ({
+        items: [],
+        summary: {
+          total: 0,
+          ready: 0,
+          needsConfiguration: 0,
+          needsAuth: 0,
+          needsAdminApproval: 0,
+          inProgress: 0,
+          failed: 0,
+          unsupported: 0,
+        },
+      })),
+      getRuntimeInfo: vi.fn(async () => ({ defaultWorkspace: projectRoot })),
+      listProjects: vi.fn(async () => [runtimeProject]),
+      listConnectors: vi.fn(async () => []),
+      listCliConnectors: vi.fn(async () => []),
+      listMcpServers: vi.fn(async () => []),
+      listSkills: vi.fn(async () => []),
+      listPlugins: vi.fn(async () => [plugin]),
+      getPlugin: vi.fn(async () => plugin),
+      listPluginComponents: vi.fn(async () => []),
+      getPluginConfiguration: vi.fn(async () => ({ fields: [], revision: 1 })),
+      uninstallPlugin,
+      subscribeCliConnectorState: vi.fn(() => () => undefined),
+    } as unknown as RuntimeClient;
+
+    await act(async () => {
+      root.render(
+        <ExtensionsView
+          section="plugins"
+          desktopReady
+          runtimeClient={runtimeClient}
+          activeWorkspaceRoot={projectRoot}
+          onNotice={vi.fn()}
+        />,
+      );
+    });
+    await settle();
+
+    await act(async () => buttonByText("已安装插件")?.click());
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>(".aw-plugin-card__main")?.click();
+    });
+    await settle();
+
+    await act(async () => buttonByText("卸载")?.click());
+    await settle();
+    const uninstallDialog = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"]'))
+      .find((dialog) => dialog.textContent?.includes("卸载插件"));
+    expect(uninstallDialog).not.toBeNull();
+
+    await act(async () => buttonByText("确认卸载")?.click());
+    await settle();
+
+    expect(uninstallPlugin).toHaveBeenCalledWith("cli-for-agents");
+    expect(uninstallDialog?.querySelector('[role="alert"]')?.textContent).toContain(
+      "当前任务正在使用这个插件，请等待或取消任务后重试",
+    );
+    expect(uninstallDialog?.querySelector('[role="alert"]')?.textContent).toContain(
+      "RUNTIME_GENERATION_IN_USE",
+    );
+    expect(document.querySelector(".aw-plugin-console")).not.toBeNull();
+    expect(document.querySelector(".aw-plugins")).toBeNull();
+
+    await act(async () => buttonByText("取消")?.click());
+    await settle();
+    await act(async () => buttonByText("返回插件")?.click());
+    await settle();
+
+    expect(document.querySelector(".aw-plugins")).not.toBeNull();
+    expect(document.querySelector(".aw-plugins [role='alert']")).toBeNull();
+  });
+
   it("accepts a dropped ZIP and rejects a dropped non-ZIP before Core validation", async () => {
     const resolveDroppedPluginSource = vi
       .fn()

@@ -43,7 +43,7 @@ func (s *Store) Install(ctx context.Context, req InstallRequest) (InstallResult,
 // Uninstall moves the package and data directories to Trash, then drops the record.
 func (s *Store) Uninstall(name string) (string, error) {
 	var trashed string
-	err := s.withMutationLock(func() (operationErr error) {
+	err := s.withPluginMutationLock(name, func() (operationErr error) {
 		state, err := s.readStateUnlocked()
 		if err != nil && !os.IsNotExist(err) {
 			return err
@@ -195,6 +195,9 @@ func (s *Store) installLocked(ctx context.Context, req InstallRequest) (result I
 	}
 	if !isValidPluginName(name) {
 		return InstallResult{}, fmt.Errorf("%w: invalid install name %q", ErrManifestInvalid, name)
+	}
+	if err := s.rejectIfLeased(name); err != nil {
+		return InstallResult{}, err
 	}
 	manifest := Manifest{
 		Name: name, Version: normalized.Identity.Version, Description: normalized.Identity.Description,

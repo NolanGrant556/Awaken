@@ -401,8 +401,8 @@ func main() {
 			}
 			return runtime.PluginAgentSelection{AgentType: role.Type, ReadOnly: role.ReadOnly}, nil
 		})
-		runService.SetPluginRuntimeLeaseProvider(func() (string, func(), error) {
-			lease, err := pluginStore.AcquireRuntimeLease()
+		runService.SetPluginRuntimeLeaseProvider(func(pluginNames []string) (string, func(), error) {
+			lease, err := pluginStore.AcquireRuntimeLease(pluginNames)
 			if err != nil {
 				return "", nil, err
 			}

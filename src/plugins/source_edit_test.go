@@ -147,15 +147,43 @@ func TestMCPSourceEditRejectsInvalidStaleAndLeasedMutationsWithoutChangingLiveTr
 	}
 	assertSourceUnchanged()
 
-	lease, err := store.AcquireRuntimeLease()
+	otherRoot := t.TempDir()
+	writePluginFixture(t, otherRoot, "source.other", true)
+	if _, err := store.Install(context.Background(), InstallRequest{Source: Source{Kind: SourceLocalPath, Path: otherRoot}}); err != nil {
+		t.Fatal(err)
+	}
+	unrelated, err := store.AcquireRuntimeLease([]string{"source.other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	edited, err := store.UpdateMCPSource("source.reject", component.LogicalID, installed.Plugin.Digest, string(original)+"\n")
+	if err != nil {
+		t.Fatalf("unrelated lease blocked unused source edit: %v", err)
+	}
+	store.ReleaseRuntimeLease(unrelated.ID)
+	original, err = os.ReadFile(livePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := store.AcquireRuntimeLease([]string{"source.reject"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.ReleaseRuntimeLease(lease.ID)
-	if _, err := store.UpdateMCPSource("source.reject", component.LogicalID, installed.Plugin.Digest, string(original)+"\n"); !errors.Is(err, ErrRuntimeLeaseActive) {
+	if _, err := store.UpdateMCPSource("source.reject", component.LogicalID, edited.Digest, string(original)+"\n"); !errors.Is(err, ErrRuntimeLeaseActive) {
 		t.Fatalf("leased edit err=%v", err)
 	}
-	assertSourceUnchanged()
+	current, readErr := os.ReadFile(livePath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(current) != string(original) {
+		t.Fatalf("leased edit changed live source: %s", current)
+	}
+	plugin, getErr := store.Get("source.reject")
+	if getErr != nil || !plugin.IntegrityValid || plugin.Digest != edited.Digest {
+		t.Fatalf("leased edit changed plugin: plugin=%+v err=%v", plugin, getErr)
+	}
 }
 
 func TestMCPSourceEditRollsBackPackageAndStateWhenTrashIsUnavailable(t *testing.T) {

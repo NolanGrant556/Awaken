@@ -244,8 +244,21 @@ describe("RunStage layout", () => {
     expect(tabs).toContain("padding: 0 0 0 4px;");
     expect(tabs).toContain("overflow-x: auto;");
     expect(addWrapper).toContain("flex: 0 0 auto;");
+    expect(actions).toContain("position: absolute;");
+    expect(actions).toContain(
+      "top: calc(50% - 11px + var(--aw-window-control-top-offset, -1px));",
+    );
+    expect(actions).toContain("right: 12px;");
+    expect(actions).toContain("height: 22px;");
     expect(actions).toContain("flex: 0 0 auto;");
+    expect(actions).not.toContain("margin-bottom");
     expect(expandToggle).toContain("flex: 0 0 auto;");
+    expect(projectFileStyles).toMatch(
+      /\.project-files-chrome-actions \.workbench-chrome-panel-toggle\s*\{\s*position: relative;/,
+    );
+    expect(projectFileStyles).toMatch(
+      /\.desktop-root-inspector-expanded\s+\.workbench-chrome-right:has\(\s*\.project-files-chrome-actions \.workbench-chrome-expand-toggle\s*\)\s*\{\s*padding-right: 72px;/,
+    );
   });
 
   it("keeps the inspector toggle on the same right-side anchor when collapsed", () => {

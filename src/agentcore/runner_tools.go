@@ -173,6 +173,16 @@ func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.To
 			}
 			continue
 		}
+		if blocked := r.rejectResearchPublish(hookCall); blocked != nil {
+			results = append(results, *blocked)
+			if events != nil {
+				if err := events.emitToolResultBatch(runCtx, *blocked, nil, nil); err != nil {
+					cancel()
+					terminateReason = TerminalReasonPersistenceError
+				}
+			}
+			continue
+		}
 
 		if r.failureSupervisor != nil {
 			r.failureSupervisor.NoteRealExecution(before.CallSignature)
@@ -261,6 +271,7 @@ func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.To
 
 		r.applyImplicitSkillActivation(call.Function.Name, result, activationPlan)
 		r.applyDeferredToolActivation(runCtx, events, call, deferredToolsLoadedByFind)
+		r.recordResearchToolReceipt(result)
 		results = append(results, result)
 		if err := r.commitToolOutcome(runCtx, call, result, recovery, buffer, events); err != nil {
 			cancel()

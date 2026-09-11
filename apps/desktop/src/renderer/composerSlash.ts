@@ -435,7 +435,7 @@ function deepResearchMentionAction(): SlashAction {
     type: "workflow",
     label: "深度研究",
     sectionLabel: "内置",
-    description: "宿主编排的只读多源研究报告",
+    description: "主 Agent 组队调研并发布 Office 或 Markdown 报告",
     keywords: [
       "deep-research",
       "deep research",

@@ -60,6 +60,8 @@ const (
 	RequestPurposeConnectionTest    RequestPurpose = "connection_test"
 	RequestPurposeHookPrompt        RequestPurpose = "hook_prompt"
 	RequestPurposeHookAgent         RequestPurpose = "hook_agent"
+	// RequestPurposeResearchSynthesis is retained for historical usage
+	// records. New Deep Research runs use the ordinary agent-turn purpose.
 	RequestPurposeResearchSynthesis RequestPurpose = "research_synthesis"
 )
 

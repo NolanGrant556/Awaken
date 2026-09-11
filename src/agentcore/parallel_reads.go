@@ -157,6 +157,7 @@ func (r *Runner) executeParallelReads(ctx context.Context, calls []convcontext.T
 					}
 				}
 			}
+			r.recordResearchToolReceipt(result)
 			results = append(results, result)
 		}
 	}

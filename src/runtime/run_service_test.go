@@ -500,6 +500,17 @@ func TestRunServiceValidatesInputAndMissingRun(t *testing.T) {
 	if _, err := service.StartRun(StartRunRequest{Input: "   ", Workspace: WorkspaceConfig{WorkspaceRoot: t.TempDir()}}); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("expected ErrInvalidInput, got %v", err)
 	}
+	if _, err := service.StartRun(StartRunRequest{
+		Input:     "",
+		Workspace: WorkspaceConfig{WorkspaceRoot: t.TempDir()},
+		ComposerTokens: []ComposerToken{{
+			ID:      "workflow:deep-research",
+			Type:    "workflow",
+			Payload: ComposerTokenPayload{WorkflowID: "deep-research"},
+		}},
+	}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("empty deep-research query must not start: %v", err)
+	}
 	if _, err := service.Subscribe("missing", 0); !errors.Is(err, ErrRunNotFound) {
 		t.Fatalf("expected ErrRunNotFound from Subscribe, got %v", err)
 	}

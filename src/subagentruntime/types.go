@@ -169,9 +169,9 @@ type TaskSnapshot struct {
 	CreatedAt              time.Time        `json:"created_at"`
 	StartedAt              *time.Time       `json:"started_at,omitempty"`
 	FinishedAt             *time.Time       `json:"finished_at,omitempty"`
-	// HostToolReceipts are host-only, successful read receipts used to ground
-	// Deep Research evidence. They are intentionally excluded from the public
-	// subagent snapshot and are persisted by the research journal instead.
+	// HostToolReceipts are host-only successful Read/WebFetch receipts.
+	// Deep Research uses them for the publish citation gate. They stay off
+	// the public subagent snapshot.
 	HostToolReceipts []HostToolReceipt `json:"-"`
 }
 

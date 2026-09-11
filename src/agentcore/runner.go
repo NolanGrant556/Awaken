@@ -4,6 +4,7 @@ import (
 	"awaken/src/context"
 	"awaken/src/hookruntime"
 	"awaken/src/llm"
+	"awaken/src/researchruntime"
 	"awaken/src/skillruntime"
 	"awaken/src/subagentruntime"
 	"awaken/src/tool"
@@ -57,6 +58,9 @@ type Runner struct {
 	configureEmitter        func(*runEventEmitter)
 	runPlanService          tool.RunPlanService
 	nativeCompactionInvoker func(stdcontext.Context, ModelCallAuthority, llm.Config, llm.Request) (*llm.Response, error)
+	researchPrefetch        []researchruntime.PrefetchedSource
+	researchReceipts        []subagentruntime.HostToolReceipt
+	researchRevision        int
 }
 
 func NewRunner(config AgentConfig, conv *context.Conversation, reqBuilder *RequestBuilder) *Runner {
@@ -286,8 +290,13 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 		}
 	}
 	events.afterTerminal = r.runEndHookCallback()
-	if r.config.ResearchIntent != nil && r.config.SubagentOrigin == nil {
-		return r.runDeepResearch(ctx, events)
+	if err := r.prepareResearchTeam(ctx, events); err != nil {
+		if ctx.Err() != nil {
+			events.runErrored(ctx, ctx.Err(), TerminalReasonCancelled)
+			return "", ctx.Err()
+		}
+		events.runErrored(ctx, err)
+		return "", err
 	}
 	turnState := newTurnState(events.threadID, events.runID, r.effectiveMaxThoughts(), r.config.ModelConfig.Model)
 	transition := TransitionInitial

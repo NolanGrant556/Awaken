@@ -446,7 +446,7 @@ describe("useRunStageScrollController prompt anchor timing", () => {
           new WheelEvent("wheel", { deltaY: -12, bubbles: true }),
         );
       });
-      expect(runStage.dataset.returnToLatestVisible).toBe("true");
+      expect(runStage.dataset.returnToLatestVisible).toBe("false");
 
       scrollToMock.mockClear();
       defineRunStageScrollGeometry(runStage, 3_000);
@@ -455,6 +455,39 @@ describe("useRunStageScrollController prompt anchor timing", () => {
       });
 
       expect(scrollToMock).not.toHaveBeenCalled();
+      expect(runStage.dataset.returnToLatestVisible).toBe("false");
+    });
+
+    it("does not show return-to-latest after a pause that stays on the latest output", () => {
+      const { runStage } = renderFollowingController();
+
+      act(() => {
+        runStage.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+      });
+      expect(runStage.dataset.returnToLatestVisible).toBe("false");
+
+      act(() => {
+        runStage.dispatchEvent(
+          new WheelEvent("wheel", { deltaY: -12, bubbles: true }),
+        );
+      });
+      expect(runStage.dataset.returnToLatestVisible).toBe("false");
+    });
+
+    it("shows return-to-latest only after the paused view leaves the latest output", () => {
+      const { runStage } = renderFollowingController();
+
+      act(() => {
+        runStage.dispatchEvent(
+          new WheelEvent("wheel", { deltaY: -12, bubbles: true }),
+        );
+      });
+      expect(runStage.dataset.returnToLatestVisible).toBe("false");
+
+      runStage.scrollTop = 400;
+      act(() => {
+        runStage.dispatchEvent(new Event("scroll"));
+      });
       expect(runStage.dataset.returnToLatestVisible).toBe("true");
     });
 
@@ -478,6 +511,12 @@ describe("useRunStageScrollController prompt anchor timing", () => {
         runStage.dispatchEvent(
           new WheelEvent("wheel", { deltaY: -12, bubbles: true }),
         );
+      });
+      expect(runStage.dataset.returnToLatestVisible).toBe("false");
+
+      runStage.scrollTop = 400;
+      act(() => {
+        runStage.dispatchEvent(new Event("scroll"));
       });
       expect(runStage.dataset.returnToLatestVisible).toBe("true");
     });

@@ -6217,29 +6217,53 @@ describe("App workbench presentation", () => {
     ).toBe(true);
   });
 
-  it("shows return-to-latest whenever the user paused away from the latest turn", () => {
+  it("shows return-to-latest only after the user has left the latest output", () => {
     expect(
       shouldShowReturnToLatestAffordance({
         followMode: "paused_by_user",
         hasLatestTurn: true,
+        isNearLatestOutput: false,
+        isAtScrollBottom: false,
       }),
     ).toBe(true);
     expect(
       shouldShowReturnToLatestAffordance({
-        followMode: "following_latest",
+        followMode: "paused_by_user",
         hasLatestTurn: true,
+        isNearLatestOutput: true,
+        isAtScrollBottom: true,
       }),
     ).toBe(false);
     expect(
       shouldShowReturnToLatestAffordance({
         followMode: "paused_by_user",
         hasLatestTurn: true,
+        isNearLatestOutput: true,
+        isAtScrollBottom: false,
       }),
-    ).toBe(true);
+    ).toBe(false);
+    expect(
+      shouldShowReturnToLatestAffordance({
+        followMode: "paused_by_user",
+        hasLatestTurn: true,
+        isNearLatestOutput: false,
+        isAtScrollBottom: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldShowReturnToLatestAffordance({
+        followMode: "following_latest",
+        hasLatestTurn: true,
+        isNearLatestOutput: false,
+        isAtScrollBottom: false,
+      }),
+    ).toBe(false);
     expect(
       shouldShowReturnToLatestAffordance({
         followMode: "paused_by_user",
         hasLatestTurn: false,
+        isNearLatestOutput: false,
+        isAtScrollBottom: false,
       }),
     ).toBe(false);
   });

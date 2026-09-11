@@ -242,6 +242,40 @@ function turnHasBodyItems(turn: HTMLElement): boolean {
   return Boolean(body?.firstElementChild);
 }
 
+function readLatestOutputViewport({
+  element,
+  turn,
+  bottomReserve,
+}: {
+  element: HTMLElement;
+  turn: HTMLElement | undefined;
+  bottomReserve: number;
+}): {
+  isNearLatestOutput: boolean;
+  isAtScrollBottom: boolean;
+} {
+  const isAtScrollBottom = isNearScrollBottom({
+    scrollTop: element.scrollTop,
+    scrollHeight: element.scrollHeight,
+    clientHeight: element.clientHeight,
+    threshold: 2,
+  });
+  if (!turn) {
+    return { isNearLatestOutput: true, isAtScrollBottom };
+  }
+  const elementRect = element.getBoundingClientRect();
+  return {
+    isNearLatestOutput: isNearLatestTurnOutputTail({
+      containerTop: elementRect.top,
+      outputBottom: latestTurnOutputBottom(turn),
+      containerHeight: element.clientHeight,
+      bottomReserve,
+      threshold: LATEST_OUTPUT_FOLLOW_THRESHOLD,
+    }),
+    isAtScrollBottom,
+  };
+}
+
 function isNestedRunStageScrollTarget(
   target: EventTarget | null,
   runStage: HTMLElement,
@@ -279,6 +313,10 @@ export function useRunStageScrollController({
   const [runStageViewportHeightPx, setRunStageViewportHeightPx] = useState(0);
   const [runStageAttachVersion, setRunStageAttachVersion] = useState(0);
   const [composerDockAttachVersion, setComposerDockAttachVersion] = useState(0);
+  const [latestOutputViewport, setLatestOutputViewport] = useState({
+    isNearLatestOutput: true,
+    isAtScrollBottom: true,
+  });
 
   const narrativeSections = useMemo(
     () => groupNarrativeByTurns(narrativeItems),
@@ -313,6 +351,8 @@ export function useRunStageScrollController({
   const returnToLatestVisible = shouldShowReturnToLatestAffordance({
     followMode: interactionState.followMode,
     hasLatestTurn: Boolean(latestPromptId),
+    isNearLatestOutput: latestOutputViewport.isNearLatestOutput,
+    isAtScrollBottom: latestOutputViewport.isAtScrollBottom,
   });
   const returnToLatestBottomPx = Math.max(
     16,
@@ -393,6 +433,23 @@ export function useRunStageScrollController({
     cancelPendingPromptAnchor: boolean,
   ): void {
     dispatchInteraction({ type: "pause-by-user", cancelPendingPromptAnchor });
+  }
+
+  function syncLatestOutputViewport(element: HTMLElement): void {
+    const turn = latestPromptId
+      ? findTurnElement(element, latestPromptId)
+      : undefined;
+    const next = readLatestOutputViewport({
+      element,
+      turn,
+      bottomReserve: composerOutputGapPx,
+    });
+    setLatestOutputViewport((current) =>
+      current.isNearLatestOutput === next.isNearLatestOutput &&
+      current.isAtScrollBottom === next.isAtScrollBottom
+        ? current
+        : next,
+    );
   }
 
   function measureLatestTurnMinHeight(promptId: string): void {
@@ -684,6 +741,7 @@ export function useRunStageScrollController({
     }
 
     syncActiveTurnFromScroll(element);
+    syncLatestOutputViewport(element);
 
     if (isProgrammaticScroll) {
       return;
@@ -698,12 +756,12 @@ export function useRunStageScrollController({
       return;
     }
 
-    const isAtScrollBottom = isNearScrollBottom({
-      scrollTop: nextScrollTop,
-      scrollHeight: element.scrollHeight,
-      clientHeight: element.clientHeight,
-      threshold: 2,
-    });
+    const { isNearLatestOutput: isNearTail, isAtScrollBottom } =
+      readLatestOutputViewport({
+        element,
+        turn,
+        bottomReserve: composerOutputGapPx,
+      });
 
     if (
       shouldPauseLatestOutputFollowForScroll({
@@ -718,15 +776,6 @@ export function useRunStageScrollController({
       });
       return;
     }
-
-    const elementRect = element.getBoundingClientRect();
-    const isNearTail = isNearLatestTurnOutputTail({
-      containerTop: elementRect.top,
-      outputBottom: latestTurnOutputBottom(turn),
-      containerHeight: element.clientHeight,
-      bottomReserve: composerOutputGapPx,
-      threshold: LATEST_OUTPUT_FOLLOW_THRESHOLD,
-    });
 
     let hasResumeIntent = state.resumeIntent !== "none";
     if (
@@ -843,6 +892,11 @@ export function useRunStageScrollController({
     if (!latestPromptId) {
       dispatchInteraction({ type: "reset-empty" });
       setLatestTurnMinHeightPx((current) => (current === 0 ? current : 0));
+      setLatestOutputViewport((current) =>
+        current.isNearLatestOutput && current.isAtScrollBottom
+          ? current
+          : { isNearLatestOutput: true, isAtScrollBottom: true },
+      );
       return;
     }
     if (!element) {
@@ -861,6 +915,11 @@ export function useRunStageScrollController({
     const turn = findTurnElement(element, latestPromptId);
     if (!turn) {
       setLatestTurnMinHeightPx((current) => (current === 0 ? current : 0));
+      setLatestOutputViewport((current) =>
+        current.isNearLatestOutput && current.isAtScrollBottom
+          ? current
+          : { isNearLatestOutput: true, isAtScrollBottom: true },
+      );
       return;
     }
 
@@ -907,6 +966,7 @@ export function useRunStageScrollController({
     if (interactionState.followMode === "following_latest") {
       scrollLatestTurnToScrollTail(latestPromptId, "follow_latest");
     }
+    syncLatestOutputViewport(element);
   }, [
     composerOutputGapPx,
     interactionState.currentTurnId,
@@ -960,6 +1020,7 @@ export function useRunStageScrollController({
       ) {
         scrollLatestTurnToScrollTail(latestPromptId, "follow_latest");
       }
+      syncLatestOutputViewport(element);
     });
     resizeObserver.observe(element);
     for (const observedTurn of turnElements(element)) {

@@ -61,6 +61,7 @@ type managedTask struct {
 	messages           []QueuedMessage
 	host               *HostSpawnOptions
 	terminalPersistErr error
+	cancelReason       string
 }
 
 type messageReceiptRecord struct {
@@ -85,6 +86,7 @@ type Manager struct {
 	order                        []string
 	delivered                    map[string]bool
 	pendingTerminalNotifications []string
+	pendingParentNotices         []ParentNotice
 	messageReceipts              map[string]*messageReceiptRecord
 	closed                       bool
 	stopped                      bool
@@ -435,7 +437,7 @@ func (m *Manager) finish(taskID string, status TaskStatus, result, code, message
 		return
 	}
 	if snapshot.Status == StatusCancelling {
-		status, result, code, message = StatusCancelled, "", ErrorCancelled, "subagent was cancelled"
+		status, result, code, message = StatusCancelled, "", ErrorCancelled, cancelMessageForReason(task.cancelReason)
 	}
 	finished := time.Now().UTC()
 	snapshot.Status = status
@@ -862,7 +864,7 @@ func (m *Manager) attachWorktree(taskID string, receipt *WorktreeReceipt) {
 	m.replaceSnapshot(taskID, snapshot)
 }
 
-func (m *Manager) Cancel(ctx context.Context, taskID, _ string) (TaskSnapshot, error) {
+func (m *Manager) Cancel(ctx context.Context, taskID, reason string) (TaskSnapshot, error) {
 	taskID = strings.TrimSpace(taskID)
 	task := m.task(taskID)
 	if task == nil {
@@ -873,6 +875,9 @@ func (m *Manager) Cancel(ctx context.Context, taskID, _ string) (TaskSnapshot, e
 	snapshot := cloneTaskSnapshot(task.snapshot)
 	if snapshot.Terminal() {
 		return snapshot, nil
+	}
+	if task.cancelReason == "" {
+		task.cancelReason = strings.TrimSpace(reason)
 	}
 	snapshot.Status = StatusCancelling
 	snapshot.CurrentActivity = "正在取消"

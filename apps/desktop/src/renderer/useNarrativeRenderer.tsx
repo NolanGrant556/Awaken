@@ -67,6 +67,7 @@ type Options = {
   subagentNowMs: number;
   openSubagentTaskId?: string;
   handleOpenSubagent: (taskId?: string) => void;
+  onStopAllAgents?: () => void | Promise<void>;
   openMediaPreview: (
     items: MediaArtifactPreviewItem[],
     activeId: string,
@@ -87,6 +88,7 @@ export function useNarrativeRenderer(options: Options) {
     subagentNowMs,
     openSubagentTaskId,
     handleOpenSubagent,
+    onStopAllAgents,
     openMediaPreview,
     handleOpenDeliverablePreview,
     setNotice,
@@ -625,6 +627,7 @@ export function useNarrativeRenderer(options: Options) {
             selected: task.taskId === openSubagentTaskId,
           }))}
           onSelect={handleOpenSubagent}
+          onStopAll={onStopAllAgents}
         />
       );
     }

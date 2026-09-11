@@ -29,6 +29,11 @@ func (s *RunService) SubscribeThreadActivity(threadID string, afterSeq uint64) (
 	return bus.SubscribeRetained(afterSeq)
 }
 
+// StopThreadAgents cancels every queued or running Subagent assignment in
+// the thread work group. It does not cancel the root run or fence later
+// child creation; the parent Agent stays running and receives a host
+// notice that the user stopped the children. Composer stop-run still uses
+// CancelRun.
 func (s *RunService) StopThreadAgents(ctx context.Context, threadID string) error {
 	s.mu.RLock()
 	thread := s.threads[threadID]
@@ -37,13 +42,9 @@ func (s *RunService) StopThreadAgents(ctx context.Context, threadID string) erro
 		return ErrThreadNotFound
 	}
 	manager := thread.workGroup
-	session := s.sessions[thread.activeRunID]
 	s.mu.RUnlock()
-	if session != nil {
-		session.RequestCancel()
+	if manager == nil {
+		return nil
 	}
-	if manager != nil {
-		return manager.StopAll(ctx)
-	}
-	return nil
+	return manager.CancelActiveAssignments(ctx, "user_stopped_all")
 }

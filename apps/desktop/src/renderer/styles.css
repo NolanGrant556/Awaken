@@ -1686,11 +1686,11 @@ pre {
 .subagent-panel__header {
   flex: none;
   background: var(--aw-surface-detail);
-  padding: 18px 18px 14px;
+  padding: 10px 16px 12px;
   border-bottom: 1px solid var(--aw-border-light);
 }
 .subagent-panel__header h2 {
-  margin: 9px 0;
+  margin: 6px 0;
   font-size: 15px;
   line-height: 1.5;
   overflow-wrap: anywhere;

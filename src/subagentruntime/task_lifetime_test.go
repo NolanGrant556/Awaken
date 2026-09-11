@@ -2,6 +2,7 @@ package subagentruntime
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -159,5 +160,54 @@ func TestLateStopAndCleanupDoNotAffectNewRoot(t *testing.T) {
 	}
 	if got, _ := m.Status(task.TaskID); got.Status != StatusRunning {
 		t.Fatalf("old operation affected new run: %s", got.Status)
+	}
+}
+
+func TestCancelActiveAssignmentsKeepsCreatorAndNotifiesParent(t *testing.T) {
+	started := make(chan struct{})
+	var startOnce sync.Once
+	m := NewManager(context.Background(), Config{
+		BindRunner: true,
+		Starter: func(ctx context.Context, _ StartRequest) (string, error) {
+			startOnce.Do(func() { close(started) })
+			<-ctx.Done()
+			return "", ctx.Err()
+		},
+	})
+	defer m.Close(context.Background())
+	first, err := m.Spawn(context.Background(), SpawnRequest{Description: "child", Prompt: "work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	if err := m.CancelActiveAssignments(context.Background(), "user_stopped_all"); err != nil {
+		t.Fatal(err)
+	}
+	notices := m.DrainParentNotices()
+	if len(notices) != 1 || !strings.Contains(notices[0].Content, "the user stopped all active Subagent assignments") {
+		t.Fatalf("parent notice = %+v", notices)
+	}
+	if !strings.Contains(notices[0].Content, first.TaskID) {
+		t.Fatalf("parent notice omitted task id: %+v", notices[0])
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		got, _ := m.Status(first.TaskID)
+		if got.Status == StatusCancelled {
+			if got.ErrorMessage != "the user stopped this Subagent assignment" {
+				t.Fatalf("cancel message = %q", got.ErrorMessage)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("child status = %s", got.Status)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if m.stopped {
+		t.Fatal("user stop-all must not fence the manager")
+	}
+	if _, err := m.Followup(context.Background(), first.TaskID, "continue after user stop"); err != nil {
+		t.Fatalf("parent must still be able to continue: %v", err)
 	}
 }

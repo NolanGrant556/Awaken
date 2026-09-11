@@ -24,8 +24,13 @@ func (r *Runner) injectSubagentTerminalNotifications(candidate *llm.Response) in
 		return 0
 	}
 	snapshots := r.subagentController.DrainTerminalNotifications()
-	if len(snapshots) > 0 && candidate != nil && candidate.Content != "" {
+	notices := r.drainParentNotices()
+	if (len(snapshots) > 0 || len(notices) > 0) && candidate != nil && candidate.Content != "" {
 		r.conversation.AssistantOutputWithProviderState(candidate.Content, nil, candidate.ProviderOpaqueState)
+	}
+	injected := r.appendParentNotices(notices)
+	if r.inboxErr != nil {
+		return 0
 	}
 	for index, snapshot := range snapshots {
 		payload, err := json.Marshal(subagentTerminalNotification{
@@ -47,8 +52,38 @@ func (r *Runner) injectSubagentTerminalNotifications(candidate *llm.Response) in
 			r.inboxErr = err
 			return 0
 		}
+		injected++
 	}
-	return len(snapshots)
+	return injected
+}
+
+func (r *Runner) drainParentNotices() []subagentruntime.ParentNotice {
+	notifier, ok := r.subagentController.(interface {
+		DrainParentNotices() []subagentruntime.ParentNotice
+	})
+	if !ok {
+		return nil
+	}
+	return notifier.DrainParentNotices()
+}
+
+func (r *Runner) appendParentNotices(notices []subagentruntime.ParentNotice) int {
+	injected := 0
+	for index, notice := range notices {
+		if err := r.appendContextMessage(notice.Content, notice.ID); err != nil {
+			if retry, ok := r.subagentController.(interface {
+				EnqueueParentNotice(string, string)
+			}); ok {
+				for _, pending := range notices[index:] {
+					retry.EnqueueParentNotice(pending.ID, pending.Content)
+				}
+			}
+			r.inboxErr = err
+			return injected
+		}
+		injected++
+	}
+	return injected
 }
 
 func (r *Runner) waitForActiveSubagents(ctx stdcontext.Context, events *runEventEmitter, candidate *llm.Response) (bool, error) {
@@ -78,6 +113,9 @@ func (r *Runner) waitForActiveSubagents(ctx stdcontext.Context, events *runEvent
 	result, err := r.subagentController.Wait(ctx, subagentruntime.WaitRequest{TaskIDs: ids, ReturnWhen: "all", EventDriven: true, DeferAcknowledgement: true})
 	if err != nil {
 		return true, err
+	}
+	if r.appendParentNotices(r.drainParentNotices()); r.inboxErr != nil {
+		return true, r.inboxErr
 	}
 	for _, snapshot := range result.Tasks {
 		payload, marshalErr := json.Marshal(subagentTerminalNotification{Type: "subagent_terminal", Task: snapshot})

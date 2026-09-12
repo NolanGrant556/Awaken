@@ -180,6 +180,7 @@ func (r *Runner) dropCompactedMemoryBodies(memoryIDs []string) {
 
 func (r *Runner) buildLLMRequest() (LLMRequest, error) {
 	llmReq := r.reqBuilder.Build(r.conversation.Context, nil)
+	r.progressNudge.project(&llmReq)
 	if err := context.ValidateToolResultPairing(llmReq.Messages); err != nil {
 		return LLMRequest{}, fmt.Errorf("invalid tool result pairing: %w", err)
 	}

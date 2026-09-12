@@ -35,6 +35,7 @@ var (
 )
 
 type Runner struct {
+	progressNudge           *progressNudge
 	pendingInbox            []string
 	inboxErr                error
 	incorporateMessages     func([]string)
@@ -160,6 +161,7 @@ func NewRunner(config AgentConfig, conv *context.Conversation, reqBuilder *Reque
 }
 
 func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (answer string, runErr error) {
+	r.progressNudge = newProgressNudge(r.config)
 	events := newRunEventEmitter(r.threadID, sink)
 	events.attemptID = r.config.AttemptID
 	events.inboxMessageIDs = func() []string { return append([]string(nil), r.pendingInbox...) }
@@ -327,6 +329,7 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 		if r.failureSupervisor != nil {
 			r.failureSupervisor.BeginTurn()
 		}
+		r.progressNudge.prepare(transition)
 		turnState = turnState.nextTurn(r.conversation.Context.GetMessages(), transition)
 		events.turnStarted(turnState)
 
@@ -374,10 +377,12 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 		if err := events.persistenceFailure(); err != nil {
 			return "", err
 		}
+		r.progressNudge.visible(response.Content)
 		if len(response.ToolCalls) > 0 {
 			reasoningOnlyContinuations = 0
 			toolCalls := llmToolCallsToContext(response.ToolCalls)
 			results := r.executeToolCalls(ctx, toolCalls, events)
+			r.progressNudge.observe(results, toolCalls...)
 			r.conversation.ToolExchangeWithProviderState(response.Content, toolCalls, toolExecutionResultsToContext(results), response.ProviderOpaqueState)
 			if stop, stopErr := r.stopAfterToolExchangeIfNeeded(ctx, events, i); stop {
 				return "", stopErr
@@ -650,6 +655,10 @@ func firstTerminalReason(reasons []TerminalReason, fallback TerminalReason) Term
 }
 
 func terminalReasonForError(err error) TerminalReason {
+	var disconnected *llm.StreamDisconnectedError
+	if errors.As(err, &disconnected) {
+		return TerminalReasonModelStreamDisconnected
+	}
 	switch {
 	case err == nil:
 		return ""

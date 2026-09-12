@@ -1104,6 +1104,8 @@ func durableRunsFromSemanticRecords(threadID string, records []agentcore.Semanti
 				}
 			}
 		case agentcore.SemanticKindRunTerminal:
+			run.StopSource = stringPayload(record.Payload, "stop_source")
+			run.TerminalReason = agentcore.TerminalReason(firstNonEmpty(stringPayload(record.Payload, "terminal_reason"), stringPayload(record.Payload, "reason")))
 			status := stringPayload(record.Payload, "status")
 			finished := record.Timestamp
 			run.FinishedAt = &finished
@@ -1331,6 +1333,7 @@ func semanticRecordToAgentEvents(record agentcore.SemanticRecord) []agentcore.Aw
 			RunID:            record.RunID,
 			TurnID:           record.TurnID,
 			TerminalReason:   agentcore.TerminalReason(stringPayload(record.Payload, "terminal_reason")),
+			StopSource:       stringPayload(record.Payload, "stop_source"),
 			TransitionReason: agentcore.TransitionReason(stringPayload(record.Payload, "transition_reason")),
 		}}
 	case agentcore.SemanticKindACPSessionStarted:
@@ -1360,6 +1363,7 @@ func semanticRecordToAgentEvents(record agentcore.SemanticRecord) []agentcore.Aw
 				TurnID:         record.TurnID,
 				Content:        stringPayload(record.Payload, "result"),
 				TerminalReason: agentcore.TerminalReason(stringPayload(record.Payload, "terminal_reason")),
+				StopSource:     stringPayload(record.Payload, "stop_source"),
 			}}
 		}
 		code := stringPayload(record.Payload, "code")
@@ -1379,6 +1383,7 @@ func semanticRecordToAgentEvents(record agentcore.SemanticRecord) []agentcore.Aw
 			Code:           code,
 			Content:        stringPayload(record.Payload, "result"),
 			TerminalReason: agentcore.TerminalReason(firstNonEmpty(stringPayload(record.Payload, "terminal_reason"), stringPayload(record.Payload, "reason"))),
+			StopSource:     stringPayload(record.Payload, "stop_source"),
 		}}
 	default:
 		return nil

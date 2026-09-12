@@ -344,6 +344,7 @@ func projectSemanticRecord(record agentcore.SemanticRecord) []Event {
 		boundary.TransitionReason = stringFromAny(payload["transition_reason"])
 		return []Event{boundary}
 	case agentcore.SemanticKindRunTerminal:
+		base.StopSource = stringFromAny(payload["stop_source"])
 		status := stringFromAny(payload["status"])
 		switch status {
 		case "finished":
@@ -682,6 +683,7 @@ func applySubagentPayload(dst *Event, payload map[string]any) {
 	dst.SubagentResultPreview = stringFromAny(payload["result_preview"])
 	dst.SubagentErrorCode = stringFromAny(payload["error_code"])
 	dst.SubagentErrorMessage = stringFromAny(payload["error_message"])
+	dst.StopSource = stringFromAny(payload["stop_source"])
 	dst.SubagentSideEffectState = stringFromAny(payload["side_effect_state"])
 	dst.SubagentCreatedAt = stringFromAny(payload["created_at"])
 	dst.SubagentStartedAt = stringFromAny(payload["started_at"])
@@ -745,6 +747,11 @@ func applyOutcomePayload(dst *Event, payload map[string]any) {
 	var outcomePayload map[string]any
 	if err := json.Unmarshal(raw, &outcomePayload); err == nil {
 		applyExecutionMetadata(dst, outcomePayload)
+		if dst.ToolCallName == "ask_user" {
+			if details, ok := outcomePayload["details"].(map[string]any); ok {
+				dst.QuestionCloseReason = stringFromAny(details["question_close_reason"])
+			}
+		}
 	}
 	applyExecutionMetadata(dst, outcome.Diagnostic)
 }
@@ -969,6 +976,8 @@ func awakenEventFromAGUI(frame Event) agentcore.AwakenEvent {
 		Error:                   frame.Message,
 		Code:                    frame.Code,
 		TerminalReason:          agentcore.TerminalReason(frame.TerminalReason),
+		StopSource:              frame.StopSource,
+		QuestionCloseReason:     frame.QuestionCloseReason,
 		ToolStatus:              frame.ToolStatus,
 		TransportStatus:         frame.TransportStatus,
 		SemanticStatus:          frame.SemanticStatus,

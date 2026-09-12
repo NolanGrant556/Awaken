@@ -103,8 +103,10 @@ type ElicitationHandler func(context.Context, ElicitationRequest) (ElicitationRe
 // owning server requires authentication. The agent layer maps this to the
 // needs_auth tool-progress stage rather than a generic failure.
 type NeedsAuthError struct {
-	ServerName string
-	Reason     string
+	CallStarted bool
+	ReadOnly    bool
+	ServerName  string
+	Reason      string
 }
 
 func (e *NeedsAuthError) Error() string {
@@ -116,8 +118,8 @@ func (e *NeedsAuthError) Error() string {
 
 // IsNeedsAuth reports whether err is a NeedsAuthError from this package.
 func IsNeedsAuth(err error) bool {
-	_, ok := err.(*NeedsAuthError)
-	return ok
+	var needed *NeedsAuthError
+	return errors.As(err, &needed)
 }
 
 // ErrServerNotFound is returned by Manager methods when the named server

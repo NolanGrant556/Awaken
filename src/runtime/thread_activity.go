@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"awaken/src/runcontrol"
 	"context"
 	"errors"
 )
@@ -46,5 +47,5 @@ func (s *RunService) StopThreadAgents(ctx context.Context, threadID string) erro
 	if manager == nil {
 		return nil
 	}
-	return manager.CancelActiveAssignments(ctx, "user_stopped_all")
+	return manager.CancelActiveAssignments(runcontrol.WithRequestSource(ctx, runcontrol.User), "user_stopped_all")
 }

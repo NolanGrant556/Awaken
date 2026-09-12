@@ -59,16 +59,18 @@ func buildTransport(cfg McpServerConfig, registry *InProcRegistry, authHandler a
 		return &mcp.CommandTransport{Command: cmd}, TransportStdio, nil
 	case TransportHTTP:
 		httpClient := buildHTTPClient(cfg.InsecureSkipVerify, cfg.HTTP.URL, cfg.HTTP.Headers)
+		httpClient.Transport = authCallTransport{base: httpClient.Transport, allowRefresh: authHandler != nil}
 		t := &mcp.StreamableClientTransport{
 			Endpoint:   cfg.HTTP.URL,
 			HTTPClient: httpClient,
 		}
 		if authHandler != nil {
-			t.OAuthHandler = authHandler
+			t.OAuthHandler = callOAuthHandler{authHandler}
 		}
 		return t, TransportHTTP, nil
 	case TransportSSE:
 		httpClient := buildHTTPClient(cfg.InsecureSkipVerify, cfg.SSE.URL, cfg.SSE.Headers)
+		httpClient.Transport = authCallTransport{base: httpClient.Transport}
 		return &mcp.SSEClientTransport{
 			Endpoint:   cfg.SSE.URL,
 			HTTPClient: httpClient,

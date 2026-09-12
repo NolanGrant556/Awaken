@@ -386,6 +386,9 @@ func buildAnthropicMessagesForConfig(cfg Config, req Request, cache PreparedProm
 }
 
 func anthropicToolResultContent(message context.Message) interface{} {
+	if message.ProviderProjectionText != "" {
+		message.Content += "\n\n" + message.ProviderProjectionText
+	}
 	if len(message.ModelContent) == 0 {
 		return message.Content
 	}

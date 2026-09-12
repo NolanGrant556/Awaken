@@ -639,30 +639,31 @@ func main() {
 	}
 
 	log.Println("awaken-core shutting down")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	runService.BeginShutdown()
+	manager.BeginShutdown()
 	cancelCleanup()
 	bashtool.CancelAllTasks()
+	cleanup := []func(context.Context) error{manager.Shutdown, runService.Drain}
 	if acpManager != nil {
-		acpCtx, acpCancel := context.WithTimeout(context.Background(), 8*time.Second)
-		defer acpCancel()
-		if err := acpManager.CloseAll(acpCtx); err != nil {
-			log.Printf("awaken-core acp close error: %v", err)
-		}
+		cleanup = append(cleanup, acpManager.CloseAll)
 	}
 	if sched != nil {
-		sched.Stop()
+		cleanup = append(cleanup, func(context.Context) error { sched.Stop(); return nil })
 	}
 	if schedSvc != nil {
-		if err := schedSvc.Close(); err != nil {
-			log.Printf("awaken-core scheduled tasks close error: %v", err)
-		}
+		cleanup = append(cleanup, func(context.Context) error { return schedSvc.Close() })
 	}
-	if err := runService.FlushTranscripts(); err != nil {
-		log.Printf("awaken-core flush transcripts error: %v", err)
+	shutdownErr := joinCoreCleanup(shutdownCtx, cleanup...)
+	if shutdownErr == nil {
+		shutdownErr = joinCoreCleanup(shutdownCtx, func(context.Context) error { return runService.FlushTranscripts() })
 	}
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Printf("awaken-core shutdown error: %v", err)
+		shutdownErr = errors.Join(shutdownErr, err)
+	}
+	if shutdownErr != nil {
+		log.Printf("awaken-core shutdown incomplete: %v", shutdownErr)
 	}
 	if userDataDir != "" && runtimeIdentity != nil {
 		if err := runtime.DeleteManifestIfOwned(userDataDir, runtimeIdentity.InstanceID); err != nil {
@@ -671,6 +672,9 @@ func main() {
 	}
 	if leaseManager != nil {
 		leaseManager.Stop()
+	}
+	if shutdownErr != nil {
+		os.Exit(1)
 	}
 }
 

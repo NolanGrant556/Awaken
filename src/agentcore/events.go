@@ -125,6 +125,7 @@ type AwakenEvent struct {
 	Truncated                        bool
 	Error                            string
 	Code                             string
+	StopSource                       string
 	TerminalReason                   TerminalReason
 	TransitionReason                 TransitionReason
 	ContextModelWindow               int
@@ -214,6 +215,7 @@ type AwakenEvent struct {
 	RuntimeVersion             string
 	QuestionID                 string
 	QuestionAnswer             string
+	QuestionCloseReason        string
 	QuestionResolution         string
 	InteractionID              string
 	InteractionKind            string

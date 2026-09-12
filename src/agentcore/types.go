@@ -18,6 +18,7 @@ import (
 )
 
 type AgentConfig struct {
+	ProgressNudgePolicy     *ProgressNudgePolicy
 	RestoredRunPlan         *tool.RunPlanSnapshot
 	NewChildComputerRuntime func(stdcontext.Context, subagentruntime.TaskSnapshot, ModelConfig) (*computer.Runtime, func(), error)
 

@@ -63,8 +63,15 @@ func setToolRegistryHooksForTest(register func(tool.Tool) error, unregister func
 // Manager owns the lifecycle of every MCP server connection. It is the
 // single entry point for the server layer and is safe for concurrent use.
 type Manager struct {
-	logger   Logger
-	registry *InProcRegistry
+	closing      bool
+	operations   sync.WaitGroup
+	stopContext  context.Context
+	stopCancel   context.CancelFunc
+	shutdownOnce sync.Once
+	shutdownDone chan struct{}
+	shutdownErr  error
+	logger       Logger
+	registry     *InProcRegistry
 
 	mu      sync.RWMutex
 	servers map[string]*managedServer
@@ -134,15 +141,16 @@ type managedServer struct {
 	tools       []*mcp.Tool
 	toolsLoaded bool
 
-	session     Session
-	cancelCtx   context.CancelFunc
-	authHandler auth.OAuthHandler
+	session              Session
+	cancelCtx            context.CancelFunc
+	authHandler          auth.OAuthHandler
+	connectionGeneration uint64
 	// running guards the connect goroutine so we never double-start.
 	running bool
 	// MCP does not include a parent tool-call id on elicitation/create. Calls
 	// are serialized per server so an incoming elicitation can be bound to the
 	// exact active CallTool context without cross-run leakage.
-	callMu            sync.Mutex
+	callGate          chan struct{}
 	elicitationMu     sync.RWMutex
 	activeCallContext context.Context
 }
@@ -237,6 +245,10 @@ func (m *Manager) startOne(ctx context.Context, scoped ScopedMcpServerConfig, se
 	kind := scoped.Config.TransportKind()
 	if kind == "" {
 		m.mu.Lock()
+		if m.closing {
+			m.mu.Unlock()
+			return
+		}
 		m.servers[scoped.Name] = &managedServer{
 			name:           scoped.Name,
 			scope:          scoped.Scope,
@@ -252,6 +264,10 @@ func (m *Manager) startOne(ctx context.Context, scoped ScopedMcpServerConfig, se
 	}
 	if scoped.Config.Enabled != nil && !*scoped.Config.Enabled {
 		m.mu.Lock()
+		if m.closing {
+			m.mu.Unlock()
+			return
+		}
 		m.servers[scoped.Name] = &managedServer{
 			name:           scoped.Name,
 			scope:          scoped.Scope,
@@ -267,6 +283,10 @@ func (m *Manager) startOne(ctx context.Context, scoped ScopedMcpServerConfig, se
 	}
 	if kind == TransportWS {
 		m.mu.Lock()
+		if m.closing {
+			m.mu.Unlock()
+			return
+		}
 		m.servers[scoped.Name] = &managedServer{
 			name:           scoped.Name,
 			scope:          scoped.Scope,
@@ -292,6 +312,10 @@ func (m *Manager) startOne(ctx context.Context, scoped ScopedMcpServerConfig, se
 		seq:            seq,
 	}
 	m.mu.Lock()
+	if m.closing {
+		m.mu.Unlock()
+		return
+	}
 	m.servers[scoped.Name] = server
 	m.mu.Unlock()
 
@@ -302,6 +326,11 @@ func (m *Manager) startOne(ctx context.Context, scoped ScopedMcpServerConfig, se
 // the handshake with exponential backoff (1s, 2s, 4s, 8s, 16s) up to 5
 // times before transitioning to failed.
 func (m *Manager) connectLoop(parentCtx context.Context, server *managedServer) {
+	parentCtx, finish, err := m.beginOperation(parentCtx)
+	if err != nil {
+		return
+	}
+	defer finish()
 	ctx, cancel := context.WithCancel(parentCtx)
 	defer cancel()
 
@@ -380,7 +409,13 @@ func (m *Manager) connectLoop(parentCtx context.Context, server *managedServer) 
 		session, capability, err := connectAndInitialize(ctx, transport, m.clientImpl, onToolListChanged, onPromptListChanged, onResourceListChanged, onElicitation)
 		if err == nil {
 			m.mu.Lock()
+			if m.closing || m.servers[server.name] != server {
+				m.mu.Unlock()
+				_ = session.Close()
+				return
+			}
 			server.session = session
+			server.connectionGeneration++
 			server.capability = capability
 			server.state = StateConnected
 			server.errorReason = ""
@@ -541,6 +576,11 @@ func (m *Manager) recordFailure(server *managedServer, err error) {
 // The original config is preserved so Enable can restore the server.
 func (m *Manager) Disable(name string) error {
 	m.mu.Lock()
+	if m.closing {
+		m.mu.Unlock()
+		return ErrTransportClosed
+	}
+	closeSession := func() {}
 	server, ok := m.servers[name]
 	if !ok {
 		m.mu.Unlock()
@@ -553,10 +593,7 @@ func (m *Manager) Disable(name string) error {
 	if server.cancelCtx != nil {
 		server.cancelCtx()
 	}
-	if server.session != nil {
-		_ = server.session.Close()
-		server.session = nil
-	}
+	closeSession = m.detachSessionLocked(server)
 	server.tools = nil
 	server.toolsLoaded = false
 	server.state = StateDisabled
@@ -564,6 +601,7 @@ func (m *Manager) Disable(name string) error {
 	disabled := false
 	server.config.Enabled = &disabled
 	m.mu.Unlock()
+	closeSession()
 	m.unregisterTools(name)
 	if m.onToolsChanged != nil {
 		m.onToolsChanged(name)
@@ -576,6 +614,10 @@ func (m *Manager) Disable(name string) error {
 // fresh connect loop. The server config must still be present.
 func (m *Manager) Enable(ctx context.Context, name string) error {
 	m.mu.Lock()
+	if m.closing {
+		m.mu.Unlock()
+		return ErrTransportClosed
+	}
 	server, ok := m.servers[name]
 	if !ok {
 		m.mu.Unlock()
@@ -602,6 +644,10 @@ func (m *Manager) Enable(ctx context.Context, name string) error {
 // progress.
 func (m *Manager) Reconnect(ctx context.Context, name string) error {
 	m.mu.Lock()
+	if m.closing {
+		m.mu.Unlock()
+		return ErrTransportClosed
+	}
 	server, ok := m.servers[name]
 	if !ok {
 		m.mu.Unlock()
@@ -629,6 +675,7 @@ func (m *Manager) InstallServerAuthHandler(name string, handler auth.OAuthHandle
 		return fmt.Errorf("%w: %q", ErrServerNotFound, name)
 	}
 	server.authHandler = handler
+	server.connectionGeneration++
 	return nil
 }
 
@@ -714,8 +761,16 @@ func (m *Manager) RestartConnectedStdioForNetworkRoute(ctx context.Context) int 
 			m.onToolsChanged(item.server.name)
 		}
 		go func(item candidate) {
-			item.server.callMu.Lock()
-			defer item.server.callMu.Unlock()
+			opCtx, finish, err := m.beginOperation(ctx)
+			if err != nil {
+				return
+			}
+			defer finish()
+			release, err := m.acquireCall(opCtx, item.server)
+			if err != nil {
+				return
+			}
+			defer release()
 
 			m.mu.RLock()
 			current, exists := m.servers[item.server.name]
@@ -741,6 +796,11 @@ func (m *Manager) RestartConnectedStdioForNetworkRoute(ctx context.Context) int 
 // an empty "user installed" group during enable/disable or config restart.
 func (m *Manager) RestartWithConfig(ctx context.Context, scoped ScopedMcpServerConfig) error {
 	m.mu.Lock()
+	if m.closing {
+		m.mu.Unlock()
+		return ErrTransportClosed
+	}
+	closeSession := func() {}
 	server, exists := m.servers[scoped.Name]
 	var seq uint64
 	if exists {
@@ -748,12 +808,10 @@ func (m *Manager) RestartWithConfig(ctx context.Context, scoped ScopedMcpServerC
 		if server.cancelCtx != nil {
 			server.cancelCtx()
 		}
-		if server.session != nil {
-			_ = server.session.Close()
-			server.session = nil
-		}
+		closeSession = m.detachSessionLocked(server)
 	}
 	m.mu.Unlock()
+	closeSession()
 
 	if exists {
 		m.unregisterTools(scoped.Name)
@@ -912,14 +970,22 @@ func (m *Manager) CallTool(ctx context.Context, prefixedName string, arguments m
 }
 
 func (m *Manager) callServerTool(ctx context.Context, serverName, toolName, displayName string, arguments map[string]any) (*mcp.CallToolResult, error) {
+	ctx, finish, err := m.beginOperation(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
 	m.mu.RLock()
 	server, exists := m.servers[serverName]
 	m.mu.RUnlock()
 	if !exists {
 		return nil, &ToolNotFoundError{ToolName: displayName}
 	}
-	server.callMu.Lock()
-	defer server.callMu.Unlock()
+	release, err := m.acquireCall(ctx, server)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	m.mu.RLock()
 	current, stillExists := m.servers[serverName]
 	state := server.state
@@ -935,6 +1001,7 @@ func (m *Manager) callServerTool(ctx context.Context, serverName, toolName, disp
 	if state != StateConnected || session == nil {
 		return nil, fmt.Errorf("mcp server %q is %s; cannot call %s", serverName, state, displayName)
 	}
+	ctx = m.callAuthContext(ctx, server, toolName, arguments)
 	server.elicitationMu.Lock()
 	server.activeCallContext = ctx
 	server.elicitationMu.Unlock()
@@ -947,6 +1014,22 @@ func (m *Manager) callServerTool(ctx context.Context, serverName, toolName, disp
 		Name:      toolName,
 		Arguments: arguments,
 	})
+	call, _ := ctx.Value(authCallKey{}).(*authCall)
+	if call != nil {
+		call.mu.Lock()
+		authFailure := call.failure
+		call.mu.Unlock()
+		if authFailure != nil {
+			m.mu.Lock()
+			if m.servers[serverName] == server && server.connectionGeneration == call.generation && !m.closing {
+				server.state = StateNeedsAuth
+				server.errorReason = authFailure.Reason
+			}
+			m.mu.Unlock()
+			m.emitEvent(ServerEvent{Type: EventDisconnected, ServerName: serverName})
+			return nil, authFailure
+		}
+	}
 	// In-process handlers are converted by the MCP SDK into an error result,
 	// not necessarily a Go error. A Core-owned runtime can atomically mark the
 	// server needs-auth while the call is in flight; inspect that state for both
@@ -956,7 +1039,7 @@ func (m *Manager) callServerTool(ctx context.Context, serverName, toolName, disp
 	reason = server.errorReason
 	m.mu.RUnlock()
 	if state == StateNeedsAuth {
-		return nil, &NeedsAuthError{ServerName: serverName, Reason: reason}
+		return nil, &NeedsAuthError{ServerName: serverName, Reason: reason, CallStarted: true, ReadOnly: call != nil && call.readOnly}
 	}
 	return result, err
 }
@@ -1068,6 +1151,11 @@ func (m *Manager) resolveMcpToolName(prefixed string) (server, toolName string, 
 // goroutine so the server appears in snapshots after the first state change.
 func (m *Manager) InjectDynamic(connectorID string, config ScopedMcpServerConfig) {
 	m.mu.Lock()
+	if m.closing {
+		m.mu.Unlock()
+		return
+	}
+	closeSession := func() {}
 	existing, exists := m.servers[config.Name]
 	if exists {
 		// If the existing entry was injected by a connector with different ID,
@@ -1080,9 +1168,7 @@ func (m *Manager) InjectDynamic(connectorID string, config ScopedMcpServerConfig
 		if existing.cancelCtx != nil {
 			existing.cancelCtx()
 		}
-		if existing.session != nil {
-			_ = existing.session.Close()
-		}
+		closeSession = m.detachSessionLocked(existing)
 	}
 	// Unregister any existing tools for this server name before replacing.
 	if exists {
@@ -1099,6 +1185,7 @@ func (m *Manager) InjectDynamic(connectorID string, config ScopedMcpServerConfig
 	}
 	m.servers[config.Name] = server
 	m.mu.Unlock()
+	closeSession()
 
 	m.logger.Debugf("mcp server %q injected from connector %s", config.Name, connectorID)
 	go m.connectLoop(context.Background(), server)
@@ -1110,6 +1197,11 @@ func (m *Manager) InjectDynamic(connectorID string, config ScopedMcpServerConfig
 // servers.
 func (m *Manager) RemoveDynamic(connectorID, serverName string) {
 	m.mu.Lock()
+	if m.closing {
+		m.mu.Unlock()
+		return
+	}
+	closeSession := func() {}
 	server, ok := m.servers[serverName]
 	if !ok {
 		m.mu.Unlock()
@@ -1123,11 +1215,10 @@ func (m *Manager) RemoveDynamic(connectorID, serverName string) {
 	if server.cancelCtx != nil {
 		server.cancelCtx()
 	}
-	if server.session != nil {
-		_ = server.session.Close()
-	}
+	closeSession = m.detachSessionLocked(server)
 	delete(m.servers, serverName)
 	m.mu.Unlock()
+	closeSession()
 
 	m.unregisterTools(serverName)
 	if m.onToolsChanged != nil {
@@ -1141,17 +1232,21 @@ func (m *Manager) RemoveDynamic(connectorID, serverName string) {
 // configuration from the UI.
 func (m *Manager) Remove(name string) error {
 	m.mu.Lock()
+	if m.closing {
+		m.mu.Unlock()
+		return ErrTransportClosed
+	}
+	closeSession := func() {}
 	server, exists := m.servers[name]
 	if exists {
 		if server.cancelCtx != nil {
 			server.cancelCtx()
 		}
-		if server.session != nil {
-			_ = server.session.Close()
-		}
+		closeSession = m.detachSessionLocked(server)
 		delete(m.servers, name)
 	}
 	m.mu.Unlock()
+	closeSession()
 
 	if exists {
 		m.unregisterTools(name)
@@ -1179,21 +1274,7 @@ func (m *Manager) ClearCredentialsFor(scoped ScopedMcpServerConfig) error {
 
 // Shutdown closes every connection. Used by tests and on graceful host
 // shutdown. It also closes all subscriber channels.
-func (m *Manager) Shutdown(ctx context.Context) {
-	m.subscribersMu.Lock()
-	if m.subscribersClosed {
-		m.subscribersMu.Unlock()
-		return
-	}
-	m.subscribersClosed = true
-	if m.subscribersDone != nil {
-		close(m.subscribersDone)
-	}
-	for ch := range m.subscribers {
-		delete(m.subscribers, ch)
-		close(ch)
-	}
-	m.subscribersMu.Unlock()
+func (m *Manager) closeConnections() error {
 	m.mu.Lock()
 	var sessions []Session
 	for _, server := range m.servers {
@@ -1206,9 +1287,37 @@ func (m *Manager) Shutdown(ctx context.Context) {
 		}
 	}
 	m.mu.Unlock()
+	var wg sync.WaitGroup
+	var errorMu sync.Mutex
+	var closeErr error
 	for _, session := range sessions {
-		_ = session.Close()
+		wg.Add(1)
+		go func(session Session) {
+			defer wg.Done()
+			if err := session.Close(); err != nil {
+				errorMu.Lock()
+				closeErr = errors.Join(closeErr, err)
+				errorMu.Unlock()
+			}
+		}(session)
 	}
+	wg.Wait()
+	m.operations.Wait()
+	m.subscribersMu.Lock()
+	if m.subscribersClosed {
+		m.subscribersMu.Unlock()
+		return closeErr
+	}
+	m.subscribersClosed = true
+	if m.subscribersDone != nil {
+		close(m.subscribersDone)
+	}
+	for ch := range m.subscribers {
+		delete(m.subscribers, ch)
+		close(ch)
+	}
+	m.subscribersMu.Unlock()
+	return closeErr
 }
 
 // Subscribe returns a buffered channel that receives ServerEvent values for

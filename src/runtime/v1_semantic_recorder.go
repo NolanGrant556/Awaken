@@ -296,6 +296,7 @@ func semanticRecordToV1Transcript(record agentcore.SemanticRecord) ([]Transcript
 			RunID:            record.RunID,
 			TurnID:           record.TurnID,
 			TerminalReason:   agentcore.TerminalReason(stringPayload(record.Payload, "terminal_reason")),
+			StopSource:       stringPayload(record.Payload, "stop_source"),
 			TransitionReason: agentcore.TransitionReason(stringPayload(record.Payload, "transition_reason")),
 		}
 		return []TranscriptRecord{eventRecord(base, event)}, true
@@ -317,6 +318,7 @@ func semanticRecordToV1Transcript(record agentcore.SemanticRecord) ([]Transcript
 				RunID:          record.RunID,
 				Content:        stringPayload(record.Payload, "result"),
 				TerminalReason: agentcore.TerminalReason(stringPayload(record.Payload, "terminal_reason")),
+				StopSource:     stringPayload(record.Payload, "stop_source"),
 			}
 			return []TranscriptRecord{eventRecord(base, event)}, true
 		}
@@ -329,6 +331,7 @@ func semanticRecordToV1Transcript(record agentcore.SemanticRecord) ([]Transcript
 			Code:           stringPayload(record.Payload, "code"),
 			Content:        stringPayload(record.Payload, "result"),
 			TerminalReason: agentcore.TerminalReason(firstNonEmpty(stringPayload(record.Payload, "terminal_reason"), stringPayload(record.Payload, "reason"))),
+			StopSource:     stringPayload(record.Payload, "stop_source"),
 		}
 		return []TranscriptRecord{eventRecord(base, event)}, true
 	default:

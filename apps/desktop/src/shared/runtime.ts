@@ -201,6 +201,8 @@ export type RuntimeRunWire = {
   status: RuntimeRunStatus;
   result?: string;
   error?: string;
+  terminal_reason?: string;
+  stop_source?: AguiEvent["stopSource"];
   cancel_requested?: boolean;
   created_at: string;
   updated_at: string;
@@ -270,6 +272,8 @@ export type RuntimeRun = {
   status: RuntimeRunStatus;
   result?: string;
   error?: string;
+  terminalReason?: string;
+  stopSource?: AguiEvent["stopSource"];
   cancelRequested: boolean;
   createdAt: string;
   updatedAt: string;
@@ -2909,6 +2913,8 @@ export function normalizeRuntimeRun(run: RuntimeRunWire): RuntimeRun {
     status: run.status,
     result: run.result,
     error: run.error,
+    terminalReason: run.terminal_reason,
+    stopSource: run.stop_source,
     cancelRequested: Boolean(run.cancel_requested),
     createdAt: run.created_at,
     updatedAt: run.updated_at,

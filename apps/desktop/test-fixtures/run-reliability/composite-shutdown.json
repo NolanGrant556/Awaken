@@ -1,0 +1,37 @@
+{
+  "owned_pid": 34496,
+  "quit_command_at_ms": 1789230478811,
+  "observed_exit_at": 1789230483.0442,
+  "exit_after_quit_command_seconds": 4.233,
+  "electron_exit_code": 0,
+  "desktop_shutdown_completed": true,
+  "root_run_ids": [
+    "run_1789230410748988000_3",
+    "run_1789230470537180000_5"
+  ],
+  "thread_ids": [
+    "thread_1789230410748990000_4",
+    "thread_1789230470537181000_6"
+  ],
+  "mcp_events": [
+    {
+      "at": "2026-09-12T16:26:51.276556Z",
+      "event": "call_started"
+    },
+    {
+      "at": "2026-09-12T16:27:51.280149Z",
+      "event": "call_returned"
+    },
+    {
+      "at": "2026-09-12T16:27:51.280225Z",
+      "event": "call_started"
+    },
+    {
+      "at": "2026-09-12T16:27:58.832126Z",
+      "event": "call_returned"
+    }
+  ],
+  "mcp_call_starts_after_quit": 0,
+  "superseded_by": "verification.json: composite_shutdown_fixed",
+  "limitation": "This first sample exposed an MCP cancellation notification incorrectly reported as needs-auth; timing remains valid but tool outcome correctness requires the repaired sample."
+}

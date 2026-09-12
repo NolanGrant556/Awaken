@@ -1,3 +1,4 @@
+import { stopMessage, terminalMessage } from "./stop-display";
 import type { RunStepItem } from "@awaken/design-system";
 import type {
   RunInputAttachment,
@@ -401,6 +402,7 @@ export type UserQuestion = {
 };
 
 export type UserQuestionItem = {
+  withdrawn?: boolean;
   runId?: string;
   id: string;
   questions: UserQuestion[];
@@ -940,7 +942,7 @@ function upsertSubagentTaskView(
     resultPreview:
       event.subagentResultPreview?.trim() || previous?.resultPreview,
     errorCode: event.subagentErrorCode ?? previous?.errorCode,
-    errorMessage: event.subagentErrorMessage ?? previous?.errorMessage,
+    errorMessage: event.subagentStatus === "cancelled" ? stopMessage(event.stopSource) : event.subagentErrorMessage ?? previous?.errorMessage,
     agentId,
     parentAgentId: event.subagentParentAgentId ?? previous?.parentAgentId,
     parentToolCallId:
@@ -1905,7 +1907,7 @@ function syncFromRun(
       phase: "cancelling",
       status: run.status,
 		timelineStatus: "running",
-		userQuestions: [],
+		userQuestions: state.userQuestions.map(question => ({ ...question, withdrawn: true })),
 		externalInteractions: state.externalInteractions.filter(item => Boolean(item.taskId)),
 		steps: toSteps(
         upsertStep(
@@ -1963,7 +1965,7 @@ function syncFromRun(
       phase: "error",
       status: run.status,
       timelineStatus: "error",
-		errorMessage: run.error || "Run failed",
+		errorMessage: terminalMessage({type:"RUN_ERROR",terminalReason:run.terminalReason,stopSource:run.stopSource}) || run.error || "Run failed",
 		userQuestions: [],
 		externalInteractions: state.externalInteractions.filter(item => Boolean(item.taskId)),
 	};
@@ -2177,7 +2179,7 @@ function reduceActiveRuntimeState(
           phase: "cancelling",
           status: "cancelling",
 		timelineStatus: "running",
-		userQuestions: [],
+		userQuestions: state.userQuestions.map(question => ({ ...question, withdrawn: true })),
 		externalInteractions: state.externalInteractions.filter(item => Boolean(item.taskId)),
 	});
     case "run/snapshotSynced":
@@ -2194,7 +2196,7 @@ function reduceActiveRuntimeState(
       if (terminalStatus === "error") {
         terminalNarrative = addRunErrorToNarrative(
           terminalNarrative,
-          action.run.error || "Run failed",
+          terminalMessage({ type: "RUN_ERROR", terminalReason: action.run.terminalReason, stopSource: action.run.stopSource }) || action.run.error || "Run failed",
           `${action.run.runId}:sync`,
         );
       } else {
@@ -2204,7 +2206,8 @@ function reduceActiveRuntimeState(
           runId: action.run.runId,
           status: terminalStatus,
           message:
-            terminalStatus === "cancelled" ? "你停止生成了本次回答" : undefined,
+            terminalStatus === "cancelled" ? stopMessage(action.run.stopSource) : undefined,
+          stopSource: action.run.stopSource,
         });
       }
       return {
@@ -2604,8 +2607,8 @@ function reduceActiveRuntimeState(
             nextState.timelineStatus = "running";
           } else if (status === "cancelling") {
             nextState.phase = "cancelling";
+            nextState.userQuestions = nextState.userQuestions.map(question => ({ ...question, withdrawn: true }));
             nextState.timelineStatus = "running";
-            nextState.userQuestions = [];
             nextState.externalInteractions = nextState.externalInteractions.filter(item => Boolean(item.taskId));
             nextState.computerReviews = nextState.computerReviews.filter(item => Boolean(item.taskId));
             nextState.computerHandoffs = nextState.computerHandoffs.filter(item => Boolean(item.taskId));
@@ -3400,6 +3403,7 @@ function reduceActiveRuntimeState(
           break;
         }
         case "AWAKEN_USER_QUESTION_REQUESTED": {
+          if (!["starting", "running", "reconnecting"].includes(nextState.phase)) break;
           const questionId =
             action.event.questionId ??
             action.event.toolCallId ??
@@ -3441,13 +3445,13 @@ function reduceActiveRuntimeState(
             action.event.toolCallId ??
             "user-question";
           const cancelled = action.event.questionResolution === "cancelled";
-          nextState.userQuestions = removeUserQuestion(
-            nextState.userQuestions,
-            questionId,
-          );
+          const withdrawn = action.event.questionCloseReason === "run_terminated" || nextState.phase === "cancelling";
+          nextState.userQuestions = withdrawn && nextState.phase === "cancelling"
+            ? nextState.userQuestions.map(question => question.id === questionId ? { ...question, withdrawn: true } : question)
+            : removeUserQuestion(nextState.userQuestions, questionId);
           records = upsertStep(records, `user-question:${questionId}`, {
-            title: cancelled ? "Question cancelled" : "Answer received",
-            description: cancelled
+            title: withdrawn ? "问题已撤回" : cancelled ? "Question cancelled" : "Answer received",
+            description: withdrawn ? "本次运行已终止，问题不再接受回答。" : cancelled
               ? "The user chose not to answer; the run continues."
               : action.event.questionAnswer,
             status: "done",
@@ -3718,7 +3722,7 @@ function reduceActiveRuntimeState(
             nextState.computerHandoffs = nextState.computerHandoffs.filter(item => Boolean(item.taskId));
             records = upsertStep(records, "run-cancelled", {
               title: "Run cancelled",
-              description: action.event.message || "Run was cancelled by user",
+              description: stopMessage(action.event.stopSource),
               status: "done",
               tag: "cancelled",
             });
@@ -3726,7 +3730,7 @@ function reduceActiveRuntimeState(
             nextState.phase = "error";
             nextState.status = "error";
             nextState.timelineStatus = "error";
-            const errorMessage = runtimeErrorMessageForDisplay(
+            const errorMessage = terminalMessage(action.event) || runtimeErrorMessageForDisplay(
               action.event.code,
               action.event.message,
             );

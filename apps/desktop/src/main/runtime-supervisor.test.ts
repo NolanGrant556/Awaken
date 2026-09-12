@@ -816,3 +816,33 @@ describe("RuntimeSupervisor", () => {
     }
   });
 });
+
+describe("bounded owned Core shutdown", () => {
+ it("waits for actual natural exit after shutdown acceptance", async () => {
+  const child = new FakeChild();
+  const supervisor = new RuntimeSupervisor({}, {allocatePort:async()=>19222,resolveBinaryPath:()=>"/fake/core",spawnProcess:()=>asChild(child),waitForHealth:async()=>{},resolveLoginUserEnvironment:async()=>({})});
+  await supervisor.start();
+  vi.stubGlobal("fetch",vi.fn(async()=>new Response('{}',{status:200})));
+  try {
+   const stopping=supervisor.stop(); await tick();
+   expect(supervisor.getStatus().status).toBe("stopping"); expect(child.killedWith).toBeNull();
+   child.exitCode=0;child.emit("exit",0,null);await stopping;
+   expect(supervisor.getStatus().status).toBe("stopped");
+  } finally {vi.unstubAllGlobals();}
+ });
+ it("rejects escalation within total 12 seconds and retains a living child", async () => {
+  const child=new FakeChild();child.kill=vi.fn(()=>true);
+  const supervisor=new RuntimeSupervisor({}, {allocatePort:async()=>19223,resolveBinaryPath:()=>"/fake/core",spawnProcess:()=>asChild(child),waitForHealth:async()=>{},resolveLoginUserEnvironment:async()=>({})});
+  await supervisor.start();vi.useFakeTimers();vi.stubGlobal("fetch",vi.fn(async()=>new Response('{}',{status:200})));
+  try {
+   const stopped=supervisor.stop();const rejection=expect(stopped).rejects.toThrow("has not exited");
+   await vi.advanceTimersByTimeAsync(8999);expect(child.kill).not.toHaveBeenCalled();
+   await vi.advanceTimersByTimeAsync(1);expect(child.kill).toHaveBeenCalledWith(gracefulSignal);
+   await vi.advanceTimersByTimeAsync(2000);expect(child.kill).toHaveBeenCalledWith("SIGKILL");
+   await vi.advanceTimersByTimeAsync(1000);await rejection;
+   expect(supervisor.getStatus().status).toBe("stopping");
+   child.exitCode=0;child.emit("exit",0,null);await supervisor.stop();
+   expect(supervisor.getStatus().status).toBe("stopped");
+  } finally {vi.useRealTimers();vi.unstubAllGlobals();}
+ });
+});

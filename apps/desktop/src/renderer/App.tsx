@@ -93,6 +93,7 @@ import {
 import {
   modelPreferenceChangeForOption,
   modelPreferenceRecoveryKey,
+  consumeModelPreferenceRecoveryNotice,
   modelProfileIcon,
   modelProfileLabel,
 } from "./modelPreferencePresentation";
@@ -266,7 +267,7 @@ export function App() {
     selectedModelProfileId?: string;
     reasoningEffortByProfile: Record<string, ReasoningEffortLevel>;
   }>({ reasoningEffortByProfile: {} });
-  const recoveredModelPreferenceRef = useRef<string>("");
+  const recoveredModelPreferencesRef = useRef(new Set<string>());
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
   const [
     modelSettingsInitialModelSection,
@@ -655,15 +656,17 @@ export function App() {
     selectedReasoningEffort,
   );
   useEffect(() => {
-    if (
-      !recoveredPreferenceKey ||
-      recoveredModelPreferenceRef.current === recoveredPreferenceKey
-    ) {
-      return;
-    }
-    recoveredModelPreferenceRef.current = recoveredPreferenceKey;
-    setNotice("原会话的模型或 effort 已失效，已恢复为当前可用默认值。");
-  }, [recoveredPreferenceKey]);
+    if (!consumeModelPreferenceRecoveryNotice(
+      recoveredModelPreferencesRef.current,
+      recoveredPreferenceKey,
+      desktopReady && !runtimeRefreshError && modelProviders.length > 0,
+    )) return;
+    setNotice(
+      activeThread?.selectedModelProfileId !== selectedModelProfile?.id
+        ? `此会话原模型配置已不可用，后续发送将使用 ${selectedModelProfile ? modelProfileLabel(selectedModelProfile) : "当前默认模型"}。可在输入框切换模型。`
+        : "此会话原推理强度已不可用，后续发送将使用当前支持的档位。可在输入框调整。",
+    );
+  }, [recoveredPreferenceKey, desktopReady, runtimeRefreshError, modelProviders.length, activeThread?.selectedModelProfileId, selectedModelProfile]);
   const composerLifecycle = useComposerLifecycle({
     composerValue,
     desktopReady,
@@ -699,6 +702,17 @@ export function App() {
   } = composerInput;
 
   const activeUserQuestion = runtimeState.userQuestions[0];
+  const questionFocusOwner = useRef<{ threadId?: string; questionId: string } | null>(null);
+  useEffect(() => {
+    if (activeUserQuestion) return;
+    const owner = questionFocusOwner.current;
+    questionFocusOwner.current = null;
+    if (!owner || owner.threadId !== runtimeState.activeThreadId || !document.hasFocus()) return;
+    if (document.activeElement && document.activeElement !== document.body && !document.activeElement.closest(".user-question-card")) return;
+    if (!isBusy) { requestComposerFocus(); return; }
+    const container = document.querySelector<HTMLElement>(".composer-dock-stack, .composer-center-stack");
+    if (container) { container.tabIndex = -1; container.focus({ preventScroll: true }); }
+  }, [activeUserQuestion, runtimeState.activeThreadId, isBusy, requestComposerFocus]);
   const activeExternalInteraction = runtimeState.externalInteractions[0];
   const activeComputerReview = runtimeState.computerReviews[0];
   const activeComputerHandoff = runtimeState.computerHandoffs.find(
@@ -1431,7 +1445,7 @@ export function App() {
   }
 
   async function handleAnswerUserQuestion(answer: string): Promise<void> {
-    if (!runtimeState.runId || !activeUserQuestion) {
+    if (!runtimeState.runId || !activeUserQuestion || activeUserQuestion.withdrawn || runtimeState.phase === "cancelling") {
       return;
     }
     if (resolvingUserQuestionId === activeUserQuestion.id) {
@@ -1444,6 +1458,9 @@ export function App() {
     }
 
     setNotice(null);
+    if (document.activeElement?.closest(".user-question-card")) {
+      questionFocusOwner.current = { threadId: runtimeState.activeThreadId, questionId: activeUserQuestion.id };
+    }
     setResolvingUserQuestionId(activeUserQuestion.id);
     try {
       await runtimeClient.answerUserQuestion(
@@ -1463,7 +1480,7 @@ export function App() {
   }
 
   async function handleCancelUserQuestion(): Promise<void> {
-    if (!runtimeState.runId || !activeUserQuestion) {
+    if (!runtimeState.runId || !activeUserQuestion || activeUserQuestion.withdrawn || runtimeState.phase === "cancelling") {
       return;
     }
     if (resolvingUserQuestionId === activeUserQuestion.id) {
@@ -1471,6 +1488,9 @@ export function App() {
     }
 
     setNotice(null);
+    if (document.activeElement?.closest(".user-question-card")) {
+      questionFocusOwner.current = { threadId: runtimeState.activeThreadId, questionId: activeUserQuestion.id };
+    }
     setResolvingUserQuestionId(activeUserQuestion.id);
     try {
       await runtimeClient.cancelUserQuestion(
@@ -1676,7 +1696,7 @@ export function App() {
     return (
       <UserQuestionPrompt
         question={activeUserQuestion}
-        disabled={resolving}
+        disabled={resolving || activeUserQuestion.withdrawn || runtimeState.phase === "cancelling"}
         onCancel={() => {
           void handleCancelUserQuestion();
         }}

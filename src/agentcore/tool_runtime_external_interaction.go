@@ -39,6 +39,11 @@ func (rt *ToolRuntime) maybeAwaitCLIAuthInteraction(
 	if !ok {
 		return result, false
 	}
+	isMCP := strings.HasPrefix(result.Name, "mcp__")
+	if isMCP && (result.Outcome.TransportStatus != tool.TransportNotStarted ||
+		(result.Outcome.Operation != nil && result.Outcome.Operation.SideEffectState != tool.OutcomeSideEffectNotStarted && result.Outcome.Operation.SideEffectState != tool.OutcomeSideEffectNone)) {
+		return result, false
+	}
 	if alreadyReplayed {
 		code := "cli_auth_replay_exhausted"
 		message := "授权后原命令仍需要授权。请检查权限范围后重试，或前往连接器完成配置。"
@@ -54,7 +59,7 @@ func (rt *ToolRuntime) maybeAwaitCLIAuthInteraction(
 			code,
 			message,
 		)
-		result.Outcome.Retryable = true
+		result.Outcome.Retryable = !isMCP
 		result.Outcome.RecoveryOptions = []string{"complete_external_authorization", "retry_with_required_scopes"}
 		result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
 		return rt.finalizeExecutedToolResult(result, def, permission, string(decision.Source), selectedTool, input, result.Content), true
@@ -118,6 +123,11 @@ func (rt *ToolRuntime) awaitExternalInteractionAndContinue(
 			return rt.finalizeExecutedToolResult(result, def, permission, string(decision.Source), selectedTool, input, result.Content)
 		}
 
+		if strings.HasPrefix(result.Name, "mcp__") && !tool.AuthReplayBudgetFromContext(ctx).Take() {
+			result.Outcome.Retryable = false
+			result.Outcome.RecoveryOptions = []string{"authenticate_mcp_server", "do_not_replay_original_call"}
+			return finalizeToolResult(result)
+		}
 		output, trashedPaths, execOut, execErr := rt.routeToExecutor(ctx, result, intent, selectedTool, input)
 		result.TrashedPaths = append([]string(nil), trashedPaths...)
 		if execErr != nil {

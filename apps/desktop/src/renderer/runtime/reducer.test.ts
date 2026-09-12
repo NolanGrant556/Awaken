@@ -5142,3 +5142,15 @@ describe("runtime reducer computer pointer hints", () => {
     expect(after.phase).toBe(before.phase);
   });
 });
+
+describe("question withdrawal lifetime", () => {
+  it("keeps readonly questions during Stop and rejects late resurrection after terminal", () => {
+    const request: AguiEvent = { type: "AWAKEN_USER_QUESTION_REQUESTED", runId: "run-1", questionId: "q", toolCallId: "ask-1", toolCallName: "ask_user", content: '{"questions":[{"question":"保留的问题","options":[{"label":"A"}]}]}' };
+    const stopped = dispatch([{ type: "run/requested", prompt: "test" }, runEvent(request), { type: "run/cancelRequested" }, runEvent({ type: "AWAKEN_USER_QUESTION_RESOLVED", questionId: "q", questionResolution: "cancelled", questionCloseReason: "run_terminated" })]);
+    expect(stopped.userQuestions).toHaveLength(1);
+    expect(stopped.userQuestions[0]).toMatchObject({ withdrawn: true, id: "q" });
+    const terminal = reduceRuntimeState(stopped, runEvent({ type: "RUN_ERROR", code: "RUN_CANCELLED", runId: "run-1", stopSource: "user" }));
+    expect(terminal.userQuestions).toEqual([]);
+    expect(reduceRuntimeState(terminal, runEvent(request)).userQuestions).toEqual([]);
+  });
+});

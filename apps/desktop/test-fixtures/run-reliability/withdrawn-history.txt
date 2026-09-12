@@ -1,0 +1,108 @@
+Window: "Awaken Desktop", App: Electron.
+0 标准窗口 Awaken Desktop, Secondary Actions: Raise
+	1 container Awaken Desktop
+		2 container
+			3 HTML 内容 Awaken Desktop, URL: 127.0.0.1:5174/
+				4 container
+					5 container Workbench controls
+						6 按钮 Hide sidebar
+						7 按钮 Expand inspector
+					8 container Awaken 导航
+						9 按钮 新建任务
+						10 container 主导航
+							11 按钮 连接器
+							12 按钮 技能
+							13 按钮 插件
+							14 按钮 定时任务
+						15 container
+							16 文本 项目工作区
+							17 按钮 展开全部项目
+							18 按钮 创建项目
+							19 按钮 awaken-reliability-workspace
+							20 按钮 受控提问撤回验收：停止后原问题可读 加载中
+								21 文本 受控提问撤回验收：停止后原问题可读
+								22 container 加载中
+							23 按钮 受控验收：等待提问后由宿主停止。
+							24 按钮 测试项目01
+							25 按钮 测试项目02
+							26 按钮 测试项目03
+							27 按钮 服装TP
+						28 container
+							29 文本 对话
+							30 按钮 收起对话
+							31 按钮 批量管理对话
+							32 按钮 新增对话
+							33 按钮 隔离验收文件检查
+						34 弹出式按钮 用户 Nolan
+							35 文本 AW
+							36 文本 Nolan
+					37 分离器 Description: Resize sidebar, Value: 288.0156
+					38 container Run stage
+						39 container Agent execution narrative
+							40 container Turn 1
+								41 container
+									42 按钮 受控提问撤回验收：停止后原问题可读
+										43 文本 受控提问撤回验收：停止后原问题可读
+									44 container 消息操作
+										45 文本 23:44
+										46 按钮 (disabled) 撤销此消息
+										47 按钮 (disabled) 编辑此消息
+										48 按钮 Copy prompt
+								49 container 执行时间 0 秒
+									50 文本 执行时间 0 秒
+								51 container
+									52 文本 可靠性受控提问
+									53 container Assistant response actions
+										54 按钮 Copy final answer
+							55 container Turn 2
+								56 container
+									57 按钮 受控可靠性验收 ask：仅执行隔离夹具。
+										58 文本 受控可靠性验收 ask：仅执行隔离夹具。
+									59 container 消息操作
+										60 文本 23:47
+										61 按钮 (disabled) 撤销此消息
+										62 按钮 (disabled) 编辑此消息
+										63 按钮 Copy prompt
+								64 按钮 执行过程
+									65 文本 执行过程
+								66 文本 你停止了本次运行
+							67 container Turn 3
+								68 container
+									69 按钮 受控可靠性验收 stream：仅执行隔离夹具。
+										70 文本 受控可靠性验收 stream：仅执行隔离夹具。
+									71 container 消息操作
+										72 文本 23:53
+										73 按钮 (disabled) 撤销此消息
+										74 按钮 (disabled) 编辑此消息
+										75 按钮 Copy prompt
+								76 container 执行时间 7 秒
+									77 文本 执行时间 7 秒
+								78 文本 受控模型正在输出，等待停止。
+						79 container Message shortcuts
+							80 按钮 Description: 跳转到第 1 条消息, Help: 第 1 条消息
+							81 按钮 Description: 跳转到第 2 条消息, Help: 第 2 条消息
+							82 按钮 Description: 跳转到第 3 条消息, Help: 第 3 条消息
+						83 container
+							84 文本输入区 (disabled) Description: 输入任务, Placeholder: 输入后续任务…
+							85 按钮 (disabled) Description: 添加上下文, Help: addContext
+							86 弹出式按钮 (disabled) 插件，1 个可用
+							87 container Doubao-Seed-Evolving · high
+								88 图像 火山方舟 Logo
+								89 文本 Doubao-Seed-Evolving · high
+							90 按钮 停止运行
+							91 container Awaken composer context
+								92 文本 awaken-reliability-workspace
+								93 弹出式按钮 上下文窗口，18k / 120k
+									94 层次指示器 Description: 上下文窗口, Value: 15, Details: 18k / 120k
+					95 container Inspector
+	96 关闭按钮
+	97 全屏幕按钮 Help: 此按钮也可以执行缩放窗口的操作, Secondary Actions: 缩放窗口
+	98 最小化按钮
+99 menu bar
+	100 Electron
+	101 File
+	102 Edit
+	103 View
+	104 Window
+
+The focused UI element is 64 按钮 执行过程

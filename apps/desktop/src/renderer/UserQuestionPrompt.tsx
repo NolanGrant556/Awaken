@@ -78,7 +78,7 @@ export function UserQuestionPrompt({
   useEffect(() => {
     setAnswers({});
     setActiveQuestionIndex(0);
-  }, [question.id]);
+  }, [question.id, question.withdrawn]);
 
   useEffect(() => {
     setActiveQuestionIndex((current) =>
@@ -94,6 +94,29 @@ export function UserQuestionPrompt({
 
   if (questions.length === 0) {
     return null;
+  }
+
+  if (question.withdrawn) {
+    return (
+      <div className="user-question-card" aria-label="已撤回的问题">
+        <div className="user-question-card__topbar">
+          <div className="user-question-card__header" role="status">正在停止，问题已撤回</div>
+        </div>
+        <div className="user-question-card__body" role="region" aria-label="原问题" tabIndex={0}>
+          {questions.map((item, index) => (
+            <div className="user-question-card__question" key={index}>
+              <div className="user-question-card__title">{item.question}</div>
+              {item.options?.map((option) => (
+                <div key={option.label} className="user-question-card__option">
+                  <span className="user-question-card__option-label">{option.label}</span>
+                  <span className="user-question-card__option-description">{option.description}</span>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
   }
 
   const questionCount = questions.length;
@@ -217,11 +240,17 @@ export function UserQuestionPrompt({
   return (
     <div
       className="user-question-card"
+      onKeyDown={(event) => {
+        if (event.key !== "Escape" || event.defaultPrevented || event.nativeEvent.isComposing || disabled || question.withdrawn) return;
+        event.preventDefault();
+        event.stopPropagation();
+        onCancel();
+      }}
       aria-label={`需要回答的问题 ${currentPageIndex + 1} of ${questionCount}`}
     >
       <div className="user-question-card__topbar">
         <div className="user-question-card__heading">
-          <div className="user-question-card__header">需要回答</div>
+          <div className="user-question-card__header">{question.withdrawn ? "正在停止，问题已撤回" : "需要回答"}</div>
         </div>
         <div className="user-question-card__topbar-actions">
           {hasMultipleQuestions ? (
@@ -353,8 +382,9 @@ export function UserQuestionPrompt({
                   disabled={disabled}
                   onClick={(event) => event.stopPropagation()}
                   onKeyDown={(event) => {
+                    if (event.key === "Escape") return;
                     event.stopPropagation();
-                    if (event.key !== "Enter") {
+                    if (event.nativeEvent.isComposing || event.key !== "Enter") {
                       return;
                     }
                     event.preventDefault();

@@ -166,6 +166,7 @@ func projectV1Event(out *[]agentcore.SemanticRecord, seq *uint64, record Transcr
 			"status":          "finished",
 			"result":          event.Content,
 			"terminal_reason": string(firstNonEmptyTerminal(record.TerminalReason, event.TerminalReason)),
+			"stop_source":     event.StopSource,
 		})
 	case agentcore.RunErrorEventType:
 		status := "error"
@@ -178,6 +179,7 @@ func projectV1Event(out *[]agentcore.SemanticRecord, seq *uint64, record Transcr
 			"code":            event.Code,
 			"result":          event.Content,
 			"terminal_reason": string(firstNonEmptyTerminal(record.TerminalReason, event.TerminalReason)),
+			"stop_source":     event.StopSource,
 		})
 	case agentcore.TurnFinishedEventType:
 		appendProjected(out, seq, base, agentcore.SemanticKindTurnBoundary, map[string]any{

@@ -1,6 +1,7 @@
 package subagentruntime
 
 import (
+	"awaken/src/runcontrol"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -47,6 +48,7 @@ type Config struct {
 }
 
 type managedTask struct {
+	stopContext        context.Context
 	role               Role
 	done               chan struct{}
 	releaseResources   func()
@@ -104,7 +106,7 @@ func NewManager(parent context.Context, cfg Config) *Manager {
 	if cfg.CancelGrace <= 0 {
 		cfg.CancelGrace = defaultCancelGrace
 	}
-	ctx, cancel := context.WithCancel(parent)
+	ctx, cancel := runcontrol.WithCancel(parent)
 	rootCtx := cfg.RootContext
 	if rootCtx == nil {
 		rootCtx = ctx
@@ -242,11 +244,12 @@ func (m *Manager) Spawn(ctx context.Context, request SpawnRequest) (TaskSnapshot
 		return TaskSnapshot{}, err
 	}
 
-	taskCtx, cancel := context.WithCancel(owner.ctx)
+	taskCtx, cancel := runcontrol.WithCancel(owner.ctx)
 	task := &managedTask{
-		role:     role,
-		done:     make(chan struct{}),
-		snapshot: snapshot, prompt: request.Prompt, cancel: cancel, starter: preparation.Starter, contextSeed: preparation.ContextSeed,
+		stopContext: taskCtx,
+		role:        role,
+		done:        make(chan struct{}),
+		snapshot:    snapshot, prompt: request.Prompt, cancel: cancel, starter: preparation.Starter, contextSeed: preparation.ContextSeed,
 		seenToolCalls: make(map[string]struct{}), seenModelRequests: make(map[string]struct{}),
 		host: request.Host,
 	}
@@ -439,6 +442,10 @@ func (m *Manager) finish(taskID string, status TaskStatus, result, code, message
 	}
 	if snapshot.Status == StatusCancelling {
 		status, result, code, message = StatusCancelled, "", ErrorCancelled, cancelMessageForReason(task.cancelReason)
+	}
+	if status == StatusCancelled {
+		snapshot.StopSource = string(runcontrol.FromContext(task.stopContext))
+		message = runcontrol.Message(runcontrol.Source(snapshot.StopSource))
 	}
 	finished := time.Now().UTC()
 	snapshot.Status = status
@@ -880,6 +887,8 @@ func (m *Manager) Cancel(ctx context.Context, taskID, reason string) (TaskSnapsh
 	if task.cancelReason == "" {
 		task.cancelReason = strings.TrimSpace(reason)
 	}
+	runcontrol.SetSource(task.stopContext, runcontrol.RequestSource(ctx, runcontrol.Parent))
+	snapshot.StopSource = string(runcontrol.FromContext(task.stopContext))
 	snapshot.Status = StatusCancelling
 	snapshot.CurrentActivity = "正在取消"
 	if err := m.persist(ctx, "subagent_status_changed", snapshot); err != nil {
@@ -939,6 +948,7 @@ func (m *Manager) Close(ctx context.Context) error {
 	}
 	m.mu.Lock()
 	m.closed = true
+	runcontrol.SetSource(m.ctx, runcontrol.RequestSource(ctx, runcontrol.Parent))
 	m.cancel()
 	m.mu.Unlock()
 	stopErr := m.StopAll(ctx)

@@ -19,10 +19,10 @@ type persistentOAuthHandler struct {
 	cfg                AuthFlowConfig
 	store              CredentialStore
 
-	mu          sync.Mutex
-	authorizeMu sync.Mutex
-	tokenSource oauth2.TokenSource
-	generation  uint64
+	mu            sync.Mutex
+	authorizeGate chan struct{}
+	tokenSource   oauth2.TokenSource
+	generation    uint64
 }
 
 func newPersistentOAuthHandler(credentialIdentity string, cfg AuthFlowConfig, store CredentialStore) *persistentOAuthHandler {
@@ -71,8 +71,11 @@ func (h *persistentOAuthHandler) Authorize(ctx context.Context, req *http.Reques
 	h.mu.Lock()
 	startedGeneration := h.generation
 	h.mu.Unlock()
-	h.authorizeMu.Lock()
-	defer h.authorizeMu.Unlock()
+	release, lockErr := h.lockAuthorization(ctx)
+	if lockErr != nil {
+		return lockErr
+	}
+	defer release()
 	h.mu.Lock()
 	completedByConcurrentFlow := h.generation != startedGeneration
 	h.mu.Unlock()

@@ -462,7 +462,12 @@ func openAIContentForMessage(msg context.Message) interface{} {
 // When content is already ModelPayload-style JSON, preserve it and ensure
 // is_error / status semantics are present. Otherwise wrap plain text with
 // structured status/error fields derived from Message.IsError.
-func openAIToolMessageContent(msg context.Message) string {
+func openAIToolMessageContent(msg context.Message) (output string) {
+	defer func() {
+		if msg.ProviderProjectionText != "" {
+			output += "\n\n" + msg.ProviderProjectionText
+		}
+	}()
 	content := msg.Content
 	if looksLikeModelPayloadJSON(content) {
 		return ensureModelPayloadIsError(content, msg.IsError)

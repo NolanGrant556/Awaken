@@ -1,0 +1,11 @@
+{
+  "owned_pid": 38425,
+  "watch_started_at": 1789230977.878168,
+  "observed_exit_at": 1789230995.5317838,
+  "upper_bound_seconds_from_before_quit": 17.653616905212402,
+  "command_at_ms": 1789230984496,
+  "seconds_after_quit": 11.036,
+  "coordinator_result": "failed: Core did not shut down cleanly; update installation was stopped",
+  "fixture_run": "run_1789230942812158000_1",
+  "fixture_thread": "thread_1789230942812159000_2"
+}

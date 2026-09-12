@@ -325,6 +325,9 @@ func fileChangeSemanticRecords(threadID, runID, turnID, sessionID string, result
 // applyToolOutcomeFields copies canonical ToolOutcome fields onto an event.
 // Prefers result.Outcome when present; otherwise maps legacy Status/IsError.
 func applyToolOutcomeFields(event *AwakenEvent, result ToolExecutionResult) {
+	if result.Name == "ask_user" {
+		event.QuestionCloseReason, _ = result.Outcome.Details["question_close_reason"].(string)
+	}
 	if result.Outcome.Status != "" {
 		event.ToolStatus = string(result.Outcome.Status)
 		event.TransportStatus = string(result.Outcome.TransportStatus)

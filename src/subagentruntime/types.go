@@ -127,6 +127,7 @@ type MessageReceipt struct {
 }
 
 type TaskSnapshot struct {
+	StopSource    string `json:"stop_source,omitempty"`
 	ScopeDigest   string `json:"scope_digest,omitempty"`
 	RoleDigest    string `json:"role_digest,omitempty"`
 	Workflow      string `json:"workflow,omitempty"`

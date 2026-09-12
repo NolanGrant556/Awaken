@@ -146,7 +146,7 @@ func TestStopThreadAgentsCancelsChildrenWithoutStoppingRoot(t *testing.T) {
 	for {
 		got, _ := group.Status(child.TaskID)
 		if got.Status == subagentruntime.StatusCancelled {
-			if got.ErrorMessage != "the user stopped this Subagent assignment" {
+			if got.ErrorMessage != "你停止了本次运行" {
 				t.Fatalf("cancel message = %q", got.ErrorMessage)
 			}
 			break

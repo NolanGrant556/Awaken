@@ -133,6 +133,8 @@ func (h runHandlers) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var fileCommentErr *awruntime.FileCommentValidationError
 		switch {
+		case errors.Is(err, awruntime.ErrRuntimeShuttingDown):
+			writeErrorJSON(w, http.StatusServiceUnavailable, "RUNTIME_SHUTTING_DOWN", "应用正在关闭，无法开始新的运行。")
 		case errors.As(err, &fileCommentErr):
 			status := http.StatusBadRequest
 			code := "INVALID_FILE_COMMENT"
@@ -890,6 +892,7 @@ func mapRuntimeEvent(event awruntime.Event) []agui.Event {
 			Message:        event.Message,
 			Code:           "RUN_CANCELLED",
 			TerminalReason: string(event.TerminalReason),
+			StopSource:     event.StopSource,
 		}}
 	case awruntime.EventKindRunError:
 		return []agui.Event{{
@@ -902,6 +905,7 @@ func mapRuntimeEvent(event awruntime.Event) []agui.Event {
 			Message:        event.Message,
 			Code:           event.Code,
 			TerminalReason: string(event.TerminalReason),
+			StopSource:     event.StopSource,
 		}}
 	case awruntime.EventKindRunStatusChanged:
 		return []agui.Event{{
@@ -916,6 +920,7 @@ func mapRuntimeEvent(event awruntime.Event) []agui.Event {
 			Content:        event.Content,
 			Code:           event.Code,
 			TerminalReason: string(event.TerminalReason),
+			StopSource:     event.StopSource,
 		}}
 	default:
 		return nil

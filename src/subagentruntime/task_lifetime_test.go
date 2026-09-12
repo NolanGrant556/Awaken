@@ -1,6 +1,7 @@
 package subagentruntime
 
 import (
+	"awaken/src/runcontrol"
 	"context"
 	"strings"
 	"sync"
@@ -180,7 +181,7 @@ func TestCancelActiveAssignmentsKeepsCreatorAndNotifiesParent(t *testing.T) {
 		t.Fatal(err)
 	}
 	<-started
-	if err := m.CancelActiveAssignments(context.Background(), "user_stopped_all"); err != nil {
+	if err := m.CancelActiveAssignments(runcontrol.WithRequestSource(context.Background(), runcontrol.User), "user_stopped_all"); err != nil {
 		t.Fatal(err)
 	}
 	notices := m.DrainParentNotices()
@@ -194,7 +195,7 @@ func TestCancelActiveAssignmentsKeepsCreatorAndNotifiesParent(t *testing.T) {
 	for {
 		got, _ := m.Status(first.TaskID)
 		if got.Status == StatusCancelled {
-			if got.ErrorMessage != "the user stopped this Subagent assignment" {
+			if got.ErrorMessage != "你停止了本次运行" {
 				t.Fatalf("cancel message = %q", got.ErrorMessage)
 			}
 			break

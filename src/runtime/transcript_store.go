@@ -545,11 +545,14 @@ func applyTerminalTranscriptEvent(run *Run, record TranscriptRecord) {
 	event := record.Event
 	switch event.Type {
 	case agentcore.RunFinishedEventType:
+		run.TerminalReason = event.TerminalReason
 		run.Status = RunStatusFinished
 		run.Result = event.Content
 		finishedAt := record.Timestamp
 		run.FinishedAt = &finishedAt
 	case agentcore.RunErrorEventType:
+		run.StopSource = event.StopSource
+		run.TerminalReason = event.TerminalReason
 		if event.Code == "RUN_CANCELLED" {
 			run.Status = RunStatusCancelled
 			run.Error = firstNonEmpty(strings.TrimSpace(event.Error), "run cancelled")
@@ -591,6 +594,7 @@ func recoverableAgentEventForTranscript(event Event) (agentcore.AwakenEvent, boo
 			Content:        event.Content,
 			Code:           event.Code,
 			TerminalReason: event.TerminalReason,
+			StopSource:     event.StopSource,
 		}, true
 	default:
 		return agentcore.AwakenEvent{}, false

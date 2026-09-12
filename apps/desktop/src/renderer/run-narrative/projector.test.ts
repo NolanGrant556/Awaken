@@ -98,13 +98,7 @@ describe("projectAguiEventToNarrative", () => {
     });
 
     expect(state.activeItem).toBeUndefined();
-    expect(state.committedItems).toContainEqual(
-      expect.objectContaining({
-        title: "Question cancelled",
-        detail: "The user chose not to answer; the run continues.",
-        status: "done",
-      }),
-    );
+    expect(state.committedItems).toEqual([]); // Durable ask_user results own history.
     expect(state.committedItems).not.toContainEqual(
       expect.objectContaining({ title: "Answer received" }),
     );
@@ -853,7 +847,7 @@ describe("projectAguiEventToNarrative", () => {
     });
   });
 
-  it("adds a hint item when a run is cancelled by the user", () => {
+  it("adds a hint item when a legacy run has no stop source", () => {
     let state = createInitialRunNarrativeState();
     state = projectAguiEventToNarrative(state, textMessageStart());
     state = projectAguiEventToNarrative(state, textMessageContent("hello"));
@@ -868,7 +862,7 @@ describe("projectAguiEventToNarrative", () => {
     expect(hint).toBeDefined();
     expect(hint).toMatchObject({
       kind: "hint",
-      text: "你停止了生成本次回答",
+      text: "本次运行已中断",
       isTerminal: true,
     });
   });
@@ -898,7 +892,7 @@ describe("projectAguiEventToNarrative", () => {
 
     state = projectAguiEventToNarrative(
       state,
-      runStatusChanged("cancelled", "你停止生成了本次回答"),
+      runStatusChanged("cancelled", "本次运行已中断"),
     );
 
     const answer = state.committedItems.find((item) => item.kind === "answer");
@@ -907,7 +901,7 @@ describe("projectAguiEventToNarrative", () => {
 
     const hint = state.committedItems.find((item) => item.kind === "hint");
     expect(hint).toBeDefined();
-    expect(hint?.kind === "hint" && hint.text).toBe("你停止生成了本次回答");
+    expect(hint?.kind === "hint" && hint.text).toBe("本次运行已中断");
   });
 
   it("uses a default hint text when cancelled status has no message", () => {
@@ -921,7 +915,7 @@ describe("projectAguiEventToNarrative", () => {
     expect(answer).toBeDefined();
 
     const hint = state.committedItems.find((item) => item.kind === "hint");
-    expect(hint?.kind === "hint" && hint.text).toBe("你停止生成了本次回答");
+    expect(hint?.kind === "hint" && hint.text).toBe("本次运行已中断");
   });
 
   it("keeps answer content when cancelled mid-stream", () => {
@@ -935,7 +929,7 @@ describe("projectAguiEventToNarrative", () => {
     expect(answer?.kind === "answer" && answer.markdown).toBe("partial");
 
     const hint = state.committedItems.find((item) => item.kind === "hint");
-    expect(hint?.kind === "hint" && hint.text).toBe("你停止了生成本次回答");
+    expect(hint?.kind === "hint" && hint.text).toBe("本次运行已中断");
   });
 
   it("adds a hint item after an already-committed answer when cancelled late", () => {
@@ -952,7 +946,7 @@ describe("projectAguiEventToNarrative", () => {
 
     const hint = state.committedItems.find((item) => item.kind === "hint");
     expect(hint).toBeDefined();
-    expect(hint?.kind === "hint" && hint.text).toBe("你停止了生成本次回答");
+    expect(hint?.kind === "hint" && hint.text).toBe("本次运行已中断");
   });
 
   it("deduplicates cancel hint items when both RUN_STATUS_CHANGED and RUN_ERROR arrive", () => {
@@ -966,7 +960,7 @@ describe("projectAguiEventToNarrative", () => {
     const hints = state.committedItems.filter((item) => item.kind === "hint");
     expect(hints).toHaveLength(1);
     expect(hints[0]?.kind === "hint" && hints[0].text).toBe(
-      "你停止了生成本次回答",
+      "本次运行已中断",
     );
   });
 

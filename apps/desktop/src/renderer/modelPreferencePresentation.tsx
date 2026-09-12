@@ -45,6 +45,15 @@ export function modelPreferenceRecoveryKey(
   return `${threadId}:${persistedModelProfileId ?? ""}:${persistedReasoningEffort ?? ""}`;
 }
 
+// Keep acknowledgements across thread navigation without rewriting historical preferences.
+export function consumeModelPreferenceRecoveryNotice(
+  seen: Set<string>, key: string, catalogReady: boolean,
+): boolean {
+  if (!catalogReady || !key || seen.has(key)) return false;
+  seen.add(key);
+  return true;
+}
+
 export function modelProfileIcon(profile: RuntimeModelProfileSummary) {
   const brand = providerBrandForId(profile.providerId);
   return brand ? (

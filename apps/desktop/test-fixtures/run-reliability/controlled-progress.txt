@@ -1,0 +1,2 @@
+There has been no change in the accessibility tree for Window: "Awaken Desktop".
+The focused UI element is 115 按钮 执行时间 1 分 36 秒

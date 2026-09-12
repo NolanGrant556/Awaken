@@ -1,0 +1,2 @@
+There has been no change in the accessibility tree for Window: "Awaken Desktop".
+The focused UI element is 142 按钮 受控等待子任务 1，已停止

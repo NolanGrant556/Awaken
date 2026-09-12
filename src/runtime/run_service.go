@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"awaken/src/runcontrol"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -210,6 +211,8 @@ func (f ExecutorFunc) Run(ctx context.Context, input string, sink agentcore.Even
 }
 
 type RunService struct {
+	shuttingDown      bool
+	startWG           sync.WaitGroup
 	mu                sync.RWMutex
 	projectMutationMu sync.RWMutex
 	contextSnapshotMu sync.Mutex
@@ -1133,6 +1136,14 @@ func (s *RunService) SetDefaultWorkspace(workspace WorkspaceConfig) error {
 }
 
 func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
+	s.mu.Lock()
+	if s.shuttingDown {
+		s.mu.Unlock()
+		return Run{}, ErrRuntimeShuttingDown
+	}
+	s.startWG.Add(1)
+	s.mu.Unlock()
+	defer s.startWG.Done()
 	trimmed := strings.TrimSpace(req.Input)
 	if trimmed == "" && len(req.Attachments) == 0 && len(req.ComposerTokens) == 0 && len(req.FileComments) == 0 {
 		return Run{}, ErrInvalidInput
@@ -1285,8 +1296,9 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	if strings.TrimSpace(trimmed) == "" && len(persistedAttachments) == 0 && len(req.ComposerTokens) == 0 {
 		threadLabel = threadLabelForFileLineComments(canonicalFileComments)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := runcontrol.WithCancel(context.Background())
 	session := NewSessionWithFileComments(runID, threadID, trimmed, persistedAttachments, req.ComposerTokens, canonicalFileComments, cancel)
+	session.stopContext = ctx
 	session.SetPluginRuntimeLease(pluginGeneration, pluginLeaseRelease)
 	hookSnapshot.AsyncSink = s.asyncHookCompletions
 	hookSnapshot.AsyncLifecycle = session
@@ -1558,6 +1570,16 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	if appendInputErr != nil {
 		return rollbackStart(appendInputErr, true)
 	}
+	s.mu.Lock()
+	if s.shuttingDown {
+		s.mu.Unlock()
+		return rollbackStart(ErrRuntimeShuttingDown, true)
+	}
+	s.runWG.Add(1)
+	if shouldGenerateThreadTitle {
+		s.runWG.Add(1)
+	}
+	s.mu.Unlock()
 	if shouldGenerateThreadTitle {
 		titleProfile := req.ModelProfile
 		if req.ModelProfile != nil {
@@ -1565,10 +1587,12 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 				titleProfile = routed
 			}
 		}
-		go s.scheduleThreadTitleGeneration(context.Background(), threadID, runID, firstNonEmpty(trimmed, threadLabelForFileLineComments(canonicalFileComments)), persistedAttachments, req.ComposerTokens, titleProfile)
+		go func() {
+			defer s.runWG.Done()
+			s.scheduleThreadTitleGeneration(ctx, threadID, runID, firstNonEmpty(trimmed, threadLabelForFileLineComments(canonicalFileComments)), persistedAttachments, req.ComposerTokens, titleProfile)
+		}()
 	}
 	executor := s.newExecutor(agent)
-	s.runWG.Add(1)
 	go func() {
 		defer s.runWG.Done()
 		s.executeWithMediaArtifactReferences(session, executor, agent, effectiveInput, trimmed, persistedAttachments, mediaArtifactReferences, ctx)
@@ -2832,11 +2856,15 @@ func threadSnapshotFromRestored(threadID string, workspace WorkspaceConfig, rest
 }
 
 func (s *RunService) CancelRun(runID string) (Run, error) {
+	return s.cancelRunWithSource(runID, runcontrol.User)
+}
+
+func (s *RunService) cancelRunWithSource(runID string, source runcontrol.Source) (Run, error) {
 	session, err := s.session(runID)
 	if err != nil {
 		return Run{}, err
 	}
-	run := session.RequestCancel()
+	run := session.RequestCancelWithSource(source)
 	if isTerminalStatus(run.Status) {
 		return run, nil
 	}
@@ -2849,7 +2877,7 @@ func (s *RunService) CancelRun(runID string) (Run, error) {
 	}
 	s.mu.RUnlock()
 	if group != nil {
-		if err := group.StopRun(context.Background(), runID); err != nil {
+		if err := group.StopRun(runcontrol.WithRequestSource(context.Background(), source), runID); err != nil {
 			log.Printf("stop run workgroup: %v", err)
 		}
 	}
@@ -2912,7 +2940,7 @@ func (s *RunService) CancelSubagent(ctx context.Context, runID, taskID, reason s
 	if controller == nil {
 		return subagentruntime.TaskSnapshot{}, &subagentruntime.Error{Code: subagentruntime.ErrorNotFound, Message: "subagent task not found"}
 	}
-	return controller.Cancel(ctx, taskID, reason)
+	return controller.Cancel(runcontrol.WithRequestSource(ctx, runcontrol.User), taskID, reason)
 }
 
 func (s *RunService) ResolveUserQuestion(runID, questionID, answer string) error {
@@ -3075,7 +3103,7 @@ func (s *RunService) executeWithMediaArtifactReferences(session *Session, execut
 
 	if err == nil {
 		if session.CancelRequested() {
-			session.CompleteCancelled("你停止了生成本次回答", partialAssistantResult(agent))
+			session.CompleteCancelled("", partialAssistantResult(agent))
 			s.flushAgentTranscript(session, agent)
 			return
 		}
@@ -3084,7 +3112,7 @@ func (s *RunService) executeWithMediaArtifactReferences(session *Session, execut
 	}
 
 	if errors.Is(ctx.Err(), context.Canceled) || session.CancelRequested() {
-		session.CompleteCancelled("你停止了生成本次回答", partialAssistantResult(agent))
+		session.CompleteCancelled("", partialAssistantResult(agent))
 		s.flushAgentTranscript(session, agent)
 		return
 	}
@@ -3360,6 +3388,10 @@ func persistSkillPreActivationFailure(ctx context.Context, recorder agentcore.Se
 		records = append(records, skillActivationRecords(snapshot, plan)...)
 	}
 	code := skillActivationErrorCode(activationErr)
+	stopSource := snapshot.StopSource
+	if ctx.Err() != nil {
+		stopSource = string(runcontrol.FromContext(ctx))
+	}
 	records = append(records, agentcore.NewSemanticRecord(
 		agentcore.SemanticKindRunTerminal,
 		snapshot.ThreadID,
@@ -3372,6 +3404,7 @@ func persistSkillPreActivationFailure(ctx context.Context, recorder agentcore.Se
 			"error":           activationErr.Error(),
 			"code":            code,
 			"terminal_reason": "skill_activation_failed",
+			"stop_source":     stopSource,
 		},
 	))
 	if err := recorder.AppendBatch(persistCtx, records); err != nil {

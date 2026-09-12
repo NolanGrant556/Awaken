@@ -312,6 +312,7 @@ type Event struct {
 	Truncated                        bool                        `json:"truncated,omitempty"`
 	Message                          string                      `json:"message,omitempty"`
 	Code                             string                      `json:"code,omitempty"`
+	StopSource                       string                      `json:"stopSource,omitempty"`
 	TerminalReason                   string                      `json:"terminalReason,omitempty"`
 	TransitionReason                 string                      `json:"transitionReason,omitempty"`
 	ContextModelWindow               int                         `json:"contextModelWindow,omitempty"`
@@ -431,6 +432,7 @@ type Event struct {
 	HookOutputPreview          string           `json:"hookOutputPreview,omitempty"`
 	QuestionID                 string           `json:"questionId,omitempty"`
 	QuestionAnswer             string           `json:"questionAnswer,omitempty"`
+	QuestionCloseReason        string           `json:"questionCloseReason,omitempty"`
 	QuestionResolution         string           `json:"questionResolution,omitempty"`
 	InteractionID              string           `json:"interactionId,omitempty"`
 	InteractionKind            string           `json:"interactionKind,omitempty"`

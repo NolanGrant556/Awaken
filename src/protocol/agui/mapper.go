@@ -23,6 +23,8 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		MessageID:                        event.MessageID,
 		Role:                             event.Role,
 		TerminalReason:                   string(event.TerminalReason),
+		StopSource:                       event.StopSource,
+		QuestionCloseReason:              event.QuestionCloseReason,
 		TransitionReason:                 string(event.TransitionReason),
 		ContextModelWindow:               event.ContextModelWindow,
 		ContextOutputReserve:             event.ContextOutputReserve,

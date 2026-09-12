@@ -1,6 +1,7 @@
 package subagentruntime
 
 import (
+	"awaken/src/runcontrol"
 	"context"
 	"errors"
 	"strings"
@@ -95,6 +96,7 @@ func (m *Manager) stopTasks(ctx context.Context, runID string) error {
 	var ids []string
 	for id, task := range m.tasks {
 		if !task.snapshot.Terminal() && (runID == "" || task.snapshot.RunID == runID) {
+			runcontrol.SetSource(task.stopContext, runcontrol.RequestSource(ctx, runcontrol.Parent))
 			cancels = append(cancels, task.cancel)
 			ids = append(ids, id)
 		}

@@ -54,6 +54,7 @@ import {
   modelProfileLabel,
   modelPreferenceChangeForOption,
   modelPreferenceRecoveryKey,
+  consumeModelPreferenceRecoveryNotice,
 } from "./modelPreferencePresentation";
 import {
   mediaRevealLabelForPlatform,
@@ -4873,6 +4874,23 @@ describe("App workbench presentation", () => {
     ).toBe("");
   });
 
+  it("does not repeat model recovery notices when navigating between historical threads", () => {
+    const seen = new Set<string>();
+    expect(consumeModelPreferenceRecoveryNotice(seen, "thread-a:deleted:high", true)).toBe(true);
+    expect(consumeModelPreferenceRecoveryNotice(seen, "thread-b:fixture:", true)).toBe(true);
+    expect(consumeModelPreferenceRecoveryNotice(seen, "thread-a:deleted:high", true)).toBe(false);
+    expect(consumeModelPreferenceRecoveryNotice(seen, "thread-b:fixture:", true)).toBe(false);
+    expect(consumeModelPreferenceRecoveryNotice(seen, "thread-a:another-deleted:high", true)).toBe(true);
+  });
+
+  it("does not consume recovery notices before the model catalog is ready", () => {
+    const seen = new Set<string>();
+    expect(consumeModelPreferenceRecoveryNotice(seen, "thread-a:deleted:high", false)).toBe(false);
+    expect(seen.size).toBe(0);
+    expect(consumeModelPreferenceRecoveryNotice(seen, "", true)).toBe(false);
+    expect(consumeModelPreferenceRecoveryNotice(seen, "thread-a:deleted:high", true)).toBe(true);
+  });
+
   it("recovers only explicit unavailable model or effort preferences", () => {
     expect(
       modelPreferenceRecoveryKey(
@@ -6335,4 +6353,13 @@ describe("sidebar thread archive menu", () => {
     items[1].onSelect?.();
     expect(onArchive).toHaveBeenCalledTimes(1);
   });
+});
+
+describe("withdrawn question view", () => {
+ it("shows all original questions without draft inputs or submitting controls", () => {
+  const html = renderToString(React.createElement(UserQuestionPrompt, { question: {id:"withdrawn",withdrawn:true,questions:[{question:"原问题一",options:[{label:"A"}]},{question:"原问题二",options:[{label:"B"}]}]},onCancel:vi.fn(),onSubmit:vi.fn()}));
+  expect(html).toContain("正在停止，问题已撤回");
+  expect(html).toContain("原问题一"); expect(html).toContain("原问题二");
+  expect(html).not.toContain("<input"); expect(html).not.toContain("<button");
+ });
 });

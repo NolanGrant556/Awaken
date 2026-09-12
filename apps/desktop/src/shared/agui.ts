@@ -342,6 +342,7 @@ export type AguiEvent = {
   researchVerifiedCount?: number;
   researchPartialCount?: number;
   researchRejectedCount?: number;
+  stopSource?: "user" | "parent" | "shutdown" | "timeout" | "unknown";
   terminalReason?: string;
   transitionReason?: string;
   contextModelWindow?: number;
@@ -452,6 +453,7 @@ export type AguiEvent = {
   questionId?: string;
   questionAnswer?: string;
   questionResolution?: "answered" | "cancelled";
+  questionCloseReason?: "user_cancelled" | "run_terminated";
   interactionId?: string;
   interactionKind?: string;
   interactionResolution?: string;

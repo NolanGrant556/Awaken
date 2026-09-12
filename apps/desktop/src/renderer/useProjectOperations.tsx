@@ -458,7 +458,7 @@ export function useProjectOperations(options: Options) {
       },
       {
         id: "delete-project-history",
-        label: "删除 Awaken 历史",
+        label: "删除项目会话历史",
         tone: "danger" as const,
         onSelect: () => {
           requestProjectDelete(projectId, "delete_history");
@@ -944,7 +944,7 @@ export function useProjectOperations(options: Options) {
     pendingProjectDelete?.action === "detach"
       ? "从 Awaken 移除项目"
       : pendingProjectDelete?.action === "delete_history"
-        ? "删除 Awaken 历史"
+        ? "删除项目会话历史"
         : "将文件夹移到废纸篓";
 
   const projectDeleteDialogBody = !pendingProjectDelete
@@ -952,7 +952,7 @@ export function useProjectOperations(options: Options) {
     : pendingProjectDelete.action === "detach"
       ? `“${pendingProjectDelete.label}”会从侧栏移除。${pendingProjectDelete.threadCount} 条历史会话和磁盘文件都会保留。`
       : pendingProjectDelete.action === "delete_history"
-        ? `将删除“${pendingProjectDelete.label}”的 ${pendingProjectDelete.threadCount} 条 Awaken 历史会话。项目和磁盘目录都会保留；运行中的任务会先自动停止。`
+        ? `将删除“${pendingProjectDelete.label}”的 ${pendingProjectDelete.threadCount} 条会话历史。项目和磁盘目录都会保留；运行中的任务会先自动停止。`
         : [
             `“${pendingProjectDelete.label}”的磁盘目录将进入系统废纸篓，并从项目中解绑。项目和它的 Awaken 历史都会保留；失败时文件夹、项目和文件都保持原样。`,
             sharedFolderTrashWarning({

@@ -1,0 +1,1626 @@
+{
+  "schema_version": 1,
+  "baseline": "61064e161730eac9142ea7f3a283cc09d0b548e1",
+  "platform": "macOS arm64",
+  "desktop_entry": "npm run open:desktop",
+  "workspace": "/tmp/awaken-reliability-workspace",
+  "isolation": "Dedicated workspace and loopback fixtures in existing Desktop profile; production userData was preserved. No external OAuth identity or business writes. Fixture MCP configuration removed after testing.",
+  "scenarios": [
+    {
+      "name": "real_cancel_answer",
+      "thread_id": "thread_1789227433202649000_2",
+      "run_id": "run_1789227433202646000_1",
+      "record_counts": {
+        "instruction_snapshot": 1,
+        "user_message": 1,
+        "model_request": 6,
+        "run_started": 1,
+        "hook_snapshot": 1,
+        "context_epoch": 1,
+        "context_snapshot": 5,
+        "model_usage": 6,
+        "reasoning_summary": 4,
+        "tool_call": 4,
+        "permission_decision": 4,
+        "tool_result": 4,
+        "turn_boundary": 4,
+        "assistant_message": 2,
+        "run_terminal": 1
+      },
+      "records": [
+        {
+          "seq": 17,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T15:40:24.310787Z",
+          "payload": {
+            "tool_call_id": "call_3heomw5w1405jdh3kh3biuw8",
+            "tool_name": "ask_user",
+            "outcome": {
+              "status": "succeeded",
+              "diagnostic": {
+                "environment_snapshot_id": "env_dd761fdcc53a8b4655dfdffd",
+                "provider_id": "builtin:ask_user",
+                "provider_readiness": "ready",
+                "provider_source": "builtin",
+                "tool_snapshot_id": "tools_56d3bf3d5b40d1b219965402"
+              }
+            },
+            "question_close_reason": "user_cancelled"
+          }
+        },
+        {
+          "seq": 21,
+          "kind": "assistant_message",
+          "timestamp": "2026-09-12T15:40:30.410043Z",
+          "payload": {
+            "content": "您取消了选择，按约定执行 **B（前两个文件）**。先列出该目录内容：\n"
+          }
+        },
+        {
+          "seq": 26,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T15:40:31.567318Z",
+          "payload": {
+            "tool_call_id": "call_2l7et90paruooj3m75xiqccd",
+            "tool_name": "Glob",
+            "outcome": {
+              "status": "succeeded",
+              "diagnostic": {
+                "capabilities": [
+                  "file.read"
+                ],
+                "environment_snapshot_id": "env_dd761fdcc53a8b4655dfdffd",
+                "provider_id": "builtin:Glob",
+                "provider_readiness": "ready",
+                "provider_source": "builtin",
+                "tool_snapshot_id": "tools_56d3bf3d5b40d1b219965402"
+              }
+            }
+          }
+        },
+        {
+          "seq": 35,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T15:40:38.324472Z",
+          "payload": {
+            "tool_call_id": "call_5kfl326e2pwqh8bwlga0hz6b",
+            "tool_name": "Read",
+            "outcome": {
+              "status": "succeeded",
+              "diagnostic": {
+                "capabilities": [
+                  "file.read"
+                ],
+                "environment_snapshot_id": "env_dd761fdcc53a8b4655dfdffd",
+                "provider_id": "builtin:Read",
+                "provider_readiness": "ready",
+                "provider_source": "builtin",
+                "tool_snapshot_id": "tools_56d3bf3d5b40d1b219965402"
+              }
+            }
+          }
+        },
+        {
+          "seq": 37,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T15:40:38.324795Z",
+          "payload": {
+            "tool_call_id": "call_ltbnrxr8ty71b95uyq0ofhgw",
+            "tool_name": "Read",
+            "outcome": {
+              "status": "succeeded",
+              "diagnostic": {
+                "capabilities": [
+                  "file.read"
+                ],
+                "environment_snapshot_id": "env_dd761fdcc53a8b4655dfdffd",
+                "provider_id": "builtin:Read",
+                "provider_readiness": "ready",
+                "provider_source": "builtin",
+                "tool_snapshot_id": "tools_56d3bf3d5b40d1b219965402"
+              }
+            }
+          }
+        },
+        {
+          "seq": 43,
+          "kind": "assistant_message",
+          "timestamp": "2026-09-12T15:40:50.392579Z",
+          "payload": {
+            "content": "## 验收报告\n\n**检查范围**：B（前两个文件，因您取消选择，按约定回退到 B）\n\n**目录情况**：`/tmp/awaken-reliability-workspace` 下共 12 个文件（item-01.txt ~ item-12.txt），仅读取了前两个：\n\n| 文件 | 内容 | quantity | price |\n|---|---|---|---|\n| item-01.txt | 样本 1: quantity=3, price=21 | 3 | 21 |\n| item-02.txt | 样本 2: quantity=6, price=22 | 6 | 22 |\n\n**数量汇总**：\n- 读取文件数：**2**\n- quantity 合计：**9**\n- 每个文件均为 1 行、31 字节\n\n全程仅操作指定目录，未读取其他路径，未联网。工具调用均一次成功，无异常。"
+          }
+        },
+        {
+          "seq": 46,
+          "kind": "run_terminal",
+          "timestamp": "2026-09-12T15:40:50.412387Z",
+          "payload": {
+            "status": "finished",
+            "terminal_reason": "completed"
+          }
+        }
+      ]
+    },
+    {
+      "name": "real_progress",
+      "thread_id": "thread_1789227433202649000_2",
+      "run_id": "run_1789227685045170000_3",
+      "record_counts": {
+        "instruction_snapshot": 1,
+        "user_message": 1,
+        "model_request": 14,
+        "run_started": 1,
+        "hook_snapshot": 1,
+        "context_snapshot": 15,
+        "model_usage": 14,
+        "reasoning_summary": 12,
+        "tool_call": 12,
+        "permission_decision": 12,
+        "tool_result": 12,
+        "turn_boundary": 13,
+        "assistant_message": 2,
+        "run_terminal": 1,
+        "context_epoch": 2
+      },
+      "records": [
+        {
+          "seq": 59,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T15:41:39.495901Z",
+          "payload": {
+            "tool_call_id": "call_k6srzbu9jf3zigtwe7kixp12",
+            "tool_name": "Bash",
+            "outcome": {
+              "status": "succeeded",
+              "diagnostic": {
+                "capabilities": [
+                  "shell.execute"
+                ],
+                "environment_snapshot_id": "env_83601e1de47c6be0422faabf",
+                "provider_id": "builtin:bash",
+                "provider_readiness": "ready",
+                "provider_source": "builtin",
+                "tool_snapshot_id": "tools_87225dee850ce534fed3f4b1"
+              }
+            }
+          }
+        },
+        {
+          "seq": 67,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T15:41:53.630844Z",
+          "payload": {
+            "tool_call_id": "call_nsygwspflw7ipci50sk3zazt",
+            "tool_name": "Bash",
+            "outcome": {
+              "status": "succeeded",
+              "diagnostic": {
+                "capabilities": [
+                  "shell.execute"
+                ],
+                "environment_snapshot_id": "env_83601e1de47c6be0422faabf",
+                "provider_id": "builtin:bash",
+                "provider_readiness": "ready",
+                "provider_source": "builtin",
+                "tool_snapshot_id": "tools_87225dee850ce534fed3f4b1"
+              }
+            }
+          }
+        },
+        {
+          "seq": 75,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T15:42:06.385237Z",
+          "payload": {
+            "tool_call_id": "call_h0qn1xvbhn77u4q4mycm76pu",
+            "tool_name": "Bash",
+            "outcome": {
+              "status": "succeeded",
+              "diagnostic": {
+                "capabilities": [
+                  "shell.execute"
+                ],
+                "environment_snapshot_id": "env_83601e1de47c6be0422faabf",
+                "provider_id": "builtin:bash",
+                "provider_readiness": "ready",
+                "provider_source": "builtin",
+                "tool_snapshot_id": "tools_87225dee850ce534fed3f4b1"
+              }
+            }
+          }
+        },
+        {
+          "seq": 83,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T15:42:20.364901Z",
+          "payload": {
+            "tool_call_id": "call_if6dymrrnb2j59i5nxh50xf5",
+            "tool_name": "Bash",
+            "outcome": {
+              "status": "succeeded",
+              "diagnostic": {
+                "capabilities": [
+                  "shell.execute"
+                ],
+                "environment_snapshot_id": "env_83601e1de47c6be0422faabf",
+                "provider_id": "builtin:bash",
+                "provider_readiness": "ready",
+                "provider_source": "builtin",
+                "tool_snapshot_id": "tools_87225dee850ce534fed3f4b1"
+              }
+            }
+          }
+        },
+        {
+          "seq": 91,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T15:42:34.301436Z",
+          "payload": {
+            "tool_call_id": "call_ipfrmp4ndrybxmsectk1szrq",
+            "tool_name": "Bash",
+            "outcome": {
+              "status": "succeeded",
+              "diagnostic": {
+                "capabilities": [
+                  "shell.execute"
+                ],
+                "environment_snapshot_id": "env_83601e1de47c6be0422faabf",
+                "provider_id": "builtin:bash",
+                "provider_readiness": "ready",
+                "provider_source": "builtin",
+                "tool_snapshot_id": "tools_87225dee850ce534fed3f4b1"
+              }
+            }
+          }
+        },
+        {
+          "seq": 99,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T15:42:50.2094Z",
+          "payload": {
+            "tool_call_id": "call_zkpl1096hchr1uq8udd8dnns",
+            "tool_name": "Bash",
+            "outcome": {
+              "status": "succeeded",
+              "diagnostic": {
+                "capabilities": [
+                  "shell.execute"
+                ],
+                "environment_snapshot_id": "env_83601e1de47c6be0422faabf",
+                "provider_id": "builtin:bash",
+                "provider_readiness": "ready",
+                "provider_source": "builtin",
+                "tool_snapshot_id": "tools_87225dee850ce534fed3f4b1"
+              }
+            }
+          }
+        },
+        {
+          "seq": 107,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T15:43:02.711072Z",
+          "payload": {
+            "tool_call_id": "call_9h4lr2205mo2jajn1879woka",
+            "tool_name": "Bash",
+            "outcome": {
+              "status": "succeeded",
+              "diagnostic": {
+                "capabilities": [
+                  "shell.execute"
+                ],
+                "environment_snapshot_id": "env_83601e1de47c6be0422faabf",
+                "provider_id": "builtin:bash",
+                "provider_readiness": "ready",
+                "provider_source": "builtin",
+                "tool_snapshot_id": "tools_87225dee850ce534fed3f4b1"
+              }
+            }
+          }
+        },
+        {
+          "seq": 115,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T15:43:14.491645Z",
+          "payload": {
+            "tool_call_id": "call_q9280i0re7csgc3d5kil76ga",
+            "tool_name": "Bash",
+            "outcome": {
+              "status": "succeeded",
+              "diagnostic": {
+                "capabilities": [
+                  "shell.execute"
+                ],
+                "environment_snapshot_id": "env_83601e1de47c6be0422faabf",
+                "provider_id": "builtin:bash",
+                "provider_readiness": "ready",
+                "provider_source": "builtin",
+                "tool_snapshot_id": "tools_87225dee850ce534fed3f4b1"
+              }
+            }
+          }
+        },
+        {
+          "seq": 119,
+          "kind": "assistant_message",
+          "timestamp": "2026-09-12T15:43:21.237426Z",
+          "payload": {
+            "content": "进度简述：已完成 8/12 项（item-01 ~ item-08），quantity 依次为 3,6,9,12,15,18,21,24，目前累计 108；下一步继续串行等待读取 item-09 ~ item-12。\n"
+          }
+        },
+        {
+          "seq": 124,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T15:43:30.583744Z",
+          "payload": {
+            "tool_call_id": "call_tpspcn01ck2isoirlkz9e7i2",
+            "tool_name": "Bash",
+            "outcome": {
+              "status": "succeeded",
+              "diagnostic": {
+                "capabilities": [
+                  "shell.execute"
+                ],
+                "environment_snapshot_id": "env_83601e1de47c6be0422faabf",
+                "provider_id": "builtin:bash",
+                "provider_readiness": "ready",
+                "provider_source": "builtin",
+                "tool_snapshot_id": "tools_87225dee850ce534fed3f4b1"
+              }
+            }
+          }
+        },
+        {
+          "seq": 132,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T15:43:46.856703Z",
+          "payload": {
+            "tool_call_id": "call_u8b1n8ux4jt6qly3ltt5cgkz",
+            "tool_name": "Bash",
+            "outcome": {
+              "status": "succeeded",
+              "diagnostic": {
+                "capabilities": [
+                  "shell.execute"
+                ],
+                "environment_snapshot_id": "env_83601e1de47c6be0422faabf",
+                "provider_id": "builtin:bash",
+                "provider_readiness": "ready",
+                "provider_source": "builtin",
+                "tool_snapshot_id": "tools_87225dee850ce534fed3f4b1"
+              }
+            }
+          }
+        },
+        {
+          "seq": 140,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T15:44:00.941306Z",
+          "payload": {
+            "tool_call_id": "call_fu414mtv3yggmuodp69rum0k",
+            "tool_name": "Bash",
+            "outcome": {
+              "status": "succeeded",
+              "diagnostic": {
+                "capabilities": [
+                  "shell.execute"
+                ],
+                "environment_snapshot_id": "env_83601e1de47c6be0422faabf",
+                "provider_id": "builtin:bash",
+                "provider_readiness": "ready",
+                "provider_source": "builtin",
+                "tool_snapshot_id": "tools_87225dee850ce534fed3f4b1"
+              }
+            }
+          }
+        },
+        {
+          "seq": 147,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T15:44:13.820315Z",
+          "payload": {
+            "tool_call_id": "call_3b6yuhtql1xe0ssnnjj2kyxi",
+            "tool_name": "Bash",
+            "outcome": {
+              "status": "succeeded",
+              "diagnostic": {
+                "capabilities": [
+                  "shell.execute"
+                ],
+                "environment_snapshot_id": "env_83601e1de47c6be0422faabf",
+                "provider_id": "builtin:bash",
+                "provider_readiness": "ready",
+                "provider_source": "builtin",
+                "tool_snapshot_id": "tools_87225dee850ce534fed3f4b1"
+              }
+            }
+          }
+        },
+        {
+          "seq": 153,
+          "kind": "assistant_message",
+          "timestamp": "2026-09-12T15:44:25.47962Z",
+          "payload": {
+            "content": "12 项逐项核查全部完成。\n\n## 核查结果\n\n12 次 Bash 调用均严格串行（每次 `sleep 8 && cat`，无并发、无合并、无跳过），全部退出码 0。\n\n| 文件 | quantity | price |\n|---|---|---|\n| item-01 | 3 | 21 |\n| item-02 | 6 | 22 |\n| item-03 | 9 | 23 |\n| item-04 | 12 | 24 |\n| item-05 | 15 | 25 |\n| item-06 | 18 | 26 |\n| item-07 | 21 | 27 |\n| item-08 | 24 | 28 |\n| item-09 | 27 | 29 |\n| item-10 | 30 | 30 |\n| item-11 | 33 | 31 |\n| item-12 | 36 | 32 |\n\n**quantity 总和：3+6+9+12+15+18+21+24+27+30+33+36 = 234**\n\n（规律：quantity 为公差 3 的等差数列；价格为 21 起逐行 +1。过程中第 9 项前宿主提示汇报进展，已按要求简短播报一次；无文件写入，未联网，工具调用无失败。）"
+          }
+        },
+        {
+          "seq": 156,
+          "kind": "run_terminal",
+          "timestamp": "2026-09-12T15:44:25.504171Z",
+          "payload": {
+            "status": "finished",
+            "terminal_reason": "completed"
+          }
+        }
+      ]
+    },
+    {
+      "name": "user_stop_question",
+      "thread_id": "thread_1789227885300055000_7",
+      "run_id": "run_1789228030056950000_8",
+      "record_counts": {
+        "instruction_snapshot": 1,
+        "user_message": 1,
+        "model_request": 2,
+        "run_started": 1,
+        "hook_snapshot": 1,
+        "model_usage": 2,
+        "context_epoch": 1,
+        "context_snapshot": 1,
+        "tool_call": 1,
+        "permission_decision": 1,
+        "tool_result": 1,
+        "turn_boundary": 1,
+        "run_terminal": 1
+      },
+      "records": [
+        {
+          "seq": 30,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T15:47:33.202457Z",
+          "payload": {
+            "tool_call_id": "fixture-question",
+            "tool_name": "ask_user",
+            "outcome": {
+              "status": "cancelled",
+              "error_code": "ask_user_aborted",
+              "diagnostic": {
+                "environment_snapshot_id": "env_8f1e7998e537f73ba6d14838",
+                "provider_id": "builtin:ask_user",
+                "provider_readiness": "ready",
+                "provider_source": "builtin",
+                "tool_snapshot_id": "tools_90cedb0daa2acb3eb47b2144"
+              }
+            },
+            "question_close_reason": "run_terminated"
+          }
+        },
+        {
+          "seq": 32,
+          "kind": "run_terminal",
+          "timestamp": "2026-09-12T15:47:33.207642Z",
+          "payload": {
+            "status": "cancelled",
+            "stop_source": "user",
+            "terminal_reason": "aborted_tools"
+          }
+        }
+      ]
+    },
+    {
+      "name": "user_stop_stream",
+      "thread_id": "thread_1789227885300055000_7",
+      "run_id": "run_1789228386002311000_9",
+      "record_counts": {
+        "instruction_snapshot": 1,
+        "user_message": 1,
+        "model_request": 2,
+        "run_started": 1,
+        "hook_snapshot": 1,
+        "model_usage": 2,
+        "context_epoch": 2,
+        "context_snapshot": 2,
+        "turn_boundary": 1,
+        "run_terminal": 1
+      },
+      "records": [
+        {
+          "seq": 44,
+          "kind": "run_terminal",
+          "timestamp": "2026-09-12T15:53:32.538606Z",
+          "payload": {
+            "status": "cancelled",
+            "stop_source": "user",
+            "terminal_reason": "aborted_streaming"
+          }
+        }
+      ]
+    },
+    {
+      "name": "user_stop_tool",
+      "thread_id": "thread_1789228444890816000_11",
+      "run_id": "run_1789228444890814000_10",
+      "record_counts": {
+        "instruction_snapshot": 1,
+        "user_message": 1,
+        "model_request": 2,
+        "run_started": 1,
+        "hook_snapshot": 1,
+        "model_usage": 2,
+        "context_epoch": 1,
+        "context_snapshot": 1,
+        "tool_call": 1,
+        "permission_decision": 1,
+        "tool_result": 1,
+        "turn_boundary": 1,
+        "run_terminal": 1
+      },
+      "records": [
+        {
+          "seq": 14,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T15:54:31.766121Z",
+          "payload": {
+            "tool_call_id": "fixture-slow-tool",
+            "tool_name": "Bash",
+            "outcome": {
+              "status": "cancelled",
+              "error_code": "tool_cancelled",
+              "diagnostic": {
+                "capabilities": [
+                  "shell.execute"
+                ],
+                "environment_snapshot_id": "env_0b6f28a8be7b187646399378",
+                "provider_id": "builtin:bash",
+                "provider_readiness": "ready",
+                "provider_source": "builtin",
+                "tool_snapshot_id": "tools_6e1317a57319e2e559c36e4a"
+              }
+            }
+          }
+        },
+        {
+          "seq": 16,
+          "kind": "run_terminal",
+          "timestamp": "2026-09-12T15:54:31.768379Z",
+          "payload": {
+            "status": "cancelled",
+            "stop_source": "user",
+            "terminal_reason": "aborted_tools"
+          }
+        }
+      ]
+    },
+    {
+      "name": "model_disconnect",
+      "thread_id": "thread_1789228444890816000_11",
+      "run_id": "run_1789228486554091000_12",
+      "record_counts": {
+        "instruction_snapshot": 1,
+        "user_message": 1,
+        "model_request": 7,
+        "run_started": 1,
+        "hook_snapshot": 1,
+        "model_usage": 7,
+        "context_epoch": 2,
+        "context_snapshot": 7,
+        "turn_boundary": 1,
+        "run_terminal": 1
+      },
+      "records": [
+        {
+          "seq": 43,
+          "kind": "run_terminal",
+          "timestamp": "2026-09-12T15:55:02.118994Z",
+          "payload": {
+            "status": "error",
+            "stop_source": "",
+            "terminal_reason": "model_stream_disconnected"
+          }
+        }
+      ]
+    },
+    {
+      "name": "normal_shutdown",
+      "thread_id": "thread_1789229929043020000_8",
+      "run_id": "run_1789229929043018000_7",
+      "record_counts": {
+        "instruction_snapshot": 1,
+        "user_message": 1,
+        "model_request": 2,
+        "run_started": 1,
+        "hook_snapshot": 1,
+        "model_usage": 2,
+        "context_epoch": 2,
+        "context_snapshot": 2,
+        "tool_call": 1,
+        "permission_decision": 1,
+        "tool_result": 1,
+        "turn_boundary": 1,
+        "run_terminal": 1
+      },
+      "records": [
+        {
+          "seq": 14,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T16:19:20.871647Z",
+          "payload": {
+            "tool_call_id": "fixture-question",
+            "tool_name": "ask_user",
+            "outcome": {
+              "status": "cancelled",
+              "error_code": "ask_user_aborted",
+              "diagnostic": {
+                "environment_snapshot_id": "env_f8c33bd11a9ce73f6cd72378",
+                "provider_id": "builtin:ask_user",
+                "provider_readiness": "ready",
+                "provider_source": "builtin",
+                "tool_snapshot_id": "tools_1aa6bdbdc60f151a59862467"
+              }
+            },
+            "question_close_reason": "run_terminated"
+          }
+        },
+        {
+          "seq": 16,
+          "kind": "run_terminal",
+          "timestamp": "2026-09-12T16:19:20.875871Z",
+          "payload": {
+            "status": "cancelled",
+            "stop_source": "shutdown",
+            "terminal_reason": "aborted_tools"
+          }
+        }
+      ]
+    },
+    {
+      "name": "parent_stop_child",
+      "thread_id": "thread_1789230371494168000_2",
+      "run_id": "run_1789230371494166000_1",
+      "record_counts": {
+        "instruction_snapshot": 1,
+        "user_message": 2,
+        "model_request": 6,
+        "model_usage": 6,
+        "run_started": 1,
+        "hook_snapshot": 2,
+        "context_epoch": 3,
+        "context_snapshot": 7,
+        "tool_call": 3,
+        "subagent_spawned": 1,
+        "permission_decision": 3,
+        "tool_result": 3,
+        "turn_boundary": 5,
+        "subagent_status_changed": 2,
+        "subagent_progress": 2,
+        "subagent_terminal": 1,
+        "assistant_message": 2,
+        "runtime_notice": 1,
+        "run_terminal": 1
+      },
+      "records": [
+        {
+          "seq": 15,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T16:26:11.943148Z",
+          "payload": {
+            "tool_call_id": "spawn-0",
+            "tool_name": "subagent",
+            "outcome": {
+              "status": "succeeded",
+              "diagnostic": {
+                "environment_snapshot_id": "env_cbc8b91e773ac1dc9cfe75a4",
+                "provider_id": "builtin:subagent",
+                "provider_readiness": "ready",
+                "provider_source": "builtin",
+                "tool_snapshot_id": "tools_469fc05adfe7fd9df6c287e0"
+              }
+            }
+          }
+        },
+        {
+          "seq": 33,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T16:26:13.991806Z",
+          "payload": {
+            "tool_call_id": "cancel-child",
+            "tool_name": "subagent",
+            "outcome": {
+              "status": "succeeded",
+              "diagnostic": {
+                "environment_snapshot_id": "env_cbc8b91e773ac1dc9cfe75a4",
+                "provider_id": "builtin:subagent",
+                "provider_readiness": "ready",
+                "provider_source": "builtin",
+                "tool_snapshot_id": "tools_469fc05adfe7fd9df6c287e0"
+              }
+            }
+          }
+        },
+        {
+          "seq": 36,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T16:26:13.992294Z",
+          "payload": {
+            "tool_call_id": "child-sleep",
+            "tool_name": "Bash",
+            "outcome": {
+              "status": "cancelled",
+              "error_code": "tool_cancelled",
+              "diagnostic": {
+                "capabilities": [
+                  "shell.execute"
+                ],
+                "environment_snapshot_id": "env_cbc8b91e773ac1dc9cfe75a4",
+                "provider_id": "builtin:bash",
+                "provider_readiness": "ready",
+                "provider_source": "builtin",
+                "tool_snapshot_id": "tools_469fc05adfe7fd9df6c287e0"
+              }
+            }
+          }
+        },
+        {
+          "seq": 38,
+          "kind": "subagent_terminal",
+          "timestamp": "2026-09-12T16:26:14.001097Z",
+          "payload": {
+            "status": "cancelled",
+            "stop_source": "parent",
+            "error_code": "subagent_cancelled",
+            "error_message": "主任务已停止此子任务",
+            "task_id": "subtask_21dfe106238687cf65a392ea",
+            "side_effect_state": "none"
+          }
+        },
+        {
+          "seq": 42,
+          "kind": "assistant_message",
+          "timestamp": "2026-09-12T16:26:14.026448Z",
+          "payload": {
+            "content": "受控验收完成"
+          }
+        },
+        {
+          "seq": 48,
+          "kind": "assistant_message",
+          "timestamp": "2026-09-12T16:26:14.056392Z",
+          "payload": {
+            "content": "受控验收完成"
+          }
+        },
+        {
+          "seq": 51,
+          "kind": "run_terminal",
+          "timestamp": "2026-09-12T16:26:14.07399Z",
+          "payload": {
+            "status": "finished",
+            "terminal_reason": "completed"
+          }
+        }
+      ]
+    },
+    {
+      "name": "forced_shutdown",
+      "thread_id": "thread_1789230942812159000_2",
+      "run_id": "run_1789230942812158000_1",
+      "record_counts": {
+        "instruction_snapshot": 1,
+        "user_message": 1,
+        "model_request": 2,
+        "run_started": 1,
+        "hook_snapshot": 1,
+        "model_usage": 2,
+        "context_epoch": 2,
+        "context_snapshot": 2,
+        "tool_call": 1,
+        "tool_result": 1,
+        "run_terminal": 1
+      },
+      "records": [
+        {
+          "seq": 13,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T16:37:13.540999Z",
+          "payload": {
+            "tool_call_id": "fixture-question",
+            "tool_name": "ask_user",
+            "outcome": {
+              "status": "interrupted",
+              "error_code": "process_restarted_outcome_unknown",
+              "diagnostic": {
+                "side_effect_state": "unknown"
+              }
+            },
+            "question_close_reason": null
+          }
+        },
+        {
+          "seq": 14,
+          "kind": "run_terminal",
+          "timestamp": "2026-09-12T16:37:13.543673Z",
+          "payload": {
+            "status": "interrupted",
+            "reason": "process_restarted"
+          }
+        }
+      ]
+    },
+    {
+      "name": "composite_shutdown_fixed",
+      "thread_id": "thread_1789231113658583000_2",
+      "run_id": "run_1789231113658582000_1",
+      "record_counts": {
+        "instruction_snapshot": 1,
+        "user_message": 3,
+        "model_request": 7,
+        "run_started": 1,
+        "hook_snapshot": 3,
+        "model_usage": 7,
+        "context_epoch": 5,
+        "context_snapshot": 7,
+        "tool_call": 5,
+        "subagent_spawned": 2,
+        "subagent_status_changed": 4,
+        "permission_decision": 5,
+        "tool_result": 5,
+        "turn_boundary": 5,
+        "subagent_progress": 4,
+        "deferred_tools_activated": 3,
+        "assistant_message": 1,
+        "runtime_notice": 1,
+        "subagent_terminal": 2,
+        "run_terminal": 1
+      },
+      "records": [
+        {
+          "seq": 16,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T16:38:33.991529Z",
+          "payload": {
+            "tool_call_id": "spawn-0",
+            "tool_name": "subagent",
+            "outcome": {
+              "status": "succeeded",
+              "diagnostic": {
+                "environment_snapshot_id": "env_8ef52cd05a1d1c44ac8e231b",
+                "provider_id": "builtin:subagent",
+                "provider_readiness": "ready",
+                "provider_source": "builtin",
+                "tool_snapshot_id": "tools_b7fbf82316b11a2ee670cd11"
+              }
+            }
+          }
+        },
+        {
+          "seq": 27,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T16:38:34.0472Z",
+          "payload": {
+            "tool_call_id": "spawn-1",
+            "tool_name": "subagent",
+            "outcome": {
+              "status": "succeeded",
+              "diagnostic": {
+                "environment_snapshot_id": "env_8ef52cd05a1d1c44ac8e231b",
+                "provider_id": "builtin:subagent",
+                "provider_readiness": "ready",
+                "provider_source": "builtin",
+                "tool_snapshot_id": "tools_b7fbf82316b11a2ee670cd11"
+              }
+            }
+          }
+        },
+        {
+          "seq": 51,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T16:39:34.089449Z",
+          "payload": {
+            "tool_call_id": "root-hold",
+            "tool_name": "mcp__reliability_local__hold",
+            "outcome": {
+              "status": "failed",
+              "error_code": "mcp_call_failed",
+              "diagnostic": {
+                "cause": "calling \"tools/call\": request terminated without response",
+                "dependency_requirements": [
+                  {
+                    "kind": "mcp_connector",
+                    "name": "reliability_local",
+                    "probe_id": "mcp.server.reliability_local",
+                    "source": "mcp"
+                  }
+                ],
+                "environment_snapshot_id": "env_8ef52cd05a1d1c44ac8e231b",
+                "protocol": "mcp",
+                "provider_id": "mcp:reliability_local:hold",
+                "provider_readiness": "ready",
+                "provider_source": "mcp",
+                "server_name": "reliability_local",
+                "tool_name": "hold",
+                "tool_snapshot_id": "tools_b7fbf82316b11a2ee670cd11"
+              }
+            }
+          }
+        },
+        {
+          "seq": 57,
+          "kind": "assistant_message",
+          "timestamp": "2026-09-12T16:39:34.156328Z",
+          "payload": {
+            "content": "受控验收完成"
+          }
+        },
+        {
+          "seq": 62,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T16:39:38.98363Z",
+          "payload": {
+            "tool_call_id": "child-hold",
+            "tool_name": "mcp__reliability_local__hold",
+            "outcome": {
+              "status": "failed",
+              "error_code": "mcp_call_failed",
+              "diagnostic": {
+                "cause": "context canceled",
+                "dependency_requirements": [
+                  {
+                    "kind": "mcp_connector",
+                    "name": "reliability_local",
+                    "probe_id": "mcp.server.reliability_local",
+                    "source": "mcp"
+                  }
+                ],
+                "environment_snapshot_id": "env_8ef52cd05a1d1c44ac8e231b",
+                "protocol": "mcp",
+                "provider_id": "mcp:reliability_local:hold",
+                "provider_readiness": "ready",
+                "provider_source": "mcp",
+                "server_name": "reliability_local",
+                "tool_name": "hold",
+                "tool_snapshot_id": "tools_b7fbf82316b11a2ee670cd11"
+              }
+            }
+          }
+        },
+        {
+          "seq": 66,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T16:39:38.985404Z",
+          "payload": {
+            "tool_call_id": "child-hold",
+            "tool_name": "mcp__reliability_local__hold",
+            "outcome": {
+              "status": "failed",
+              "error_code": "mcp_call_failed",
+              "diagnostic": {
+                "cause": "context canceled",
+                "dependency_requirements": [
+                  {
+                    "kind": "mcp_connector",
+                    "name": "reliability_local",
+                    "probe_id": "mcp.server.reliability_local",
+                    "source": "mcp"
+                  }
+                ],
+                "environment_snapshot_id": "env_8ef52cd05a1d1c44ac8e231b",
+                "protocol": "mcp",
+                "provider_id": "mcp:reliability_local:hold",
+                "provider_readiness": "ready",
+                "provider_source": "mcp",
+                "server_name": "reliability_local",
+                "tool_name": "hold",
+                "tool_snapshot_id": "tools_b7fbf82316b11a2ee670cd11"
+              }
+            }
+          }
+        },
+        {
+          "seq": 69,
+          "kind": "subagent_terminal",
+          "timestamp": "2026-09-12T16:39:38.993153Z",
+          "payload": {
+            "status": "cancelled",
+            "stop_source": "shutdown",
+            "error_code": "subagent_cancelled",
+            "error_message": "应用关闭，运行已中断",
+            "task_id": "subtask_b6386967d51037861e4cc948",
+            "side_effect_state": "none"
+          }
+        },
+        {
+          "seq": 70,
+          "kind": "subagent_terminal",
+          "timestamp": "2026-09-12T16:39:38.995658Z",
+          "payload": {
+            "status": "cancelled",
+            "stop_source": "shutdown",
+            "error_code": "subagent_cancelled",
+            "error_message": "应用关闭，运行已中断",
+            "task_id": "subtask_17647d6d6ed4b3bf9061beb3",
+            "side_effect_state": "none"
+          }
+        },
+        {
+          "seq": 71,
+          "kind": "run_terminal",
+          "timestamp": "2026-09-12T16:39:39.018848Z",
+          "payload": {
+            "status": "cancelled",
+            "stop_source": "shutdown",
+            "terminal_reason": "cancelled"
+          }
+        }
+      ]
+    },
+    {
+      "name": "composite_question_fixed",
+      "thread_id": "thread_1789231113963510000_4",
+      "run_id": "run_1789231113963509000_3",
+      "record_counts": {
+        "instruction_snapshot": 1,
+        "user_message": 1,
+        "model_request": 2,
+        "run_started": 1,
+        "hook_snapshot": 1,
+        "model_usage": 2,
+        "context_epoch": 1,
+        "context_snapshot": 1,
+        "tool_call": 1,
+        "permission_decision": 1,
+        "tool_result": 1,
+        "turn_boundary": 1,
+        "run_terminal": 1
+      },
+      "records": [
+        {
+          "seq": 14,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T16:39:38.976128Z",
+          "payload": {
+            "tool_call_id": "fixture-question",
+            "tool_name": "ask_user",
+            "outcome": {
+              "status": "cancelled",
+              "error_code": "ask_user_aborted",
+              "diagnostic": {
+                "environment_snapshot_id": "env_d51560570ff99000f92054be",
+                "provider_id": "builtin:ask_user",
+                "provider_readiness": "ready",
+                "provider_source": "builtin",
+                "tool_snapshot_id": "tools_f2b06bf70e008b3286c27d25"
+              }
+            },
+            "question_close_reason": "run_terminated"
+          }
+        },
+        {
+          "seq": 16,
+          "kind": "run_terminal",
+          "timestamp": "2026-09-12T16:39:38.991411Z",
+          "payload": {
+            "status": "cancelled",
+            "stop_source": "shutdown",
+            "terminal_reason": "aborted_tools"
+          }
+        }
+      ]
+    },
+    {
+      "name": "controlled_progress",
+      "thread_id": "thread_1789231256260948000_2",
+      "run_id": "run_1789231256260892000_1",
+      "record_counts": {
+        "instruction_snapshot": 1,
+        "user_message": 1,
+        "model_request": 14,
+        "run_started": 1,
+        "hook_snapshot": 1,
+        "model_usage": 14,
+        "context_epoch": 3,
+        "context_snapshot": 16,
+        "tool_call": 12,
+        "permission_decision": 12,
+        "tool_result": 12,
+        "turn_boundary": 13,
+        "assistant_message": 2,
+        "run_terminal": 1
+      },
+      "records": [
+        {
+          "seq": 14,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T16:41:04.755822Z",
+          "payload": {
+            "tool_call_id": "progress-0",
+            "tool_name": "Bash",
+            "outcome": {
+              "status": "succeeded",
+              "diagnostic": {
+                "capabilities": [
+                  "shell.execute"
+                ],
+                "environment_snapshot_id": "env_593bfb2c551b94020045fb45",
+                "provider_id": "builtin:bash",
+                "provider_readiness": "ready",
+                "provider_source": "builtin",
+                "tool_snapshot_id": "tools_2e6400a07d1a1af17060f6fa"
+              }
+            }
+          }
+        },
+        {
+          "seq": 21,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T16:41:12.794885Z",
+          "payload": {
+            "tool_call_id": "progress-1",
+            "tool_name": "Bash",
+            "outcome": {
+              "status": "succeeded",
+              "diagnostic": {
+                "capabilities": [
+                  "shell.execute"
+                ],
+                "environment_snapshot_id": "env_593bfb2c551b94020045fb45",
+                "provider_id": "builtin:bash",
+                "provider_readiness": "ready",
+                "provider_source": "builtin",
+                "tool_snapshot_id": "tools_2e6400a07d1a1af17060f6fa"
+              }
+            }
+          }
+        },
+        {
+          "seq": 28,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T16:41:20.844928Z",
+          "payload": {
+            "tool_call_id": "progress-2",
+            "tool_name": "Bash",
+            "outcome": {
+              "status": "succeeded",
+              "diagnostic": {
+                "capabilities": [
+                  "shell.execute"
+                ],
+                "environment_snapshot_id": "env_593bfb2c551b94020045fb45",
+                "provider_id": "builtin:bash",
+                "provider_readiness": "ready",
+                "provider_source": "builtin",
+                "tool_snapshot_id": "tools_2e6400a07d1a1af17060f6fa"
+              }
+            }
+          }
+        },
+        {
+          "seq": 35,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T16:41:28.886381Z",
+          "payload": {
+            "tool_call_id": "progress-3",
+            "tool_name": "Bash",
+            "outcome": {
+              "status": "succeeded",
+              "diagnostic": {
+                "capabilities": [
+                  "shell.execute"
+                ],
+                "environment_snapshot_id": "env_593bfb2c551b94020045fb45",
+                "provider_id": "builtin:bash",
+                "provider_readiness": "ready",
+                "provider_source": "builtin",
+                "tool_snapshot_id": "tools_2e6400a07d1a1af17060f6fa"
+              }
+            }
+          }
+        },
+        {
+          "seq": 42,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T16:41:36.928028Z",
+          "payload": {
+            "tool_call_id": "progress-4",
+            "tool_name": "Bash",
+            "outcome": {
+              "status": "succeeded",
+              "diagnostic": {
+                "capabilities": [
+                  "shell.execute"
+                ],
+                "environment_snapshot_id": "env_593bfb2c551b94020045fb45",
+                "provider_id": "builtin:bash",
+                "provider_readiness": "ready",
+                "provider_source": "builtin",
+                "tool_snapshot_id": "tools_2e6400a07d1a1af17060f6fa"
+              }
+            }
+          }
+        },
+        {
+          "seq": 49,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T16:41:44.973853Z",
+          "payload": {
+            "tool_call_id": "progress-5",
+            "tool_name": "Bash",
+            "outcome": {
+              "status": "succeeded",
+              "diagnostic": {
+                "capabilities": [
+                  "shell.execute"
+                ],
+                "environment_snapshot_id": "env_593bfb2c551b94020045fb45",
+                "provider_id": "builtin:bash",
+                "provider_readiness": "ready",
+                "provider_source": "builtin",
+                "tool_snapshot_id": "tools_2e6400a07d1a1af17060f6fa"
+              }
+            }
+          }
+        },
+        {
+          "seq": 56,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T16:41:53.034767Z",
+          "payload": {
+            "tool_call_id": "progress-6",
+            "tool_name": "Bash",
+            "outcome": {
+              "status": "succeeded",
+              "diagnostic": {
+                "capabilities": [
+                  "shell.execute"
+                ],
+                "environment_snapshot_id": "env_593bfb2c551b94020045fb45",
+                "provider_id": "builtin:bash",
+                "provider_readiness": "ready",
+                "provider_source": "builtin",
+                "tool_snapshot_id": "tools_2e6400a07d1a1af17060f6fa"
+              }
+            }
+          }
+        },
+        {
+          "seq": 63,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T16:42:01.079759Z",
+          "payload": {
+            "tool_call_id": "progress-7",
+            "tool_name": "Bash",
+            "outcome": {
+              "status": "succeeded",
+              "diagnostic": {
+                "capabilities": [
+                  "shell.execute"
+                ],
+                "environment_snapshot_id": "env_593bfb2c551b94020045fb45",
+                "provider_id": "builtin:bash",
+                "provider_readiness": "ready",
+                "provider_source": "builtin",
+                "tool_snapshot_id": "tools_2e6400a07d1a1af17060f6fa"
+              }
+            }
+          }
+        },
+        {
+          "seq": 67,
+          "kind": "assistant_message",
+          "timestamp": "2026-09-12T16:42:01.110538Z",
+          "payload": {
+            "content": "已完成前八项受控检查，接下来继续剩余四项。"
+          }
+        },
+        {
+          "seq": 71,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T16:42:09.130988Z",
+          "payload": {
+            "tool_call_id": "progress-8",
+            "tool_name": "Bash",
+            "outcome": {
+              "status": "succeeded",
+              "diagnostic": {
+                "capabilities": [
+                  "shell.execute"
+                ],
+                "environment_snapshot_id": "env_593bfb2c551b94020045fb45",
+                "provider_id": "builtin:bash",
+                "provider_readiness": "ready",
+                "provider_source": "builtin",
+                "tool_snapshot_id": "tools_2e6400a07d1a1af17060f6fa"
+              }
+            }
+          }
+        },
+        {
+          "seq": 78,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T16:42:17.17573Z",
+          "payload": {
+            "tool_call_id": "progress-9",
+            "tool_name": "Bash",
+            "outcome": {
+              "status": "succeeded",
+              "diagnostic": {
+                "capabilities": [
+                  "shell.execute"
+                ],
+                "environment_snapshot_id": "env_593bfb2c551b94020045fb45",
+                "provider_id": "builtin:bash",
+                "provider_readiness": "ready",
+                "provider_source": "builtin",
+                "tool_snapshot_id": "tools_2e6400a07d1a1af17060f6fa"
+              }
+            }
+          }
+        },
+        {
+          "seq": 85,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T16:42:25.223399Z",
+          "payload": {
+            "tool_call_id": "progress-10",
+            "tool_name": "Bash",
+            "outcome": {
+              "status": "succeeded",
+              "diagnostic": {
+                "capabilities": [
+                  "shell.execute"
+                ],
+                "environment_snapshot_id": "env_593bfb2c551b94020045fb45",
+                "provider_id": "builtin:bash",
+                "provider_readiness": "ready",
+                "provider_source": "builtin",
+                "tool_snapshot_id": "tools_2e6400a07d1a1af17060f6fa"
+              }
+            }
+          }
+        },
+        {
+          "seq": 92,
+          "kind": "tool_result",
+          "timestamp": "2026-09-12T16:42:33.268375Z",
+          "payload": {
+            "tool_call_id": "progress-11",
+            "tool_name": "Bash",
+            "outcome": {
+              "status": "succeeded",
+              "diagnostic": {
+                "capabilities": [
+                  "shell.execute"
+                ],
+                "environment_snapshot_id": "env_593bfb2c551b94020045fb45",
+                "provider_id": "builtin:bash",
+                "provider_readiness": "ready",
+                "provider_source": "builtin",
+                "tool_snapshot_id": "tools_2e6400a07d1a1af17060f6fa"
+              }
+            }
+          }
+        },
+        {
+          "seq": 97,
+          "kind": "assistant_message",
+          "timestamp": "2026-09-12T16:42:33.296488Z",
+          "payload": {
+            "content": "受控验收完成"
+          }
+        },
+        {
+          "seq": 100,
+          "kind": "run_terminal",
+          "timestamp": "2026-09-12T16:42:33.313497Z",
+          "payload": {
+            "status": "finished",
+            "terminal_reason": "completed"
+          }
+        }
+      ]
+    }
+  ],
+  "controlled_progress_requests": [
+    {
+      "at": 1789231256.675138,
+      "mode": "progress",
+      "child": false,
+      "tool_result_count": 0,
+      "has_tools": false,
+      "nudge": false
+    },
+    {
+      "at": 1789231256.731023,
+      "mode": "progress",
+      "child": false,
+      "tool_result_count": 0,
+      "has_tools": true,
+      "nudge": false
+    },
+    {
+      "at": 1789231264.7737012,
+      "mode": "progress",
+      "child": false,
+      "tool_result_count": 1,
+      "has_tools": true,
+      "nudge": false
+    },
+    {
+      "at": 1789231272.818231,
+      "mode": "progress",
+      "child": false,
+      "tool_result_count": 2,
+      "has_tools": true,
+      "nudge": false
+    },
+    {
+      "at": 1789231280.864788,
+      "mode": "progress",
+      "child": false,
+      "tool_result_count": 3,
+      "has_tools": true,
+      "nudge": false
+    },
+    {
+      "at": 1789231288.905795,
+      "mode": "progress",
+      "child": false,
+      "tool_result_count": 4,
+      "has_tools": true,
+      "nudge": false
+    },
+    {
+      "at": 1789231296.948471,
+      "mode": "progress",
+      "child": false,
+      "tool_result_count": 5,
+      "has_tools": true,
+      "nudge": false
+    },
+    {
+      "at": 1789231305.001473,
+      "mode": "progress",
+      "child": false,
+      "tool_result_count": 6,
+      "has_tools": true,
+      "nudge": false
+    },
+    {
+      "at": 1789231313.0541382,
+      "mode": "progress",
+      "child": false,
+      "tool_result_count": 7,
+      "has_tools": true,
+      "nudge": false
+    },
+    {
+      "at": 1789231321.109733,
+      "mode": "progress",
+      "child": false,
+      "tool_result_count": 8,
+      "has_tools": true,
+      "nudge": true
+    },
+    {
+      "at": 1789231329.154121,
+      "mode": "progress",
+      "child": false,
+      "tool_result_count": 9,
+      "has_tools": true,
+      "nudge": false
+    },
+    {
+      "at": 1789231337.200771,
+      "mode": "progress",
+      "child": false,
+      "tool_result_count": 10,
+      "has_tools": true,
+      "nudge": false
+    },
+    {
+      "at": 1789231345.244551,
+      "mode": "progress",
+      "child": false,
+      "tool_result_count": 11,
+      "has_tools": true,
+      "nudge": false
+    },
+    {
+      "at": 1789231353.291559,
+      "mode": "progress",
+      "child": false,
+      "tool_result_count": 12,
+      "has_tools": true,
+      "nudge": false
+    }
+  ],
+  "composite_fixed": {
+    "quit_command_unix": 1789231178.921,
+    "mcp_events": [
+      {
+        "at": "2026-09-12T16:38:34.086448Z",
+        "event": "call_started"
+      },
+      {
+        "at": "2026-09-12T16:39:34.089735Z",
+        "event": "call_returned"
+      },
+      {
+        "at": "2026-09-12T16:39:34.089896Z",
+        "event": "call_started"
+      },
+      {
+        "at": "2026-09-12T16:39:38.97738Z",
+        "event": "call_returned"
+      }
+    ],
+    "calls_started_after_quit": 0,
+    "coordinator_result": "desktop_shutdown_completed",
+    "precise_exit_time": "Not captured: process observer expired during screenshot capture. See shutdown.json and forced-shutdown.json for separately measured samples.",
+    "note": "Initial root hold reached its 60 second tool timeout before quit; at quit, a child elicitation, queued child call, root child barrier and independent ask_user were active. No authentication error in the repaired journal."
+  },
+  "automation": {
+    "go": "10 affected packages passed; Outlook regression passed separately",
+    "race": "6 packages passed cancellation/drain/auth/refresh/question/progress/cleanup selection",
+    "desktop": "154 files, 1609 tests passed (final push validation includes model preference notice regression)",
+    "typecheck": "passed",
+    "build": "passed; Vite chunk size warning remains",
+    "docs": "passed: 16 domains, 38 features, 76 documents; links/anchors/code fences valid",
+    "diff_check": "passed"
+  },
+  "evidence_files": [
+    "cancel-answer-continued.png",
+    "composite-before-shutdown.png",
+    "composite-fixed-before-shutdown.png",
+    "composite-fixed-replay.png",
+    "composite-fixed-replay.txt",
+    "composite-shutdown.json",
+    "controlled-progress.png",
+    "controlled-progress.txt",
+    "controlled-question-before-stop.png",
+    "escape-busy.png",
+    "escape-busy.txt",
+    "forced-restart.png",
+    "forced-restart.txt",
+    "forced-shutdown.json",
+    "model-stream-exhausted.png",
+    "parent-stop-child.png",
+    "parent-stop-child.txt",
+    "real-long-task-result.png",
+    "real-progress-after-eight.png",
+    "real-progress-after-eight.txt",
+    "shutdown-question-before.png",
+    "shutdown-replay.png",
+    "shutdown-replay.txt",
+    "shutdown.json",
+    "user-stop-stream.png",
+    "withdrawn-history.png",
+    "withdrawn-history.txt"
+  ],
+  "gaps": [
+    "Third-party real OAuth accounts were not exercised; real SDK plus local OAuth HTTP fixtures cover protocol counts.",
+    "Windows and Linux Desktop acceptance was not executed.",
+    "Actual signed update installation was not executed; coordinator failure gate is covered by automated tests and native normal-quit failure sample.",
+    "IME composition and nested Escape propagation have automated DOM coverage; native IME/menu combinations and cross-window focus switching were not exhaustively exercised.",
+    "Run-level timeout rendering is covered by automated provenance/projection tests; no separate native root timeout sample.",
+    "Slow uncooperative owner deadline is covered by Go fixtures; native forced process sample tests the outer supervisor bound."
+  ],
+  "cleanup": {
+    "temporary_mcp_server_removed": true,
+    "fixture_processes_stopped": true,
+    "active_runs_after_acceptance": 0,
+    "desktop_left_open": false,
+    "workspace_removed_by_user_request": true
+  },
+  "restart_request_counts": [
+    {
+      "sample": "composite_before_auth_notification_fix",
+      "before": 15,
+      "after": 15
+    },
+    {
+      "sample": "forced_shutdown",
+      "before": 17,
+      "after": 17
+    }
+  ]
+}

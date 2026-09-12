@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"awaken/src/runcontrol"
 	"context"
 	"encoding/json"
 	"errors"
@@ -36,24 +37,26 @@ const (
 )
 
 type Run struct {
-	RunID               string                `json:"run_id"`
-	ThreadID            string                `json:"thread_id"`
-	Input               string                `json:"input,omitempty"`
-	InputAttachments    []RunInputAttachment  `json:"input_attachments,omitempty"`
-	ComposerTokens      []ComposerToken       `json:"composer_tokens,omitempty"`
-	FileComments        []FileLineComment     `json:"file_comments,omitempty"`
-	Status              RunStatus             `json:"status"`
-	Result              string                `json:"result,omitempty"`
-	Error               string                `json:"error,omitempty"`
-	CancelRequested     bool                  `json:"cancel_requested,omitempty"`
-	CreatedAt           time.Time             `json:"created_at"`
-	UpdatedAt           time.Time             `json:"updated_at"`
-	FinishedAt          *time.Time            `json:"finished_at,omitempty"`
-	ModelProfileID      string                `json:"model_profile_id,omitempty"`
-	ReasoningEffort     string                `json:"reasoning_effort,omitempty"`
-	HookSnapshotID      string                `json:"hook_snapshot_id,omitempty"`
-	InstructionSnapshot *instructions.Summary `json:"instruction_snapshot,omitempty"`
-	PluginGeneration    string                `json:"plugin_generation,omitempty"`
+	RunID               string                   `json:"run_id"`
+	ThreadID            string                   `json:"thread_id"`
+	Input               string                   `json:"input,omitempty"`
+	InputAttachments    []RunInputAttachment     `json:"input_attachments,omitempty"`
+	ComposerTokens      []ComposerToken          `json:"composer_tokens,omitempty"`
+	FileComments        []FileLineComment        `json:"file_comments,omitempty"`
+	Status              RunStatus                `json:"status"`
+	Result              string                   `json:"result,omitempty"`
+	Error               string                   `json:"error,omitempty"`
+	TerminalReason      agentcore.TerminalReason `json:"terminal_reason,omitempty"`
+	StopSource          string                   `json:"stop_source,omitempty"`
+	CancelRequested     bool                     `json:"cancel_requested,omitempty"`
+	CreatedAt           time.Time                `json:"created_at"`
+	UpdatedAt           time.Time                `json:"updated_at"`
+	FinishedAt          *time.Time               `json:"finished_at,omitempty"`
+	ModelProfileID      string                   `json:"model_profile_id,omitempty"`
+	ReasoningEffort     string                   `json:"reasoning_effort,omitempty"`
+	HookSnapshotID      string                   `json:"hook_snapshot_id,omitempty"`
+	InstructionSnapshot *instructions.Summary    `json:"instruction_snapshot,omitempty"`
+	PluginGeneration    string                   `json:"plugin_generation,omitempty"`
 }
 
 func (s *Session) SetHookSnapshotID(snapshotID string) {
@@ -89,6 +92,7 @@ type Event struct {
 	Message        string
 	Content        string
 	Code           string
+	StopSource     string
 	TerminalReason agentcore.TerminalReason
 }
 
@@ -113,6 +117,8 @@ func (s *Session) appendEventLocked(event Event, terminal bool) {
 }
 
 type Session struct {
+	ephemeralResultStart int
+	stopContext          context.Context
 	childComputers       map[string]*computer.Runtime
 	computerReviewOwners map[string]*computer.Runtime
 	mu                   sync.RWMutex
@@ -348,6 +354,10 @@ func (s *Session) CancelRequested() bool {
 }
 
 func (s *Session) RequestCancel() Run {
+	return s.RequestCancelWithSource(runcontrol.User)
+}
+
+func (s *Session) RequestCancelWithSource(source runcontrol.Source) Run {
 	now := time.Now().UTC()
 	s.mu.Lock()
 	if isTerminalStatus(s.run.Status) {
@@ -356,6 +366,10 @@ func (s *Session) RequestCancel() Run {
 		return snapshot
 	}
 
+	if !s.run.CancelRequested {
+		s.run.StopSource = string(runcontrol.Normalize(source))
+		runcontrol.SetSource(s.stopContext, source)
+	}
 	s.run.CancelRequested = true
 	statusChanged := false
 	if s.run.Status == RunStatusRunning {
@@ -366,11 +380,12 @@ func (s *Session) RequestCancel() Run {
 	var statusEvent Event
 	if statusChanged {
 		statusEvent = Event{
-			Kind:      EventKindRunStatusChanged,
-			Timestamp: now,
-			ThreadID:  s.run.ThreadID,
-			RunID:     s.run.RunID,
-			Status:    string(RunStatusCancelling),
+			Kind:       EventKindRunStatusChanged,
+			Timestamp:  now,
+			ThreadID:   s.run.ThreadID,
+			RunID:      s.run.RunID,
+			Status:     string(RunStatusCancelling),
+			StopSource: s.run.StopSource,
 		}
 	}
 	cancel := s.cancel
@@ -417,6 +432,12 @@ func (s *Session) RecordAgentEvent(event agentcore.AwakenEvent) {
 		if !s.run.CancelRequested {
 			s.run.Status = RunStatusRunning
 		}
+	case agentcore.TextMessageStartedEventType:
+		s.ephemeralResultStart = len(s.run.Result)
+	case agentcore.ProviderReconnectEventType:
+		if event.ProviderReconnect != nil && event.ProviderReconnect.ResetInProgress && s.ephemeralResultStart <= len(s.run.Result) {
+			s.run.Result = s.run.Result[:s.ephemeralResultStart]
+		}
 	case agentcore.TextDeltaEventType:
 		s.run.Result += event.Delta
 	case agentcore.RunFinishedEventType:
@@ -428,7 +449,12 @@ func (s *Session) RecordAgentEvent(event agentcore.AwakenEvent) {
 		s.run.FinishedAt = &finishedAt
 		terminal = true
 	case agentcore.RunErrorEventType:
+		s.run.StopSource = event.StopSource
+		s.run.TerminalReason = event.TerminalReason
 		s.run.Status = RunStatusError
+		if event.Code == "RUN_CANCELLED" {
+			s.run.Status = RunStatusCancelled
+		}
 		s.run.Error = firstNonEmpty(strings.TrimSpace(event.Error), "run failed")
 		finishedAt := timestamp
 		s.run.FinishedAt = &finishedAt
@@ -486,11 +512,13 @@ func (s *Session) RecordSemanticRecords(records []agentcore.SemanticRecord) {
 				s.run.Status = RunStatusRunning
 			}
 		case agentcore.SemanticKindRunTerminal:
+			s.run.StopSource = stringPayload(record.Payload, "stop_source")
 			status := stringPayload(record.Payload, "status")
 			terminalReason = agentcore.TerminalReason(firstNonEmpty(
 				stringPayload(record.Payload, "terminal_reason"),
 				stringPayload(record.Payload, "reason"),
 			))
+			s.run.TerminalReason = terminalReason
 			switch status {
 			case "finished":
 				s.run.Status = RunStatusFinished
@@ -600,7 +628,7 @@ func (s *Session) AwaitUserQuestion(ctx context.Context, request agentcore.Awake
 	}
 
 	s.mu.Lock()
-	if ctx.Err() != nil || isTerminalStatus(s.run.Status) {
+	if ctx.Err() != nil || s.run.CancelRequested || isTerminalStatus(s.run.Status) {
 		s.mu.Unlock()
 		return agentcore.UserQuestionResolution{}, ErrRunTerminal
 	}
@@ -624,10 +652,17 @@ func (s *Session) AwaitUserQuestion(ctx context.Context, request agentcore.Awake
 		return resolution, nil
 	case <-ctx.Done():
 		s.mu.Lock()
+		select {
+		case resolution := <-pending.resolution:
+			s.mu.Unlock()
+			return resolution, nil
+		default:
+		}
 		if s.userQuestions[request.QuestionID] == pending {
 			delete(s.userQuestions, request.QuestionID)
 			resolved := request
 			resolved.Type, resolved.QuestionResolution = agentcore.UserQuestionResolvedType, "cancelled"
+			resolved.QuestionCloseReason = "run_terminated"
 			s.appendEventLocked(Event{Kind: EventKindAgent, ThreadID: s.run.ThreadID, RunID: s.run.RunID, Timestamp: time.Now().UTC(), AgentEvent: resolved}, false)
 		}
 		s.mu.Unlock()
@@ -675,8 +710,7 @@ func (s *Session) resolveUserQuestion(questionID string, resolution agentcore.Us
 		s.mu.Unlock()
 		return ErrUserQuestionNotFound
 	}
-	if pending.ctx.Err() != nil || isTerminalStatus(s.run.Status) {
-		delete(s.userQuestions, questionID)
+	if pending.ctx.Err() != nil || s.run.CancelRequested || isTerminalStatus(s.run.Status) {
 		s.mu.Unlock()
 		return ErrRunTerminal
 	}
@@ -686,6 +720,9 @@ func (s *Session) resolveUserQuestion(questionID string, resolution agentcore.Us
 	resolved.Timestamp = now
 	resolved.QuestionAnswer = resolution.Answer
 	resolved.QuestionResolution = string(resolution.Status)
+	if resolution.Status == agentcore.UserQuestionCancelled {
+		resolved.QuestionCloseReason = "user_cancelled"
+	}
 	resolved.ThreadID = s.run.ThreadID
 	resolved.RunID = s.run.RunID
 	s.run.UpdatedAt = now
@@ -697,8 +734,8 @@ func (s *Session) resolveUserQuestion(questionID string, resolution agentcore.Us
 		AgentEvent: resolved,
 	}
 	s.appendEventLocked(wrapped, false)
-	s.mu.Unlock()
 	pending.resolution <- resolution
+	s.mu.Unlock()
 	return nil
 }
 
@@ -833,7 +870,7 @@ func cloneInteractionContent(content map[string]any) map[string]any {
 func (s *Session) CompleteCancelled(message, result string) {
 	now := time.Now().UTC()
 	if strings.TrimSpace(message) == "" {
-		message = "你停止了生成本次回答"
+		message = runcontrol.Message(runcontrol.Source(s.Snapshot().StopSource))
 	}
 
 	s.mu.Lock()
@@ -849,6 +886,7 @@ func (s *Session) CompleteCancelled(message, result string) {
 	}
 
 	s.run.Status = RunStatusCancelled
+	s.run.TerminalReason = agentcore.TerminalReasonCancelled
 	s.run.Error = message
 	s.run.Result = result
 	s.run.CancelRequested = true
@@ -865,6 +903,7 @@ func (s *Session) CompleteCancelled(message, result string) {
 		Content:        result,
 		Code:           "RUN_CANCELLED",
 		TerminalReason: agentcore.TerminalReasonCancelled,
+		StopSource:     s.run.StopSource,
 	}
 	event := Event{
 		Kind:           EventKindRunCancelled,
@@ -875,6 +914,7 @@ func (s *Session) CompleteCancelled(message, result string) {
 		Content:        result,
 		Code:           "RUN_CANCELLED",
 		TerminalReason: agentcore.TerminalReasonCancelled,
+		StopSource:     s.run.StopSource,
 	}
 	s.bus.Append(statusEvent, false)
 	s.bus.Append(event, true)
@@ -891,6 +931,7 @@ func (s *Session) CompleteFinished(result string) {
 	}
 
 	s.run.Status = RunStatusFinished
+	s.run.TerminalReason = agentcore.TerminalReasonCompleted
 	s.run.Result = result
 	s.run.UpdatedAt = now
 	finishedAt := now
@@ -927,6 +968,7 @@ func (s *Session) CompleteError(message, code string) {
 	}
 
 	s.run.Status = RunStatusError
+	s.run.TerminalReason = agentcore.TerminalReasonModelError
 	s.run.Error = message
 	s.run.UpdatedAt = now
 	finishedAt := now
@@ -939,6 +981,7 @@ func (s *Session) CompleteError(message, code string) {
 		Message:        message,
 		Code:           code,
 		TerminalReason: agentcore.TerminalReasonModelError,
+		StopSource:     s.run.StopSource,
 	}
 	s.bus.Append(event, true)
 	s.mu.Unlock()

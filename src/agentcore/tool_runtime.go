@@ -311,6 +311,7 @@ func subsetStrings(needles, haystack []string) bool {
 }
 
 func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall) ToolExecutionResult {
+	ctx = tool.WithAuthReplayBudget(ctx)
 	id := call.ID
 	if id == "" {
 		id = convcontext.GenerateToolCallID()
@@ -642,6 +643,18 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 		resolution, err := awaiter.AwaitUserQuestion(ctx, request)
 		if err != nil {
 			result = synthesizeAskUserAwaitFailure(result, ctx, err)
+			result.Outcome.Details = map[string]any{"question_close_reason": "run_terminated"}
+			result.Content = "问题已撤回：本次运行已终止。"
+			for _, question := range questions {
+				result.Content += "\n" + question.Question
+				for _, option := range question.Options {
+					result.Content += "\n- " + option.Label
+					if option.Description != "" {
+						result.Content += ": " + option.Description
+					}
+				}
+			}
+			result.Outcome.Content = result.Content
 			result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
 			result = finalizeToolResult(result)
 			rt.writeAudit(def, result, permission, string(decision.Source), auditOutcomeLabel(result), err.Error())
@@ -653,8 +666,9 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 			result.Outcome = tool.SucceededOutcome(result.Content)
 			result.Outcome.Summary = "User cancelled the clarification without ending the run."
 			result.Outcome.Details = map[string]any{
-				"resolution":     string(UserQuestionCancelled),
-				"question_count": len(questions),
+				"resolution":            string(UserQuestionCancelled),
+				"question_close_reason": "user_cancelled",
+				"question_count":        len(questions),
 			}
 			result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
 			result = finalizeToolResult(result)

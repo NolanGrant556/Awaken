@@ -1,0 +1,13 @@
+{
+  "owned_pid": 29372,
+  "quit_command_at_ms": 1789229960848,
+  "observed_exit_at": 1789229965.2513092,
+  "exit_after_quit_command_seconds": 4.403,
+  "desktop_shutdown_completed": true,
+  "electron_exit_code": 0,
+  "thread_id": "thread_1789229929043020000_8",
+  "run_id": "run_1789229929043018000_7",
+  "terminal_seq": 16,
+  "stop_source": "shutdown",
+  "terminal_reason": "aborted_tools"
+}

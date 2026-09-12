@@ -95,9 +95,10 @@ func (t *AskUserTool) Definition() tool.ToolDefinition {
 			"不要把普通进度更新或最终答复包装成工具调用",
 		},
 		OutputSchema: tool.ToolParam{Type: "object", Properties: map[string]tool.ToolParam{
-			"resolution":     {Type: "string", Description: "用户处理问题的结果：answered 或 cancelled"},
-			"answer_text":    {Type: "string", Description: "answered 时用户返回的原始回答文本；cancelled 时为空"},
-			"question_count": {Type: "integer", Description: "本次向用户展示的问题数量"},
+			"resolution":            {Type: "string", Description: "用户处理问题的结果：answered 或 cancelled"},
+			"answer_text":           {Type: "string", Description: "answered 时用户返回的原始回答文本；cancelled 时为空"},
+			"question_count":        {Type: "integer", Description: "本次向用户展示的问题数量"},
+			"question_close_reason": {Type: "string", Description: "问题关闭原因：user_cancelled 或 run_terminated"},
 		}},
 		SideEffects: []tool.ToolSideEffect{{Kind: tool.SideEffectNone, Description: "暂停当前工具调用等待用户回答或取消，不修改 workspace 或外部系统；问题取消不终止 run。", Reversibility: tool.ReversibilityNotApplicable}},
 		Examples:    []tool.ToolExample{{Scenario: "实现方向需要用户选择", Input: map[string]any{"questions": []any{map[string]any{"question": "选择数据迁移策略", "options": []any{map[string]any{"label": "兼容迁移", "description": "保留旧格式并渐进升级"}, map[string]any{"label": "一次切换", "description": "立即要求新格式"}}}}}, Outcome: "runtime 发出用户问题并在 answered 或 cancelled resolution 前暂停当前工具调用"}},

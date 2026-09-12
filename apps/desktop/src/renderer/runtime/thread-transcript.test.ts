@@ -664,7 +664,7 @@ describe("thread transcript replay helpers", () => {
     expect(state.narrative.committedItems).toContainEqual({
       kind: "hint",
       id: "hint:run-cancelled:run-cancelled",
-      text: "你停止了生成本次回答",
+      text: "本次运行已中断",
       isTerminal: true,
     });
   });

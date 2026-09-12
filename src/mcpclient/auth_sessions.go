@@ -96,6 +96,17 @@ func (s *oauthAuthSession) finish(status string, err error) {
 }
 
 func (m *Manager) startCoreAuthSession(serverName string, req AuthRequest) (AuthResult, error) {
+	lifetime, finish, err := m.beginOperation(context.Background())
+	if err != nil {
+		return AuthResult{}, err
+	}
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			finish()
+		}
+	}()
+
 	m.mu.RLock()
 	server, ok := m.servers[serverName]
 	if !ok {
@@ -114,7 +125,7 @@ func (m *Manager) startCoreAuthSession(serverName string, req AuthRequest) (Auth
 	if err != nil {
 		return AuthResult{}, fmt.Errorf("start OAuth callback listener: %w", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), oauthSessionTTL)
+	ctx, cancel := context.WithTimeout(lifetime, oauthSessionTTL)
 	session := &oauthAuthSession{
 		id: uuid.NewString(), serverName: serverName, status: "authorizing",
 		expiresAt: time.Now().UTC().Add(oauthSessionTTL), result: make(chan *sdkauth.AuthorizationResult, 1),
@@ -167,12 +178,14 @@ func (m *Manager) startCoreAuthSession(serverName string, req AuthRequest) (Auth
 	}
 	handler := newPersistentOAuthHandler(CredentialIdentity(scoped.Scope, scoped.Name, scoped.Config), cfg, m.credentials)
 	m.mu.Lock()
-	if live := m.servers[serverName]; live != nil {
+	if live := m.servers[serverName]; live == server && !m.closing {
+		live.connectionGeneration++
 		live.authHandler = handler
 	}
 	m.mu.Unlock()
 
-	go m.runCoreAuthSession(ctx, session, handler, cfg, scoped)
+	handedOff = true
+	go func() { defer finish(); m.runCoreAuthSession(ctx, session, handler, cfg, scoped) }()
 	select {
 	case <-session.ready:
 		view := session.view()
@@ -185,6 +198,10 @@ func (m *Manager) startCoreAuthSession(serverName string, req AuthRequest) (Auth
 			return AuthResult{}, fmt.Errorf("start OAuth session: %s", view.ErrorMessage)
 		}
 		return AuthResult{AuthorizationURL: authorizationURL, State: view.Status, ServerName: serverName, SessionID: session.id, ExpiresAt: view.ExpiresAt}, nil
+	case <-ctx.Done():
+		cancel()
+		_ = session.httpServer.Close()
+		return AuthResult{}, ctx.Err()
 	case <-time.After(15 * time.Second):
 		cancel()
 		_ = session.httpServer.Close()

@@ -331,6 +331,7 @@ function isPidAlive(pid: number): boolean {
 }
 
 export class RuntimeSupervisor {
+  private stopInFlight?: Promise<void>;
   private options: SupervisorOptions;
   private deps: Required<RuntimeSupervisorDeps>;
   private child: ChildProcess | null = null;
@@ -544,7 +545,12 @@ export class RuntimeSupervisor {
     return this.getStatus();
   }
 
-  async stop(): Promise<void> {
+  stop(): Promise<void> {
+    this.stopInFlight ??= this.stopOwned().finally(() => { this.stopInFlight = undefined; });
+    return this.stopInFlight;
+  }
+
+  private async stopOwned(): Promise<void> {
     // Invalidate any in-flight start() loop so it stops spawning/retrying and
     // does not overwrite the stopped state we are about to set.
     this.startGeneration++;
@@ -568,29 +574,51 @@ export class RuntimeSupervisor {
     this.setStatus("stopping");
     const child = this.child;
     const baseUrl = this.runtimeBaseUrl;
-    this.child = null;
-    this.runtimeBaseUrl = undefined;
-    await this.releaseControlLease();
-
-    if (baseUrl) {
-      try {
+    const deadline = Date.now() + 9000;
+    try {
+      if (baseUrl) {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 2000);
         try {
-          await fetch(`${baseUrl}/v1/shutdown`, {
-            method: "POST",
-            signal: controller.signal,
-          });
-        } finally {
-          clearTimeout(timer);
-        }
-      } catch {
-        // Ignore shutdown endpoint errors and fall back to terminating the child.
+          await fetch(`${baseUrl}/v1/shutdown`, { method: "POST", signal: controller.signal });
+        } catch {
+          // An unavailable control endpoint falls back to the owned process signal.
+          this.killChild(child, false);
+        } finally { clearTimeout(timer); }
+      } else {
+        this.killChild(child, false);
       }
+      let exited = await this.waitForOwnedExit(child, Math.max(0, deadline - Date.now()));
+      let escalated = false;
+      if (!exited) {
+        escalated = true;
+        this.killChild(child, false);
+        exited = await this.waitForOwnedExit(child, 2000);
+      }
+      if (!exited) {
+        this.killChild(child, true);
+        exited = await this.waitForOwnedExit(child, 1000);
+      }
+      if (!exited) throw new Error("Core shutdown timed out; owned process has not exited");
+      this.child = null;
+      this.runtimeBaseUrl = undefined;
+      await this.releaseControlLease();
+      this.setStatus("stopped");
+      if (escalated || child.exitCode !== 0) throw new Error("Core did not shut down cleanly; update installation was stopped");
+    } catch (error) {
+      // Keep the handle while the process is alive so a retry cannot lose ownership.
+      throw error;
     }
+  }
 
-    await this.terminateChild(child);
-    this.setStatus("stopped");
+  private waitForOwnedExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
+    if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const onExit = () => { clearTimeout(timer); child.off("exit", onExit); resolve(true); };
+      const timer = setTimeout(() => { child.off("exit", onExit); resolve(false); }, timeoutMs);
+      child.once("exit", onExit);
+      if (child.exitCode !== null || child.signalCode !== null) onExit();
+    });
   }
 
   async restart(): Promise<SupervisorStatusInfo> {
@@ -676,7 +704,7 @@ export class RuntimeSupervisor {
       }
       this.child = null;
       this.runtimeBaseUrl = undefined;
-      if (this.status === "starting") {
+      if (this.status === "starting" || this.status === "stopping") {
         return;
       }
       this.setStatus("crashed", {

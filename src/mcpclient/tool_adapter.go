@@ -445,10 +445,20 @@ func (a *McpToolAdapter) callFailureOutcome(err error) tool.ExecutionOutcome {
 	var needsAuth *NeedsAuthError
 	if errors.As(err, &needsAuth) {
 		now := time.Now().UTC()
+		transport := tool.TransportNotStarted
+		sideEffect := tool.OutcomeSideEffectNotStarted
+		if needsAuth.CallStarted {
+			transport = tool.TransportFailed
+			sideEffect = tool.OutcomeSideEffectUnknown
+			if needsAuth.ReadOnly {
+				sideEffect = tool.OutcomeSideEffectNone
+			}
+		}
 		return tool.ExecutionOutcome{
 			Content:         content,
 			Status:          tool.OutcomeNeedsAuth,
-			TransportStatus: tool.TransportNotStarted,
+			Operation:       &tool.OperationDescriptor{Type: a.Name(), SideEffectState: sideEffect},
+			TransportStatus: transport,
 			SemanticStatus:  tool.SemanticUnknown,
 			ProcessStatus:   tool.ProcessNotApplicable,
 			ErrorCode:       tool.ErrorCodeNeedsAuth,

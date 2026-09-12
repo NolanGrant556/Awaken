@@ -1,3 +1,4 @@
+import { stopMessage, terminalMessage } from "../runtime/stop-display";
 import { compactEventDetails } from "../runtime/compact-event";
 import type { AguiEvent } from "../../shared/agui";
 import type { FileLineComment, RunInputAttachment } from "../../shared/runtime";
@@ -367,39 +368,9 @@ export function projectAguiEventToNarrative(
       // tool-shaped item here double-counts both the tool and the failure.
       return base;
     case "AWAKEN_USER_QUESTION_REQUESTED":
-    case "AWAKEN_USER_QUESTION_RESOLVED": {
-      let detail = "";
-      if (event.type === "AWAKEN_USER_QUESTION_REQUESTED") {
-        try {
-          const parsed = JSON.parse(event.content ?? "{}");
-          if (Array.isArray(parsed.questions)) {
-            detail = parsed.questions
-              .map((q: { question?: string }) => q.question)
-              .filter(Boolean)
-              .join(" | ");
-          }
-        } catch {
-          detail = event.content ?? "";
-        }
-      } else {
-        detail =
-          event.questionResolution === "cancelled"
-            ? "The user chose not to answer; the run continues."
-            : (event.questionAnswer ?? "");
-      }
-      return commitRuntimeNotice(
-        base,
-        event,
-        "user-question",
-        event.type === "AWAKEN_USER_QUESTION_RESOLVED"
-          ? event.questionResolution === "cancelled"
-            ? "Question cancelled"
-            : "Answer received"
-          : "Waiting for your answer",
-        detail,
-        event.type === "AWAKEN_USER_QUESTION_REQUESTED" ? "active" : "done",
-      );
-    }
+    case "AWAKEN_USER_QUESTION_RESOLVED":
+      // The Composer owns the live gate; its original tool result owns history.
+      return base;
     case "AWAKEN_ARTIFACT_CREATED":
     case "AWAKEN_ARTIFACT_UPDATED":
     case "AWAKEN_COMPUTER_POINTER_HINT":
@@ -460,7 +431,7 @@ export function projectAguiEventToNarrative(
         return commitRunCancelledHint(
           clearProviderReconnectItems(base),
           event,
-          "你停止了生成本次回答",
+          stopMessage(event.stopSource),
         );
       }
       return commitErrorAnswer(clearProviderReconnectItems(base), event);
@@ -469,7 +440,7 @@ export function projectAguiEventToNarrative(
         return commitRunCancelledHint(
           clearProviderReconnectItems(base),
           event,
-          event.message || "你停止生成了本次回答",
+          stopMessage(event.stopSource),
         );
       }
       if (event.status === "finished") {
@@ -1615,7 +1586,7 @@ function answerId(state: RunNarrativeState, event: AguiEvent): string {
 }
 
 function narrativeErrorMessage(event: AguiEvent): string {
-  return runtimeErrorMessageForDisplay(event.code, event.message);
+  return terminalMessage(event) ?? runtimeErrorMessageForDisplay(event.code, event.message);
 }
 
 function toolId(event: AguiEvent): string {
@@ -2608,7 +2579,7 @@ function commitTool(
     kind: "tool",
     id,
     toolCallId: event.toolCallId ?? active?.toolCallId,
-    title: event.toolCallName || active?.title || "Tool result",
+    title: event.questionCloseReason === "run_terminated" ? "问题已撤回" : event.toolCallName || active?.title || "Tool result",
     detail,
     status,
     toolStatus,

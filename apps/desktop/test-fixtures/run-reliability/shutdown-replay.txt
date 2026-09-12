@@ -1,0 +1,103 @@
+Window: "Awaken Desktop", App: Electron.
+0 标准窗口 Awaken Desktop, Secondary Actions: Raise
+	1 container Awaken Desktop
+		2 container
+			3 HTML 内容 Awaken Desktop, URL: 127.0.0.1:5174/
+				4 container
+					5 container Workbench controls
+						6 按钮 Hide sidebar
+						7 按钮 Expand inspector
+					8 container Awaken 导航
+						9 按钮 新建任务
+						10 container 主导航
+							11 按钮 连接器
+							12 按钮 技能
+							13 按钮 插件
+							14 按钮 定时任务
+						15 container
+							16 文本 项目工作区
+							17 按钮 展开全部项目
+							18 按钮 创建项目
+							19 按钮 awaken-reliability-workspace
+							20 按钮 退出计时独立样本
+							21 按钮 退出来源与问题恢复验收
+							22 按钮 隔离夹具执行任务
+							23 按钮 受控可靠性验收 ask：仅执行隔离夹具。
+							24 按钮 受控慢工具停止验收
+							25 按钮 受控提问撤回验收：停止后原问题可读
+							26 按钮 受控验收：等待提问后由宿主停止。
+							27 按钮 测试项目01
+							28 按钮 测试项目02
+							29 按钮 测试项目03
+							30 按钮 服装TP
+						31 container
+							32 文本 对话
+							33 按钮 收起对话
+							34 按钮 批量管理对话
+							35 按钮 新增对话
+							36 按钮 隔离验收文件检查
+						37 弹出式按钮 用户 Nolan
+							38 文本 AW
+							39 文本 Nolan
+					40 分离器 Description: Resize sidebar, Value: 288.0156
+					41 container Run stage
+						42 container Agent execution narrative
+							43 container Turn 1
+								44 container
+									45 按钮 受控可靠性验收 ask：仅执行隔离夹具。
+										46 文本 受控可靠性验收 ask：仅执行隔离夹具。
+									47 container 消息操作
+										48 文本 00:18
+										49 按钮 撤销此消息
+										50 按钮 编辑此消息
+										51 按钮 Copy prompt
+								52 按钮 执行过程
+									53 文本 执行过程
+								54 container
+									55 按钮 问题已撤回 问题已撤回：本次运行已终止。
+										56 文本 问题已撤回
+										57 文本 问题已撤回：本次运行已终止。
+									58 container 工具详情
+										59 按钮 复制详情
+										60 container
+											61 文本 结果
+											62 文本 问题已撤回：本次运行已终止。
+停止后保留原问题一？
+- A
+- B
+停止后保留原问题二？
+- C
+- D
+											63 文本 错误与恢复信息
+											64 文本 {
+  "environment_snapshot_id": "env_f8c33bd11a9ce73f6cd72378",
+  "provider_id": "builtin:ask_user",
+  "provider_readiness": "ready",
+  "provider_source": "builtin",
+  "tool_snapshot_id": "tools_1aa6bdbdc60f151a59862467"
+}
+								65 文本 应用关闭，运行已中断
+						66 container
+							67 文本输入区 (settable) Description: 输入任务, Placeholder: 输入后续任务…
+							68 按钮 Description: 添加上下文, Help: addContext
+							69 弹出式按钮 插件，1 个可用
+							70 弹出式按钮 Doubao-Seed-Evolving · high
+								71 图像 火山方舟 Logo
+								72 文本 Doubao-Seed-Evolving · high
+							73 按钮 (disabled) 发送
+							74 container Awaken composer context
+								75 文本 awaken-reliability-workspace
+								76 弹出式按钮 上下文窗口，22k / 272k
+									77 层次指示器 Description: 上下文窗口, Value: 8, Details: 22k / 272k
+					78 container Inspector
+	79 关闭按钮
+	80 全屏幕按钮 Help: 此按钮也可以执行缩放窗口的操作, Secondary Actions: 缩放窗口
+	81 最小化按钮
+82 menu bar
+	83 Electron
+	84 File
+	85 Edit
+	86 View
+	87 Window
+
+The focused UI element is 55 按钮 问题已撤回 问题已撤回：本次运行已终止。

@@ -646,3 +646,17 @@ func TestProjectSuppressesHookInternalAssistantNarrative(t *testing.T) {
 
 func intPtr(value int) *int           { return &value }
 func floatPtr(value float64) *float64 { return &value }
+
+func TestTerminalStopSourceProjectionAndLegacyNeutral(t *testing.T) {
+	for _, source := range []string{"user", "parent", "shutdown", "timeout", "unknown", ""} {
+		frames := ProjectSemanticRecord(agentcore.SemanticRecord{Kind: agentcore.SemanticKindRunTerminal, RunID: "r", Payload: map[string]any{"status": "cancelled", "terminal_reason": "aborted_tools", "stop_source": source}})
+		if len(frames) == 0 {
+			t.Fatal("missing terminal")
+		}
+		for _, frame := range frames {
+			if frame.StopSource != source || frame.TerminalReason != "aborted_tools" {
+				t.Fatalf("lost semantics: %+v", frame)
+			}
+		}
+	}
+}

@@ -3,6 +3,7 @@ package agentcore
 import (
 	"awaken/src/context"
 	"awaken/src/llm"
+	"awaken/src/runcontrol"
 	"awaken/src/subagentruntime"
 	"awaken/src/tool"
 	stdcontext "context"
@@ -37,6 +38,7 @@ type runEventEmitter struct {
 	reasoningText         strings.Builder
 	assistantText         strings.Builder
 	toolArgumentProgress  toolArgumentProgressTracker
+	pendingStopSource     string
 	pendingTerminalReason TerminalReason
 	persistenceErr        error
 	suppressRunLifecycle  bool
@@ -177,6 +179,7 @@ func (e *runEventEmitter) notePersistenceFailure(phase string, cause error) erro
 				"code":            string(TerminalReasonPersistenceError),
 				"terminal_reason": string(TerminalReasonPersistenceError),
 				"failed_phase":    phase,
+				"stop_source":     e.pendingStopSource,
 			},
 		)
 		recoveryErr := e.recorder.Append(recoveryCtx, terminal)
@@ -195,6 +198,7 @@ func (e *runEventEmitter) notePersistenceFailure(phase string, cause error) erro
 		Type:           RunErrorEventType,
 		Error:          e.persistenceErr.Error(),
 		Code:           "PERSISTENCE_ERROR",
+		StopSource:     e.pendingStopSource,
 		TerminalReason: TerminalReasonPersistenceError,
 	}
 	e.fillIDs(&event)
@@ -401,6 +405,10 @@ func (e *runEventEmitter) turnFinished(ctx stdcontext.Context, reason TerminalRe
 }
 
 func (e *runEventEmitter) runFinished(ctx stdcontext.Context, content string, state *ContextWindowState, reasons ...TerminalReason) {
+	if ctx.Err() != nil {
+		e.runErrored(ctx, ctx.Err(), TerminalReasonCancelled)
+		return
+	}
 	if e.suppressRunLifecycle {
 		return
 	}
@@ -446,6 +454,9 @@ func (e *runEventEmitter) runFinished(ctx stdcontext.Context, content string, st
 }
 
 func (e *runEventEmitter) runErrored(ctx stdcontext.Context, err error, reasons ...TerminalReason) {
+	if ctx.Err() != nil {
+		e.pendingStopSource = string(runcontrol.FromContext(ctx))
+	}
 	if err == nil {
 		return
 	}
@@ -460,6 +471,9 @@ func (e *runEventEmitter) runErrored(ctx stdcontext.Context, err error, reasons 
 		Type:           RunErrorEventType,
 		Error:          err.Error(),
 		TerminalReason: firstTerminalReason(reasons, terminalReasonForError(err)),
+	}
+	if ctx.Err() != nil || errors.Is(err, stdcontext.Canceled) {
+		event.StopSource = string(runcontrol.FromContext(ctx))
 	}
 	if event.TerminalReason == TerminalReasonCancelled || errors.Is(err, stdcontext.Canceled) {
 		event.Code = "RUN_CANCELLED"
@@ -492,6 +506,7 @@ func (e *runEventEmitter) runErrored(ctx stdcontext.Context, err error, reasons 
 				"error":           event.Error,
 				"code":            event.Code,
 				"terminal_reason": string(event.TerminalReason),
+				"stop_source":     event.StopSource,
 			},
 		), event); persistErr != nil {
 			return
@@ -525,6 +540,7 @@ func (e *runEventEmitter) publishSubagentBarrierFailure(ctx stdcontext.Context, 
 		Type:           RunErrorEventType,
 		Error:          err.Error(),
 		Code:           "SUBAGENT_TERMINAL_BARRIER_FAILED",
+		StopSource:     e.pendingStopSource,
 		TerminalReason: TerminalReasonAbortedTools,
 	}
 	e.fillIDs(&event)
@@ -541,6 +557,7 @@ func (e *runEventEmitter) publishSubagentBarrierFailure(ctx stdcontext.Context, 
 				"error":           event.Error,
 				"code":            event.Code,
 				"terminal_reason": string(event.TerminalReason),
+				"stop_source":     event.StopSource,
 			},
 		), event); persistErr != nil {
 			e.notePersistenceFailure("run_terminal_subagent_barrier", persistErr)

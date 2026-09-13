@@ -316,6 +316,23 @@ export class RuntimeControlClient {
     }, intervalMs);
   }
 
+  async registerBrowserHost(registration: {
+    base_url: string;
+    token: string;
+  } | null): Promise<void> {
+    const resp = await fetch(`${this.baseUrl}/v1/control/browser-host`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(registration ?? {}),
+    });
+    if (!resp.ok) {
+      throw new Error(`register browser host failed: ${resp.status}`);
+    }
+  }
+
   private stopHeartbeat(): void {
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);

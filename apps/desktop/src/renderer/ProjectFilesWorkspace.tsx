@@ -26,7 +26,10 @@ import type { RuntimeClient } from "./runtime/client";
 import ArtifactPreviewHost, {
   type ArtifactPreviewSelection,
 } from "./file-preview/ArtifactPreviewHost";
-import FilePreviewHost, { type ProjectFileWorkspaceMode } from "./file-preview/FilePreviewHost";
+import FilePreviewHost, {
+  type FilePreviewHostProps,
+  type ProjectFileWorkspaceMode,
+} from "./file-preview/FilePreviewHost";
 import { projectFileTabId, type ProjectFileWorkspaceTab } from "./projectFileTabs";
 import { projectFileIconKind, projectFileTreeRows, type ProjectFileTreeRow } from "./projectFiles";
 import ProjectFileIcon, { type ProjectFileVisualIconKind } from "./ProjectFileIcon";
@@ -84,6 +87,11 @@ export type ProjectFilesWorkspaceProps = {
   onAddFileTextSelection?: (selection: FileLineComment) => void;
   onDeleteFileComment?: (commentId: string) => void;
   addTaskDisabled?: boolean;
+  threadId?: string;
+  inspectorViewId?: string;
+  embeddedBrowser?: FilePreviewHostProps["embeddedBrowser"];
+  browserActive?: boolean;
+  onLeaveHtmlPreview?: () => void;
   onAddTaskContext?: (
     request: ProjectEntryActionRequest,
   ) => Promise<{ ok: true } | { ok: false; message: string }>;
@@ -253,6 +261,11 @@ export function ProjectFilesWorkspace({
   onAddFileTextSelection,
   onDeleteFileComment,
   addTaskDisabled = false,
+  threadId,
+  inspectorViewId,
+  embeddedBrowser,
+  browserActive = true,
+  onLeaveHtmlPreview,
   onAddTaskContext,
 }: ProjectFilesWorkspaceProps) {
   const workspaceBodyRef = useRef<HTMLDivElement>(null);
@@ -1005,6 +1018,11 @@ export function ProjectFilesWorkspace({
               onAddFileTextSelection={onAddFileTextSelection}
               onDeleteFileComment={onDeleteFileComment}
               fileCommentDisabled={addTaskDisabled}
+              threadId={threadId}
+              viewId={inspectorViewId}
+              embeddedBrowser={embeddedBrowser}
+              browserActive={browserActive}
+              onLeaveHtmlPreview={onLeaveHtmlPreview}
             />
           ) : (
             <div className="project-files-preview-empty is-centered">

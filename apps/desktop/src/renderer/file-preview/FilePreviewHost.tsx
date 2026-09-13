@@ -13,11 +13,20 @@ import type {
   ProjectFilePreviewHandle,
 } from "../../shared/runtime";
 import type { RuntimeClient } from "../runtime/client";
+import {
+  createIdleEmbeddedBrowserClient,
+  type EmbeddedBrowserBridge,
+} from "../../shared/embedded-browser";
 import ImagePreview from "./ImagePreview";
 import PreviewFrame, { type PreviewFrameProps } from "./PreviewFrame";
 import PreviewErrorBoundary from "./PreviewErrorBoundary";
 import { useProjectFilePreviewPrimaryClick } from "./useProjectFilePreviewPrimaryClick";
-import WebviewPreview from "./WebviewPreview";
+import WebviewPreview, {
+  type WebviewNavigationHandle,
+} from "./WebviewPreview";
+import EmbeddedBrowserChrome, {
+  type EmbeddedHtmlNavigation,
+} from "./EmbeddedBrowserChrome";
 
 const MarkdownPreview = lazy(() => import("./MarkdownPreview"));
 const CodePreview = lazy(() => import("./CodePreview"));
@@ -52,6 +61,24 @@ export type FilePreviewHostProps = {
   onAddFileTextSelection?: (selection: FileLineComment) => void;
   onDeleteFileComment?: (commentId: string) => void;
   fileCommentDisabled?: boolean;
+  threadId?: string;
+  viewId?: string;
+  embeddedBrowser?: Pick<
+    EmbeddedBrowserBridge,
+    | "navigate"
+    | "back"
+    | "forward"
+    | "reload"
+    | "stop"
+    | "close"
+    | "getState"
+    | "setViewport"
+    | "setActive"
+    | "onStateChanged"
+    | "onGuestHttpNavigate"
+  >;
+  browserActive?: boolean;
+  onLeaveHtmlPreview?: () => void;
 };
 
 type PreviewState =
@@ -86,10 +113,21 @@ export default function FilePreviewHost({
   onAddFileTextSelection,
   onDeleteFileComment,
   fileCommentDisabled = false,
+  threadId,
+  viewId,
+  embeddedBrowser,
+  browserActive = true,
+  onLeaveHtmlPreview,
 }: FilePreviewHostProps) {
+  const browserClient = embeddedBrowser ?? createIdleEmbeddedBrowserClient();
   const [state, setState] = useState<PreviewState>({ status: "idle" });
   const [retryGeneration, setRetryGeneration] = useState(0);
   const [guestLoading, setGuestLoading] = useState(false);
+  const [htmlNav, setHtmlNav] = useState<Omit<
+    EmbeddedHtmlNavigation,
+    "goBack" | "goForward" | "reload"
+  > | null>(null);
+  const htmlNavApiRef = useRef<WebviewNavigationHandle | null>(null);
   const activePreviewIdRef = useRef<string | undefined>(undefined);
   const generationRef = useRef(0);
   const onModeChangeRef = useRef(onModeChange);
@@ -188,6 +226,27 @@ export default function FilePreviewHost({
     onPreviewPrimaryClick,
   });
 
+  const htmlPreviewId =
+    state.status === "ready" && state.preview.kind === "html"
+      ? state.preview.previewId
+      : undefined;
+  const browserRef =
+    threadId && viewId ? { threadId, viewId } : undefined;
+
+  useEffect(() => {
+    if (!htmlPreviewId || !browserRef) return;
+    void browserClient.close(browserRef);
+  }, [browserClient, htmlPreviewId, threadId, viewId]);
+
+  useEffect(() => {
+    if (!browserRef) return;
+    return browserClient.onGuestHttpNavigate?.((payload) => {
+      if (!htmlPreviewId || payload.previewId !== htmlPreviewId) return;
+      onLeaveHtmlPreview?.();
+      void browserClient.navigate(browserRef, payload.url);
+    });
+  }, [browserClient, browserRef?.threadId, browserRef?.viewId, htmlPreviewId, onLeaveHtmlPreview]);
+
   const actionRequest: ProjectFilePreviewActionRequest | undefined =
     state.status === "ready" ? state.request : projectId && folderPath && selection
       ? {
@@ -265,7 +324,7 @@ export default function FilePreviewHost({
       projectId,
       folderPath,
       relativePath: selection.relativePath,
-      displayName: preview.displayName,
+      displayName: selection.name,
       contentDigest,
       startLine: selectionRange.startLine,
       endLine: selectionRange.endLine,
@@ -278,17 +337,60 @@ export default function FilePreviewHost({
     else onCreateFileComment?.(item);
   };
 
-  if (mode === "browser" && state.status !== "ready") {
+  const htmlNavigation: EmbeddedHtmlNavigation | undefined =
+    htmlPreviewId && htmlNav
+      ? {
+          ...htmlNav,
+          goBack: () => htmlNavApiRef.current?.goBack(),
+          goForward: () => htmlNavApiRef.current?.goForward(),
+          reload: () => htmlNavApiRef.current?.reload(),
+        }
+      : undefined;
+
+  const wrapBrowser = (children?: React.ReactNode) => {
+    if (mode !== "browser") {
+      return children ?? null;
+    }
+    const ref = browserRef ?? { threadId: "local", viewId: "preview" };
+    const htmlOccupied =
+      Boolean(htmlPreviewId) ||
+      (Boolean(selection) && state.status !== "ready");
     return (
-      <div className="project-files-preview-empty is-centered">
-        <AwakenIcon concept="browser" size={24} />
-        <strong>浏览器</strong>
-        <span>预览 Html 文件</span>
-      </div>
+      <EmbeddedBrowserChrome
+        client={browserClient}
+        viewRef={ref}
+        active={Boolean(browserRef) && browserActive}
+        htmlOccupied={htmlOccupied}
+        onLeaveHtmlPreview={onLeaveHtmlPreview}
+        htmlNavigation={htmlNavigation}
+      >
+        {children}
+      </EmbeddedBrowserChrome>
     );
+  };
+
+  if (mode === "browser" && state.status !== "ready") {
+    if (state.status === "loading") {
+      return wrapBrowser(
+        <div className="project-file-preview-state" role="status">
+          <span className="project-file-preview-spinner" aria-hidden="true" />
+          <strong>{state.displayName}</strong>
+          <span>正在准备预览…</span>
+        </div>,
+      );
+    }
+    if (state.status === "error") {
+      return wrapBrowser(
+        <div className="project-file-preview-state is-error" role="alert">
+          <strong>无法预览此文件</strong>
+          <span>{state.message}</span>
+        </div>,
+      );
+    }
+    return wrapBrowser();
   }
 
-  if (state.status === "idle") return null;
+  if (state.status === "idle") return wrapBrowser();
 
   if (state.status === "loading") {
     return (
@@ -348,7 +450,7 @@ export default function FilePreviewHost({
       runFallbackAction(runtimeClient.openProjectFileExternally),
     onReveal: () => runFallbackAction(runtimeClient.revealProjectFile),
   };
-  return (
+  const stack = (
     <div className="project-file-preview-mode-stack">
       <div
         className={`project-file-preview-mode-stack__preview${
@@ -445,7 +547,25 @@ export default function FilePreviewHost({
                   preview as Parameters<typeof WebviewPreview>[0]["preview"]
                 }
                 frameProps={frameProps}
-                onLoadingChange={setGuestLoading}
+                embedded={mode === "browser" && preview.kind === "html"}
+                navigationRef={
+                  mode === "browser" && preview.kind === "html"
+                    ? htmlNavApiRef
+                    : undefined
+                }
+                onNavigationState={
+                  mode === "browser" && preview.kind === "html"
+                    ? (next) => setHtmlNav(next)
+                    : undefined
+                }
+                onLoadingChange={(loading) => {
+                  setGuestLoading(loading);
+                  if (mode === "browser" && preview.kind === "html") {
+                    setHtmlNav((current) =>
+                      current ? { ...current, loading } : current,
+                    );
+                  }
+                }}
                 onLoadError={(message) =>
                   setState({
                     status: "error",
@@ -481,11 +601,12 @@ export default function FilePreviewHost({
           ) : (
             <>
               <strong>浏览器</strong>
-              <span>预览 Html 文件</span>
+              <span>输入网址，或从文件树打开 HTML 文件</span>
             </>
           )}
         </div>
       ) : null}
     </div>
   );
+  return mode === "browser" ? wrapBrowser(stack) : stack;
 }

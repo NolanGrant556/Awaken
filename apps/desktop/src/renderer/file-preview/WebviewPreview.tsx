@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import { AwakenIcon } from "@awaken/design-system";
 import type { WebviewTag } from "electron";
 import type { ProjectFilePreviewUrlHandle } from "../../shared/runtime";
@@ -9,6 +9,12 @@ type WebviewPreviewHandle = ProjectFilePreviewUrlHandle & {
   partition: string;
 };
 
+export type WebviewNavigationHandle = {
+  goBack: () => void;
+  goForward: () => void;
+  reload: () => void;
+};
+
 export type WebviewPreviewProps = {
   preview: WebviewPreviewHandle;
   onLoadingChange?: (loading: boolean) => void;
@@ -17,6 +23,14 @@ export type WebviewPreviewProps = {
     PreviewFrameProps,
     "children" | "formatActions" | "formatLabel"
   >;
+  embedded?: boolean;
+  navigationRef?: MutableRefObject<WebviewNavigationHandle | null>;
+  onNavigationState?: (state: {
+    canGoBack: boolean;
+    canGoForward: boolean;
+    address: string;
+    loading: boolean;
+  }) => void;
 };
 
 function visibleBrowserAddress(value: string, fallback: string): string {
@@ -34,6 +48,9 @@ export default function WebviewPreview({
   onLoadingChange,
   onLoadError,
   frameProps,
+  embedded = false,
+  navigationRef,
+  onNavigationState,
 }: WebviewPreviewProps) {
   const webviewRef = useRef<WebviewTag>(null);
   const domReadyRef = useRef(false);
@@ -43,8 +60,10 @@ export default function WebviewPreview({
   const [canGoForward, setCanGoForward] = useState(false);
   const [address, setAddress] = useState(`/${preview.relativePath}`);
 
+  const onNavigationStateRef = useRef(onNavigationState);
   onLoadingChangeRef.current = onLoadingChange;
   onLoadErrorRef.current = onLoadError;
+  onNavigationStateRef.current = onNavigationState;
 
   useEffect(() => {
     const webview = webviewRef.current;
@@ -52,11 +71,18 @@ export default function WebviewPreview({
     const updateNavigation = () => {
       if (!domReadyRef.current || !webview.isConnected) return;
       try {
-        setCanGoBack(webview.canGoBack());
-        setCanGoForward(webview.canGoForward());
-        setAddress(
-          visibleBrowserAddress(webview.getURL(), preview.relativePath),
-        );
+        const nextCanGoBack = webview.canGoBack();
+        const nextCanGoForward = webview.canGoForward();
+        const nextAddress = visibleBrowserAddress(webview.getURL(), preview.relativePath);
+        setCanGoBack(nextCanGoBack);
+        setCanGoForward(nextCanGoForward);
+        setAddress(nextAddress);
+        onNavigationStateRef.current?.({
+          canGoBack: nextCanGoBack,
+          canGoForward: nextCanGoForward,
+          address: nextAddress,
+          loading: webview.isLoading?.() ?? false,
+        });
       } catch {
         // Electron rejects guest methods until dom-ready and after DOM detachment.
       }
@@ -113,6 +139,29 @@ export default function WebviewPreview({
     }
   };
 
+  if (navigationRef) {
+    navigationRef.current = {
+      goBack: () => runGuestAction((webview) => webview.goBack()),
+      goForward: () => runGuestAction((webview) => webview.goForward()),
+      reload: () => runGuestAction((webview) => webview.reload()),
+    };
+  }
+
+  const guest = (
+    <webview
+      key={preview.previewId}
+      ref={webviewRef}
+      className="project-file-webview-preview__guest"
+      src={preview.src}
+      partition={preview.partition}
+      webpreferences="contextIsolation=yes,nodeIntegration=no,sandbox=yes"
+    />
+  );
+
+  if (embedded) {
+    return <div className="project-file-webview-preview is-embedded">{guest}</div>;
+  }
+
   return (
     <PreviewFrame
       {...frameProps}
@@ -156,14 +205,7 @@ export default function WebviewPreview({
         ) : undefined
       }
     >
-      <webview
-        key={preview.previewId}
-        ref={webviewRef}
-        className="project-file-webview-preview__guest"
-        src={preview.src}
-        partition={preview.partition}
-        webpreferences="contextIsolation=yes,nodeIntegration=no,sandbox=yes"
-      />
+      {guest}
     </PreviewFrame>
   );
 }

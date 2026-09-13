@@ -67,6 +67,23 @@ describe("inspector tabs", () => {
     state = apply(state, { type: "project", projectId: "other" }, "other");
     expect(state.tabs).toEqual([]);
   });
+  it("clears the HTML file from a browser slot without creating a new tab", () => {
+    let state = apply(createInspectorTabs(), { type: "add-file", projectId: "p", mode: "browser" });
+    const browserId = state.activeId;
+    state = apply(state, { type: "open-file", tab: { ...file("index.html"), mode: "browser" } });
+    expect(state.tabs.find(tab => tab.id === browserId)).toMatchObject({
+      kind: "file",
+      tab: { name: "index.html" },
+      mode: "browser",
+    });
+    state = apply(state, { type: "clear-file" });
+    expect(state.activeId).toBe(browserId);
+    expect(state.tabs.find(tab => tab.id === browserId)).toMatchObject({
+      kind: "file",
+      tab: undefined,
+      mode: "browser",
+    });
+  });
   it("keeps artifact tabs when selecting project files or adding a browser", () => {
     let state = apply(createInspectorTabs(), { type: "open-artifact", selection: artifact("report") });
     const report = state.tabs[0];

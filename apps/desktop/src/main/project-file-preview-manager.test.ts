@@ -70,6 +70,7 @@ function createManager(root: string, transcript?: RuntimeThreadTranscript) {
   const previewSessions = new Map<string, FakeSession>();
   const openExternal = vi.fn(async () => undefined);
   const onPreviewInteraction = vi.fn();
+  const onGuestHttpNavigate = vi.fn();
   const manager = new ProjectFilePreviewManager({
     getProjects: async () => [project(root)],
     getTranscript: async () => {
@@ -93,6 +94,7 @@ function createManager(root: string, transcript?: RuntimeThreadTranscript) {
     showItemInFolder: vi.fn(),
     savePdfAs: vi.fn(async () => undefined),
     onPreviewInteraction,
+    onGuestHttpNavigate,
   });
   manager.initialize();
   return {
@@ -101,6 +103,7 @@ function createManager(root: string, transcript?: RuntimeThreadTranscript) {
     previewSessions,
     openExternal,
     onPreviewInteraction,
+    onGuestHttpNavigate,
   };
 }
 
@@ -335,6 +338,7 @@ describe("ProjectFilePreviewManager", () => {
       previewSessions,
       openExternal,
       onPreviewInteraction,
+      onGuestHttpNavigate,
     } = createManager(root);
     const result = await manager.start({
       requestId: "request-secure-html",
@@ -396,7 +400,11 @@ describe("ProjectFilePreviewManager", () => {
     const preventDefault = vi.fn();
     willNavigate?.({ preventDefault }, "https://example.com/");
     expect(preventDefault).toHaveBeenCalledOnce();
-    expect(openExternal).toHaveBeenCalledWith("https://example.com/");
+    expect(openExternal).not.toHaveBeenCalled();
+    expect(onGuestHttpNavigate).toHaveBeenCalledWith({
+      previewId: result.preview.previewId,
+      url: "https://example.com/",
+    });
 
     const beforeMouseEvent = on.mock.calls.find(
       ([eventName]) => eventName === "before-mouse-event",

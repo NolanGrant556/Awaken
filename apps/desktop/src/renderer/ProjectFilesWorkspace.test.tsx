@@ -398,7 +398,7 @@ createProjectAgentsFile: vi.fn(),
     await settle();
 
     expect(container.textContent).toContain("浏览器");
-    expect(container.textContent).toContain("预览 Html 文件");
+    expect(container.textContent).toContain("输入网址，或从文件树打开 HTML 文件");
     expect(container.querySelector(".project-files-preview-empty.is-centered")).not.toBeNull();
   });
 

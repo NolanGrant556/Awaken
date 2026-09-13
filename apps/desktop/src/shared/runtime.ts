@@ -3,6 +3,7 @@ import type { AguiEvent, InstructionSnapshotSummary } from "./agui.js";
 import type { DesktopUpdateSnapshot } from "./desktop-update.js";
 import type { PetBridge } from "./pets.js";
 import type { ProjectFilePreviewInteraction } from "./project-file-preview-interaction.js";
+import type { EmbeddedBrowserBridge } from "./embedded-browser.js";
 
 export type DesktopPlatform = "macos" | "windows" | "linux";
 
@@ -2617,6 +2618,7 @@ export type AwakenBridge = {
   onProjectFilePreviewInteraction: (
     handler: (interaction: ProjectFilePreviewInteraction) => void,
   ) => () => void;
+  embeddedBrowser: EmbeddedBrowserBridge;
   openProjectFileExternally: (
     request: ProjectFilePreviewActionRequest,
   ) => Promise<ProjectFilePreviewActionResult>;

@@ -165,7 +165,8 @@ const activeThoughtTraceHtml = renderToString(
 );
 
 if (
-  !activeThoughtTraceHtml.includes("思考中") ||
+  !activeThoughtTraceHtml.includes("思考") ||
+  !activeThoughtTraceHtml.includes("中") ||
   !activeThoughtTraceHtml.includes("aw-trace-dots") ||
   !activeThoughtTraceHtml.includes('aria-expanded="false"') ||
   activeThoughtTraceHtml.includes("Inspecting the current implementation") ||
@@ -183,7 +184,7 @@ const completedThoughtTraceHtml = renderToString(
 );
 
 if (
-  !completedThoughtTraceHtml.includes("思考过程") ||
+  !completedThoughtTraceHtml.includes("片刻") ||
   !completedThoughtTraceHtml.includes("thought-trace-disclosure") ||
   !completedThoughtTraceHtml.includes('aria-hidden="true"') ||
   completedThoughtTraceHtml.includes("aw-thinking-orb-status") ||

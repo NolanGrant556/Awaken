@@ -3,6 +3,7 @@ import { AwakenIcon } from "../AwakenIcon";
 import { memo, useId, useState } from "react";
 import { type AwakenThinkingOrbTheme } from "../AwakenThinkingOrb";
 import { useAwakenDisclosurePresence } from "../../hooks/useAwakenDisclosurePresence";
+import { AwakenTraceTitle } from "../AwakenTraceTitle";
 
 type ThoughtTraceStatus = "active" | "done" | "error";
 
@@ -41,10 +42,10 @@ export const AwakenThoughtTrace = memo(function AwakenThoughtTrace({
   const statusLabel =
     label ??
     (status === "active"
-      ? "思考中"
+      ? "思考 中"
       : status === "error"
-        ? "思考已中断"
-        : "思考过程");
+        ? "思考 已中断"
+        : "思考 片刻");
   const heading = durationLabel
     ? `${statusLabel} ${durationLabel}`
     : statusLabel;
@@ -55,7 +56,9 @@ export const AwakenThoughtTrace = memo(function AwakenThoughtTrace({
   }
   const headingContent = (
     <>
-      <span className="thought-trace-disclosure-label">{heading}</span>
+      <span className="thought-trace-disclosure-label">
+        <AwakenTraceTitle title={heading} />
+      </span>
       {status === "active" ? (
         <span className="aw-trace-dots" aria-hidden="true">
           <i />

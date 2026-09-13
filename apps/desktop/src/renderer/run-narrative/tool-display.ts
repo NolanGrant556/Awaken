@@ -79,3 +79,32 @@ export function describeGlobPattern(value: string): string {
     ? `${compactPathLabel(literalScope)} 中的 ${description}`
     : description;
 }
+
+export function readLineRangeLabel(
+  offset?: number,
+  limit?: number,
+): string | undefined {
+  if (typeof offset !== "number" || !Number.isFinite(offset) || offset <= 0) {
+    return undefined;
+  }
+  if (typeof limit === "number" && Number.isFinite(limit) && limit > 0) {
+    return `L${offset}-${offset + limit - 1}`;
+  }
+  return `L${offset}`;
+}
+
+export function searchActionTitle(query?: string, scope?: string): string {
+  const rawQuery = query?.replace(/\s+/g, " ").trim();
+  const queryLabel = rawQuery
+    ? /[*?[\]{}]/.test(rawQuery)
+      ? describeGlobPattern(rawQuery)
+      : rawQuery.length > 48
+        ? `${rawQuery.slice(0, 47).trimEnd()}…`
+        : rawQuery
+    : undefined;
+  const scopeLabel = scope?.trim() || undefined;
+  if (queryLabel && scopeLabel) return `搜索 ${queryLabel} in ${scopeLabel}`;
+  if (queryLabel) return `搜索 ${queryLabel}`;
+  if (scopeLabel) return `搜索 ${scopeLabel}`;
+  return "搜索文件";
+}

@@ -704,7 +704,10 @@
 }
 
 .execution-turn-header .execution-prompt-bubble {
-  --execution-prompt-collapsed-content-height: 48px;
+  --execution-prompt-collapsed-fade-size: calc(0.8 * var(--aw-line-height-base));
+  --execution-prompt-collapsed-content-height: calc(
+    3 * var(--aw-line-height-base) + var(--execution-prompt-collapsed-fade-size)
+  );
   --execution-prompt-expanded-content-height: 162px;
   --execution-prompt-surface: var(--aw-surface-raised);
   width: 100%;
@@ -765,20 +768,48 @@
 .execution-process-disclosure-title {
   color: var(--aw-text-subtle);
   font-size: var(--aw-font-size-sm);
-  font-weight: var(--aw-font-weight-semibold);
+  font-weight: 400;
   line-height: var(--aw-line-height-sm);
 }
 
-.execution-process-disclosure-body {
+.execution-process-diff {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.execution-process-diff-add {
+  color: var(--aw-status-success-text);
+}
+
+.execution-process-diff-remove {
+  color: var(--aw-status-danger-text);
+}
+
+.execution-process-diff-failed {
+  color: var(--aw-text-subtle);
+}
+
+.execution-process-disclosure-body,
+.execution-activity-list {
   display: grid;
-  gap: 8px;
+  gap: 0;
   width: 100%;
   min-width: 0;
+}
+
+.execution-process-disclosure-body {
   padding-top: 0;
+  gap: 2px;
 }
 
 .execution-turn-body > .assistant-message-wrapper:not(:first-child),
 .execution-process-disclosure-body > .assistant-message-wrapper:not(:first-child) {
+  margin-top: 16px;
+}
+.execution-turn-body > .assistant-message-wrapper + :not(.assistant-message-wrapper),
+.execution-process-disclosure-body > .assistant-message-wrapper + :not(.assistant-message-wrapper) {
   margin-top: 16px;
 }
 .assistant-message-wrapper[data-final="false"] {
@@ -791,9 +822,14 @@
    open content and all durable narrative data stay untouched. */
 @supports (content-visibility: auto) {
   .execution-process-disclosure-body
-    > :is(
+    :is(
       .thought-trace[data-disclosure-state="closed"],
       .tool-trace-group[data-disclosure-state="closed"],
+      .tool-trace-item[data-disclosure-state="closed"]
+    ),
+  .execution-activity-list
+    > :is(
+      .thought-trace[data-disclosure-state="closed"],
       .tool-trace-item[data-disclosure-state="closed"]
     ),
   .tool-trace-group-lines

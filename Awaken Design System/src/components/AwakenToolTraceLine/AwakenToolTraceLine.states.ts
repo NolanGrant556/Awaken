@@ -70,7 +70,7 @@ export const AwakenToolTraceLineStates: AwakenToolTraceLineState[] = [
     id: "static",
     label: "仅展示",
     props: {
-      title: "artifact_publish",
+      title: "发布 output/report.pdf",
       detail: "output/report.pdf",
       status: "done",
       onSelect: undefined,
@@ -80,7 +80,7 @@ export const AwakenToolTraceLineStates: AwakenToolTraceLineState[] = [
     id: "long-content",
     label: "长工具返回",
     props: {
-      title: "skill__dws",
+      title: "使用 dws",
       detailCard: {
         title: "Skill 详情",
         copyText:
@@ -115,7 +115,7 @@ export const AwakenToolTraceLineStates: AwakenToolTraceLineState[] = [
     id: "denied",
     label: "被拒绝",
     props: {
-      title: "computer_action",
+      title: "操作 点击确认支付",
       detail: "点击「确认支付」",
       status: "denied",
       onSelect: noop,
@@ -125,7 +125,7 @@ export const AwakenToolTraceLineStates: AwakenToolTraceLineState[] = [
     id: "cancelled",
     label: "已取消",
     props: {
-      title: "web_search",
+      title: "搜索 季度财报对比",
       detail: "季度财报对比",
       status: "cancelled",
       onSelect: noop,
@@ -135,7 +135,7 @@ export const AwakenToolTraceLineStates: AwakenToolTraceLineState[] = [
     id: "interrupted",
     label: "被中断",
     props: {
-      title: "Bash",
+      title: "运行 npm run build",
       detail: "npm run build",
       status: "interrupted",
       kind: "terminal",
@@ -146,7 +146,7 @@ export const AwakenToolTraceLineStates: AwakenToolTraceLineState[] = [
     id: "blocked",
     label: "被策略阻断",
     props: {
-      title: "git_remote",
+      title: "查看 远程",
       detail: "push origin main",
       status: "blocked",
       onSelect: noop,
@@ -156,7 +156,7 @@ export const AwakenToolTraceLineStates: AwakenToolTraceLineState[] = [
     id: "unsupported",
     label: "工具不可用",
     props: {
-      title: "media_generate",
+      title: "使用 图像生成",
       detail: "当前模型不支持图像生成",
       status: "unsupported",
       onSelect: noop,

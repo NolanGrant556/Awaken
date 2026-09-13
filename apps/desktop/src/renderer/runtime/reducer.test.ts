@@ -1486,7 +1486,7 @@ describe("runtime reducer run narrative projection", () => {
       state.narrative.activeItem.actions.map((action) => action.id),
     ).toEqual(["explore:read-1", "explore:list-1", "explore:grep-1"]);
     expect(state.narrative.activeItem.actions[0]).toMatchObject({
-      title: "读取 README.md L1-L80",
+      title: "读取 README.md L1-80",
       status: "done",
     });
     expect(state.narrative.activeItem.actions[1]).toMatchObject({
@@ -1495,7 +1495,7 @@ describe("runtime reducer run narrative projection", () => {
       status: "done",
     });
     expect(state.narrative.activeItem.actions[2]).toMatchObject({
-      title: '搜索 "Run Workbench" · Markdown 文件',
+      title: "搜索 Run Workbench in Markdown 文件",
       visualKind: "search",
       status: "done",
     });

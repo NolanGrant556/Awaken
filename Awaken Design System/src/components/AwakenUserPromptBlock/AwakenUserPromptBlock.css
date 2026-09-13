@@ -8,7 +8,10 @@
 }
 
 .execution-prompt-bubble {
-  --execution-prompt-collapsed-content-height: 60px;
+  --execution-prompt-collapsed-fade-size: calc(0.8 * var(--aw-line-height-base));
+  --execution-prompt-collapsed-content-height: calc(
+    3 * var(--aw-line-height-base) + var(--execution-prompt-collapsed-fade-size)
+  );
   --execution-prompt-expanded-content-height: 180px;
   --execution-prompt-attachment-size: 52px;
   --execution-prompt-attachment-gap: 8px;
@@ -233,13 +236,13 @@
   -webkit-mask-image: linear-gradient(
     to bottom,
     #000 0,
-    #000 calc(100% - 16px),
+    #000 calc(100% - var(--execution-prompt-collapsed-fade-size)),
     transparent 100%
   );
   mask-image: linear-gradient(
     to bottom,
     #000 0,
-    #000 calc(100% - 16px),
+    #000 calc(100% - var(--execution-prompt-collapsed-fade-size)),
     transparent 100%
   );
   -webkit-mask-size: 100% 100%;
@@ -252,7 +255,7 @@
   .execution-prompt-bubble-text {
   max-height: var(--execution-prompt-collapsed-content-height);
   overflow: hidden;
-  line-height: 16px;
+  line-height: var(--aw-line-height-base);
 }
 
 .execution-prompt-block-expanded .execution-prompt-bubble {

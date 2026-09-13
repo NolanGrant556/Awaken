@@ -7,7 +7,7 @@
 }
 
 .aw-disclosure-open {
-  gap: 8px;
+  gap: 2px;
 }
 
 .aw-disclosure-trigger {
@@ -37,6 +37,7 @@
   min-width: 0;
   color: inherit;
   font-size: var(--aw-font-size-sm);
+  font-weight: 400;
   line-height: var(--aw-line-height-sm);
   overflow-wrap: anywhere;
 }

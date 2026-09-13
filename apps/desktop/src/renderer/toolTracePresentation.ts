@@ -2,7 +2,11 @@ import {
   type ToolTraceAction,
   type ToolTraceDetailCard,
 } from "@awaken/design-system";
-import { describeGlobPattern } from "./run-narrative/tool-display";
+import {
+  describeGlobPattern,
+  readLineRangeLabel,
+  searchActionTitle,
+} from "./run-narrative/tool-display";
 import type { ToolDisplayState } from "../shared/toolStatus";
 import { diffLineStats } from "./workbenchPresentation";
 import { toolResultPatch } from "./tracePatch";
@@ -127,6 +131,43 @@ export function firstStringArgument(
   return undefined;
 }
 
+export function firstNumberArgument(
+  args: Record<string, unknown> | undefined,
+  keys: string[],
+): number | undefined {
+  for (const key of keys) {
+    const value = args?.[key];
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string" && value.trim()) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+  return undefined;
+}
+
+export function thoughtTraceTitle(input: {
+  kind?: string;
+  status?: string;
+  phase?: string;
+  text?: string;
+  durationMs?: number;
+}): string {
+  if (input.kind === "planning" && input.phase) {
+    return input.text?.trim() || "思考 中";
+  }
+  if (input.status === "active") return "思考 中";
+  if (input.status === "error") return "思考 已中断";
+  const durationMs = input.durationMs;
+  const seconds =
+    typeof durationMs === "number" &&
+    Number.isFinite(durationMs) &&
+    durationMs >= 1500
+      ? Math.max(1, Math.round(durationMs / 1000))
+      : undefined;
+  return seconds ? `思考 ${seconds} 秒` : "思考 片刻";
+}
+
 export function safeFileToolArguments(
   args: Record<string, unknown> | undefined,
 ): Record<string, string> | undefined {
@@ -185,6 +226,185 @@ export function detailCardFromSections(
   };
 }
 
+export function compactUrlLabel(value?: string): string | undefined {
+  const raw = value?.trim();
+  if (!raw) return undefined;
+  try {
+    const withScheme = /^[a-z][a-z0-9+.-]*:/i.test(raw)
+      ? raw
+      : `https://${raw}`;
+    const parsed = new URL(withScheme);
+    const path =
+      parsed.pathname === "/" ? "" : parsed.pathname.replace(/\/$/, "");
+    return compactInlineLabel(`${parsed.host}${path}`, 48);
+  } catch {
+    return compactInlineLabel(raw, 48);
+  }
+}
+
+function titled(verb: string, fact?: string): string {
+  const rest = fact?.trim();
+  return rest ? `${verb} ${rest}` : verb;
+}
+
+const COMPUTER_ACTION_LABELS: Record<string, string> = {
+  click: "点击",
+  double_click: "双击",
+  scroll: "滚动",
+  drag: "拖拽",
+  key: "按键",
+  hotkey: "快捷键",
+  type_text: "输入",
+  move_cursor: "移动指针",
+  wait: "等待",
+};
+
+function namedBuiltinTitle(
+  name: string,
+  args?: Record<string, unknown>,
+): string | undefined {
+  const path = firstStringArgument(args, [
+    "path",
+    "file_path",
+    "filePath",
+    "target",
+  ]);
+  switch (name) {
+    case "computer_observe": {
+      const scope = firstStringArgument(args, ["scope"]);
+      return titled(
+        "观察",
+        scope === "window" ? "窗口" : scope === "desktop" ? "桌面" : "屏幕",
+      );
+    }
+    case "computer_act":
+    case "computer_action": {
+      const intent = firstStringArgument(args, ["intent"]);
+      const action = firstStringArgument(args, ["action"]);
+      if (intent) return titled("操作", compactInlineLabel(intent, 32));
+      if (action)
+        return titled(
+          "操作",
+          COMPUTER_ACTION_LABELS[action] ?? compactInlineLabel(action, 24),
+        );
+      return "操作 桌面";
+    }
+    case "computer_verify":
+      return titled(
+        "核对",
+        firstStringArgument(args, ["expected_effect"]) || "结果",
+      );
+    case "webfetch":
+    case "browser_navigate":
+      return titled(
+        "打开",
+        compactUrlLabel(firstStringArgument(args, ["url", "href"])) || "页面",
+      );
+    case "browser_snapshot":
+      return "查看 页面";
+    case "browser_click":
+      return titled(
+        "点击",
+        firstStringArgument(args, ["ref"]) || "页面",
+      );
+    case "browser_type":
+      return titled(
+        "输入",
+        compactInlineLabel(firstStringArgument(args, ["text"]) ?? "文字", 32),
+      );
+    case "browser_wait": {
+      const seconds = firstNumberArgument(args, ["seconds"]);
+      return seconds ? titled("等待", `${seconds} 秒`) : "等待 页面";
+    }
+    case "browser_extract":
+      return "提取 页面";
+    case "calculator":
+      return titled(
+        "计算",
+        compactInlineLabel(
+          firstStringArgument(args, ["expression"]) ?? "算式",
+          32,
+        ),
+      );
+    case "memory":
+      return titled(
+        "记忆",
+        firstStringArgument(args, ["action", "query", "name"]) || "记录",
+      );
+    case "artifact_publish":
+      return titled("发布", path ? compactPathLabel(path) : "文件");
+    case "git_remote": {
+      const operation = firstStringArgument(args, ["operation"]);
+      const url = compactUrlLabel(firstStringArgument(args, ["url"]));
+      if (operation === "clone") return titled("克隆", url || "仓库");
+      return titled("查看", url || "远程");
+    }
+    case "trash_file":
+      return titled("删除", path ? compactPathLabel(path) : "文件");
+    case "tool_find":
+      return titled(
+        "查找",
+        firstStringArgument(args, ["query"]) || "工具",
+      );
+    case "tool_result_read":
+      return "读取 上次结果";
+    case "thread_history_read":
+      return "读取 会话";
+    case "archived_history":
+      return "读取 归档";
+    case "dependency_install":
+      return titled(
+        "安装",
+        firstStringArgument(args, ["name", "package", "id"]) || "依赖",
+      );
+    case "configure_hook":
+      return "配置 钩子";
+    case "configure_acp_runner":
+      return "配置 外部助手";
+    case "delegate_external_agent":
+      return titled(
+        "调用",
+        firstStringArgument(args, ["runner"]) || "外部助手",
+      );
+    case "subagent":
+      return titled(
+        "子任务",
+        firstStringArgument(args, ["description", "action"]) || "操作",
+      );
+    case "plugin":
+      return titled(
+        "使用",
+        firstStringArgument(args, ["name", "plugin"]) || "插件",
+      );
+    case "skill_install":
+      return titled(
+        "安装",
+        firstStringArgument(args, ["skill_id", "name"]) || "技能",
+      );
+    case "skill_resource_read":
+      return titled("读取", path ? compactPathLabel(path) : "技能文件");
+    case "skill_resource_list":
+      return "列出 技能文件";
+    case "skill_package_export":
+      return "发布 技能";
+    case "skill":
+      return titled(
+        "使用",
+        firstStringArgument(args, ["skill_id", "name"]) || "技能",
+      );
+    default:
+      return undefined;
+  }
+}
+
+function mcpToolTitle(title: string): string {
+  const compact = title.replace(/\s*\{\s*$/, "").trim();
+  if (/^[\u4e00-\u9fff]/.test(compact)) return compact;
+  const parts = compact.split("__").filter(Boolean);
+  const toolName = parts.at(-1)?.replace(/^mcp$/i, "") || compact;
+  return titled("调用", compactInlineLabel(toolName.replace(/_/g, " "), 40));
+}
+
 export function naturalToolTitle(
   title: string,
   kind: "tool" | "mcp" | "terminal",
@@ -202,37 +422,44 @@ export function naturalToolTitle(
     if (command) return `运行 ${compactInlineLabel(redactShellText(command))}`;
     return "运行命令";
   }
+  const compactName = title.replace(/\s*\{\s*$/, "").trim();
+  const named = namedBuiltinTitle(compactName.toLowerCase(), args);
+  if (named) return named;
+  if (kind === "mcp" || /^mcp__/i.test(compactName)) {
+    return mcpToolTitle(compactName);
+  }
   if (READ_TOOL_TITLE.test(title)) {
+    const compactTitle = title.replace(/\s*\{\s*$/, "").trim();
     const path = firstStringArgument(args, ["path", "file_path", "filePath"]);
     const query = firstStringArgument(args, ["query", "pattern", "url"]);
     const glob = firstStringArgument(args, ["glob"]);
+    if (/websearch|网页/i.test(title)) {
+      if (query) return `搜索网页 ${compactInlineLabel(query, 48)}`;
+      if (/^搜索网页/.test(compactTitle)) return compactTitle;
+      return "搜索网页";
+    }
     if (/search|grep|glob|find|搜索/i.test(title)) {
-      const compactTitle = title.replace(/\s*\{\s*$/, "").trim();
-      if (/^搜索/.test(compactTitle) && !/[*?[\]{}]/.test(compactTitle)) {
-        return compactTitle;
-      }
-      const queryLabel = query
-        ? /[*?[\]{}]/.test(query)
-          ? describeGlobPattern(query)
-          : `"${compactInlineLabel(query, 48)}"`
-        : undefined;
       const scopeLabel = glob
         ? describeGlobPattern(glob)
         : path
           ? compactPathLabel(path)
           : undefined;
-      if (queryLabel && scopeLabel) {
-        return `搜索 ${queryLabel} · ${scopeLabel}`;
+      if (query || scopeLabel) return searchActionTitle(query, scopeLabel);
+      if (/^搜索/.test(compactTitle) && !/[*?[\]{}]/.test(compactTitle)) {
+        return compactTitle;
       }
-      if (queryLabel) return `搜索 ${queryLabel}`;
-      if (scopeLabel) return `搜索 ${scopeLabel}`;
       return "搜索文件";
     }
+    const verb = /list|列出/i.test(title) ? "列出" : "读取";
     if (path) {
-      const offset = typeof args?.offset === "number" ? args.offset : undefined;
-      return `${/list|列出/i.test(title) ? "列出" : "读取"} ${compactPathLabel(path)}${offset ? ` · 第 ${offset} 行起` : ""}`;
+      const range = readLineRangeLabel(
+        firstNumberArgument(args, ["offset"]),
+        firstNumberArgument(args, ["limit"]),
+      );
+      return `${verb} ${compactPathLabel(path)}${range ? ` ${range}` : ""}`;
     }
-    return /list|列出/i.test(title) ? "列出文件" : "读取文件";
+    if (/^(?:读取|列出)/.test(compactTitle)) return compactTitle;
+    return verb === "列出" ? "列出文件" : "读取文件";
   }
   if (FILE_TOOL_TITLE.test(title)) {
     const target = firstStringArgument(args, [
@@ -259,8 +486,11 @@ export function naturalToolTitle(
     if (target) return `${action} ${compactPathLabel(target)}`;
     return `${action}文件`;
   }
-  if (title === "subagent") return "子任务操作";
-  return title.replace(/\s*\{\s*$/, "").trim() || "使用工具";
+  if (title === "subagent") return "子任务 操作";
+  if (/^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/i.test(compactName)) {
+    return titled("使用", compactInlineLabel(compactName.replace(/_/g, " "), 40));
+  }
+  return compactName || "使用工具";
 }
 
 export function toolTracePresentation(
@@ -277,9 +507,6 @@ export function toolTracePresentation(
   const requestedMcpIdentity = /^mcp__.+__/i.test(requestedTitle);
   if (!tool) {
     const legacyContent = fallback?.trim() || undefined;
-    const statusNeedsContext = Boolean(
-      options.status && options.status !== "done",
-    );
     const detailCard =
       options.allowLegacyFallbackOutput && legacyContent
         ? detailCardFromSections("工具详情", [
@@ -302,14 +529,14 @@ export function toolTracePresentation(
         : undefined;
     return {
       ...(options.title
-        ? { title: options.title.replace(/\s*\{\s*$/, "").trim() }
+        ? {
+            title: naturalToolTitle(
+              options.title.replace(/\s*\{\s*$/, "").trim(),
+              requestedMcpIdentity ? "mcp" : "tool",
+            ),
+          }
         : {}),
-      detail:
-        options.status === "active"
-          ? compactToolContext(fallback)
-          : statusNeedsContext
-            ? compactToolFailureContext(fallback)
-            : undefined,
+      detail: undefined,
       output: undefined,
       outputLabel: "工具输出",
       detailCard,
@@ -323,9 +550,6 @@ export function toolTracePresentation(
       ? undefined
       : tool.content?.trim();
   const active = !tool.status || tool.status === "active";
-  const failed = Boolean(
-    tool.status && tool.status !== "active" && tool.status !== "done",
-  );
   const output = active
     ? commandOutput || undefined
     : commandOutput || result || undefined;
@@ -344,13 +568,6 @@ export function toolTracePresentation(
   const providerLabel = mcpProvider
     ? providerId.replace(/^(mcp|connector):/i, "")
     : undefined;
-  const progress = active
-    ? compactToolContext(fallback) ||
-      compactToolContext(commandOutput) ||
-      compactToolContext(result)
-    : compactToolContext(result) ||
-      compactToolContext(commandOutput) ||
-      compactToolContext(fallback);
   const command = shellTool
     ? firstStringArgument(args, ["command", "cmd", "script"])
     : undefined;
@@ -368,11 +585,7 @@ export function toolTracePresentation(
   const argumentContent = sanitizedArgs
     ? JSON.stringify(sanitizedArgs, null, 2)
     : "";
-  const errorContent = tool.diagnostic
-    ? JSON.stringify(redactSensitiveValue(tool.diagnostic), null, 2)
-    : "";
   const sections: ToolTraceDetailCard["sections"] = [];
-
   if (command) {
     sections.push({
       label: "命令",
@@ -416,14 +629,6 @@ export function toolTracePresentation(
       format: knownFileTool && /^[\[{]/.test(result) ? "json" : "text",
     });
   }
-  if (errorContent) {
-    sections.push({
-      label: failed ? "错误与恢复信息" : "执行环境",
-      content: errorContent,
-      format: "json",
-      tone: failed ? "danger" : "muted",
-    });
-  }
   if (shellTool && !active && !commandOutput && !result) {
     sections.push({
       label: "输出",
@@ -431,7 +636,7 @@ export function toolTracePresentation(
       format: "text",
     });
   }
-  // Readable results lead; parameters and diagnostics stay available on demand.
+  // Readable results lead; JSON parameters stay folded on demand.
   if (mcpProvider || patch)
     sections.sort(
       (a, b) => Number(a.format === "json") - Number(b.format === "json"),
@@ -444,22 +649,9 @@ export function toolTracePresentation(
         : "工具详情",
     sections,
   );
-  const patchStats =
-    patch && !patch.truncated ? diffLineStats(patch.patch) : undefined;
-  const lineChangeDetail = patchStats
-    ? `+${patchStats.added} −${patchStats.removed} 行`
-    : undefined;
-  const preparationDetail =
-    active && /^\+\d+(?: −\d+)? 行$/.test(progress ?? "")
-      ? progress
-      : undefined;
   return {
     title: naturalToolTitle(sourceTitle, kind, args),
-    detail:
-      providerLabel ||
-      (failed
-        ? compactToolFailureContext(progress)
-        : lineChangeDetail || preparationDetail),
+    detail: providerLabel,
     output,
     outputLabel:
       kind === "terminal" ? "终端输出" : mcpProvider ? "MCP 输出" : "工具输出",
@@ -521,6 +713,8 @@ export function normalizeTracePath(path: string): string {
 export function activityBatchSummary(actions: ActivitySummaryInput[]): {
   label: string;
   detail?: string;
+  added?: number;
+  removed?: number;
 } {
   const unique = [
     ...new Map(
@@ -567,11 +761,11 @@ export function activityBatchSummary(actions: ActivitySummaryInput[]): {
     } else counts[operation]++;
   }
   const parts = [
-    readPaths.size ? `读取 ${readPaths.size} 个文件` : "",
-    counts.read ? `读取 ${counts.read} 次` : "",
-    counts.search ? `搜索 ${counts.search} 次` : "",
     editPaths.size ? `修改 ${editPaths.size} 个文件` : "",
     counts.edit ? `修改 ${counts.edit} 次` : "",
+    readPaths.size ? `探索 ${readPaths.size} 个文件` : "",
+    counts.read ? `探索 ${counts.read} 次` : "",
+    counts.search ? `搜索 ${counts.search} 次` : "",
     counts.command ? `运行 ${counts.command} 条命令` : "",
     ...[...namedOther.values()]
       .slice(0, 3)
@@ -584,18 +778,15 @@ export function activityBatchSummary(actions: ActivitySummaryInput[]): {
   const failed = unique.filter(
     (action) => action.status !== "done" && action.status !== "active",
   ).length;
-  const detail = [
-    completeDiff && (added || removed) ? `累计 +${added} −${removed}` : "",
-    failed ? `${failed} 项异常` : "",
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const showDiff = completeDiff && (added > 0 || removed > 0);
   return {
     label:
-      parts.join(" · ") ||
+      parts.join("、") ||
       (unique.some((action) => action.status === "active")
         ? "执行过程"
         : "活动记录"),
-    detail: detail || undefined,
+    added: showDiff ? added : undefined,
+    removed: showDiff ? removed : undefined,
+    detail: failed ? `${failed} 项异常` : undefined,
   };
 }

@@ -17,7 +17,11 @@ import type {
   RunNarrativeState,
   SubagentNarrativeTask,
 } from "./types";
-import { describeGlobPattern } from "./tool-display";
+import {
+  describeGlobPattern,
+  readLineRangeLabel,
+  searchActionTitle,
+} from "./tool-display";
 import { runtimeErrorMessageForDisplay } from "../runtime/error-display";
 
 const MAX_SEEN_EVENTS = 1000;
@@ -2209,41 +2213,31 @@ function readOnlyActionTitle(event: AguiEvent): string {
   switch (event.toolCallName) {
     case "Read": {
       const path = compactPathLabel(stringArg(args, "file_path") ?? "文件");
-      const offset = numberArg(args, "offset");
-      const limit = numberArg(args, "limit");
-      const range =
-        offset && limit
-          ? ` L${offset}-L${offset + limit - 1}`
-          : offset
-            ? ` from L${offset}`
-            : "";
-      return `读取 ${path}${range}`;
+      const range = readLineRangeLabel(
+        numberArg(args, "offset"),
+        numberArg(args, "limit"),
+      );
+      return `读取 ${path}${range ? ` ${range}` : ""}`;
     }
     case "Glob": {
       const pattern = stringArg(args, "pattern");
       const root = stringArg(args, "path");
-      if (pattern && root) {
-        return `搜索 ${describeGlobPattern(pattern)} · ${compactPathLabel(root)}`;
-      }
-      if (pattern) {
-        return `搜索 ${describeGlobPattern(pattern)}`;
-      }
-      return "搜索文件";
+      return searchActionTitle(
+        pattern ? describeGlobPattern(pattern) : undefined,
+        root ? compactPathLabel(root) : undefined,
+      );
     }
     case "Grep": {
       const query = stringArg(args, "pattern");
       const include = stringArg(args, "path") ?? stringArg(args, "glob");
-      if (query && include) {
-        return `搜索 "${query}" · ${compactSearchScope(include)}`;
-      }
-      if (query) {
-        return `搜索 "${query}"`;
-      }
-      return "搜索文件";
+      return searchActionTitle(
+        query,
+        include ? compactSearchScope(include) : undefined,
+      );
     }
     case "WebSearch": {
       const query = stringArg(args, "query");
-      return query ? `搜索网页 "${query}"` : "搜索网页";
+      return query ? `搜索网页 ${query}` : "搜索网页";
     }
     default:
       return event.toolCallName || "检查项目";

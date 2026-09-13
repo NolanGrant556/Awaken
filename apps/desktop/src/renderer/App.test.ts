@@ -17,6 +17,8 @@ import {
   AwakenSidebarSectionAction,
   AwakenUserPromptBlock,
   buildUserPromptCopyText,
+  promptElementExceedsCollapsedLines,
+  promptTextExceedsCollapsedLines,
   pastedImageFilesFromClipboardData,
   pluginOptionSections,
   reorderProjectIds,
@@ -84,6 +86,8 @@ import {
 } from "./sidebarThreadPresentation";
 import {
   activityBatchSummary,
+  naturalToolTitle,
+  thoughtTraceTitle,
   toolRecordIdForNarrativeItem,
   toolTracePresentation,
 } from "./toolTracePresentation";
@@ -279,8 +283,8 @@ describe("tool trace presentation", () => {
         status: "active",
       }),
     ).toEqual({
-      title: "Write",
-      detail: "Preparing tool arguments",
+      title: "写入文件",
+      detail: undefined,
       output: undefined,
       outputLabel: "工具输出",
       detailCard: undefined,
@@ -288,7 +292,7 @@ describe("tool trace presentation", () => {
     });
   });
 
-  it("keeps streamed file line counts on the same semantic tool row", () => {
+  it("keeps streamed file line counts out of the tool title", () => {
     expect(
       toolTracePresentation(
         { title: "Edit", content: "", status: "active" },
@@ -297,12 +301,12 @@ describe("tool trace presentation", () => {
       ),
     ).toMatchObject({
       title: "编辑 report.md",
-      detail: "+12 −3 行",
+      detail: undefined,
       output: undefined,
     });
   });
 
-  it("replaces provisional counts with canonical patch line totals", () => {
+  it("keeps canonical patch line totals in the detail card instead of the title", () => {
     expect(
       toolTracePresentation(
         { title: "Edit", content: "updated", status: "done" },
@@ -318,7 +322,7 @@ describe("tool trace presentation", () => {
       ),
     ).toMatchObject({
       title: "编辑 report.md",
-      detail: "+2 −1 行",
+      detail: undefined,
     });
   });
 
@@ -334,10 +338,49 @@ describe("tool trace presentation", () => {
     );
 
     expect(presentation.title).toBe("写入文件");
-    expect(presentation.detail).toBe("权限被拒绝");
-    expect(presentation.detail).not.toContain("/Users/");
+    expect(presentation.detail).toBeUndefined();
     expect(presentation.detailCard?.copyText).toContain(
       "/Users/nolan/private/report.md",
+    );
+  });
+
+  it("keeps tool results and errors out of the title row", () => {
+    const presentation = toolTracePresentation({
+      title: "browser_navigate",
+      args: JSON.stringify({ url: "http://127.0.0.1:18758/a" }),
+      content: "Browser action failed: browser_view_client not found",
+      status: "error",
+    });
+
+    expect(presentation.title).toBe("打开 127.0.0.1:18758/a");
+    expect(presentation.detail).toBeUndefined();
+    expect(JSON.stringify(presentation.title)).not.toContain(
+      "Browser action failed",
+    );
+    expect(presentation.detailCard?.copyText).toContain(
+      "Browser action failed: browser_view_client not found",
+    );
+  });
+
+  it("omits execution-environment diagnostics from the detail card", () => {
+    const presentation = toolTracePresentation({
+      title: "browser_navigate",
+      content: "Awaken Browser A\nhttp://127.0.0.1:18758/a",
+      status: "done",
+      diagnostic: {
+        capabilities: ["browser.interact"],
+        environment_snapshot_id: "env_1",
+        provider_id: "builtin:browser_navigate",
+      },
+    });
+
+    expect(presentation.detailCard?.copyText).toContain("Awaken Browser A");
+    expect(presentation.detailCard?.copyText).not.toContain("执行环境");
+    expect(presentation.detailCard?.copyText).not.toContain(
+      "environment_snapshot_id",
+    );
+    expect(presentation.detailCard?.sections.map((section) => section.label)).toEqual(
+      ["结果"],
     );
   });
 
@@ -415,15 +458,51 @@ describe("tool trace presentation", () => {
         status: "done",
       },
       undefined,
-      { title: '搜索 "Run Workbench" · Markdown 文件' },
+      { title: "Grep" },
     );
 
     expect(glob.title).toBe("搜索 PDF 文件");
     expect(glob.title).not.toContain("*");
     expect(glob.detailCard?.copyText).toContain('"pattern": "**/*.pdf"');
-    expect(grep.title).toBe('搜索 "Run Workbench" · Markdown 文件');
+    expect(grep.title).toBe("搜索 Run Workbench in Markdown 文件");
     expect(grep.title).not.toContain("*");
     expect(grep.detailCard?.copyText).toContain('"glob": "**/*.md"');
+    expect(
+      naturalToolTitle("Read", "tool", {
+        file_path: "AwakenUserPromptBlock.tsx",
+        offset: 24,
+        limit: 50,
+      }),
+    ).toBe("读取 AwakenUserPromptBlock.tsx L24-73");
+    expect(
+      naturalToolTitle("Read", "tool", {
+        file_path: "intro.md",
+        offset: 12,
+      }),
+    ).toBe("读取 intro.md L12");
+    expect(thoughtTraceTitle({ status: "active" })).toBe("思考 中");
+    expect(thoughtTraceTitle({ status: "done" })).toBe("思考 片刻");
+    expect(
+      naturalToolTitle("computer_observe", "tool", { scope: "window" }),
+    ).toBe("观察 窗口");
+    expect(
+      naturalToolTitle("computer_act", "tool", { action: "click" }),
+    ).toBe("操作 点击");
+    expect(
+      naturalToolTitle("computer_act", "tool", {
+        action: "click",
+        intent: "打开设置",
+      }),
+    ).toBe("操作 打开设置");
+    expect(
+      naturalToolTitle("WebFetch", "tool", { url: "https://example.com/docs" }),
+    ).toBe("打开 example.com/docs");
+    expect(
+      toolTracePresentation(undefined, undefined, {
+        title: "computer_observe",
+        status: "active",
+      }).title,
+    ).toBe("观察 屏幕");
   });
 
   it("keeps the MCP source identity for built-in and user-added servers", () => {
@@ -633,7 +712,7 @@ describe("activity batch presentation", () => {
         { kind: "tool", title: "读取 README", toolName: "Read", status: "done", paths: ["README"] },
         { kind: "tool", title: "搜索 package.json", toolName: "Grep", status: "done" },
       ]),
-    ).toEqual({ label: "读取 1 个文件 · 搜索 1 次", detail: undefined });
+    ).toEqual({ label: "探索 1 个文件、搜索 1 次", detail: undefined });
     expect(
       activityBatchSummary([
         { kind: "skill", title: "PDF Skill", status: "done" },
@@ -3628,7 +3707,28 @@ describe("context usage presentation", () => {
 });
 
 describe("AwakenUserPromptBlock layout contract", () => {
-  it("renders the prompt bubble as a collapsed expandable surface", () => {
+  it("collapses any prompt that exceeds three hard lines, including follow-ups", () => {
+    const first = renderToString(
+      React.createElement(AwakenUserPromptBlock, {
+        text: "1. First line\n2. Second line\n3. Third line\n4. Fourth line",
+      }),
+    );
+    const followUp = renderToString(
+      React.createElement(AwakenUserPromptBlock, {
+        text: "继续上一轮\n把折叠改到三行\n第四行开始渐隐\n不要只收第一条",
+      }),
+    );
+
+    expect(first).toContain("execution-prompt-block-limited");
+    expect(followUp).toContain("execution-prompt-block-limited");
+    expect(
+      promptTextExceedsCollapsedLines(
+        "1. First line\n2. Second line\n3. Third line\n4. Fourth line",
+      ),
+    ).toBe(true);
+  });
+
+  it("renders a longer prompt bubble as a collapsed expandable surface", () => {
     const html = renderToString(
       React.createElement(AwakenUserPromptBlock, {
         text: "1. First line\n2. Second line\n3. Third line\n4. Fourth line",
@@ -3644,19 +3744,54 @@ describe("AwakenUserPromptBlock layout contract", () => {
     expect(html).toContain("4. Fourth line");
   });
 
-  it("keeps short prompt bubbles non-expandable", () => {
-    const html = renderToString(
+  it("keeps three-line and short prompt bubbles non-collapsed until they wrap", () => {
+    const threeLine = renderToString(
+      React.createElement(AwakenUserPromptBlock, {
+        text: "First line\nSecond line\nThird line",
+      }),
+    );
+    const short = renderToString(
       React.createElement(AwakenUserPromptBlock, {
         text: "One short prompt",
       }),
     );
+    const longSingleLine = renderToString(
+      React.createElement(AwakenUserPromptBlock, {
+        text: "A".repeat(200),
+      }),
+    );
 
-    expect(html).toContain("execution-prompt-bubble");
-    expect(html).toContain("execution-prompt-bubble-text");
-    expect(html).toContain("<p");
-    expect(html).not.toContain("execution-prompt-block-limited");
-    expect(html).toContain('role="button"');
-    expect(html).toContain('aria-expanded="false"');
+    expect(threeLine).not.toContain("execution-prompt-block-limited");
+    expect(short).toContain("execution-prompt-bubble");
+    expect(short).toContain("execution-prompt-bubble-text");
+    expect(short).toContain("<p");
+    expect(short).not.toContain("execution-prompt-block-limited");
+    expect(short).toContain('role="button"');
+    expect(short).toContain('aria-expanded="false"');
+    expect(longSingleLine).not.toContain("execution-prompt-block-limited");
+    expect(promptTextExceedsCollapsedLines("First line\nSecond line\nThird line")).toBe(
+      false,
+    );
+    expect(promptTextExceedsCollapsedLines("One short prompt")).toBe(false);
+  });
+
+  it("treats rendered height overflow as collapsed even without extra hard lines", () => {
+    const element = {
+      scrollHeight: 80,
+      ownerDocument: {
+        defaultView: {
+          getComputedStyle: () => ({ lineHeight: "20px" }),
+        },
+      },
+    } as unknown as HTMLElement;
+
+    expect(promptElementExceedsCollapsedLines(element)).toBe(true);
+    expect(
+      promptElementExceedsCollapsedLines({
+        ...element,
+        scrollHeight: 60,
+      } as HTMLElement),
+    ).toBe(false);
   });
 
   it("renders structured prompt content inside the user message bubble", () => {

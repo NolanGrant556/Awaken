@@ -11,21 +11,27 @@
   gap: 6px;
   width: fit-content;
   max-width: 100%;
-  min-height: 28px;
+  min-height: 20px;
   box-sizing: border-box;
-  padding: 4px 0;
+  padding: 0;
   border: 0;
   background: transparent;
-  color: var(--aw-text-secondary);
+  color: var(--aw-text-subtle);
   font: 400 13px/20px var(--aw-font-sans);
   text-align: left;
 }
 button.thought-trace-heading {
   cursor: pointer;
 }
-button.thought-trace-heading:hover,
-button.thought-trace-heading:focus-visible {
+button.thought-trace-heading:hover .aw-trace-fact,
+button.thought-trace-heading:focus-visible .aw-trace-fact {
+  color: var(--aw-text-subtle);
+}
+.thought-trace-disclosure-label .aw-trace-verb {
   color: var(--aw-text-primary);
+}
+.thought-trace-disclosure-label .aw-trace-fact {
+  color: var(--aw-text-disabled);
 }
 .thought-trace-disclosure-icon {
   display: inline-flex;
@@ -56,7 +62,7 @@ button.thought-trace-heading:focus-visible {
   margin: 0;
   padding: 4px 0 8px;
   color: var(--aw-text-secondary);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.65;
   white-space: pre-wrap;
   overflow-wrap: anywhere;

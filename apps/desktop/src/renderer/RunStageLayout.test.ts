@@ -116,7 +116,10 @@ describe("RunStage layout", () => {
       ".execution-prompt-bubble",
     );
     expect(promptBubble).toContain(
-      "--execution-prompt-collapsed-content-height: 60px;",
+      "--execution-prompt-collapsed-fade-size: calc(0.8 * var(--aw-line-height-base));",
+    );
+    expect(promptBubble).toContain(
+      "3 * var(--aw-line-height-base) + var(--execution-prompt-collapsed-fade-size)",
     );
     expect(promptBubble).toContain("font-size: var(--aw-font-size-base);");
     expect(promptBubble).toContain("line-height: var(--aw-line-height-base);");
@@ -201,6 +204,17 @@ describe("RunStage layout", () => {
       });
     });
     expect(narrowPosition).toBe("relative");
+  });
+
+  it("keeps process rows spaced from the reply text above them", () => {
+    const workbenchStyles = readStyleSource(new URL("./styles/workbench.css", import.meta.url));
+
+    expect(workbenchStyles).toContain(
+      ".assistant-message-wrapper + :not(.assistant-message-wrapper)",
+    );
+    expect(workbenchStyles).toMatch(
+      /\.assistant-message-wrapper \+ :not\(\.assistant-message-wrapper\)[\s\S]{0,200}margin-top:\s*16px;/,
+    );
   });
 
   it("bounds the run-plan overlay between the stage top and measured composer", () => {
@@ -386,14 +400,14 @@ describe("RunStage layout", () => {
     );
     expect(collapsedText).toContain("mask-image:");
     expect(collapsedText).toContain("-webkit-mask-image:");
-    expect(collapsedText).toContain("calc(100% - 16px)");
+    expect(collapsedText).toContain("calc(100% - var(--execution-prompt-collapsed-fade-size))");
     expect(collapsedText).toContain("mask-size: 100% 100%;");
     expect(collapsedText).toContain("overflow: hidden;");
     expect(collapsedText).not.toContain(".execution-prompt-bubble::after");
     expect(collapsedText).not.toContain(".execution-prompt-bubble-main::after");
     expect(collapsedText).not.toContain(".execution-prompt-bubble-text::after");
     expect(collapsedText).not.toContain("-webkit-line-clamp");
-    expect(collapsedText).toContain("line-height: 16px;");
+    expect(collapsedText).toContain("line-height: var(--aw-line-height-base);");
 
     const copyButton = cssRule(
       designSystemStyles,
@@ -408,6 +422,18 @@ describe("RunStage layout", () => {
       ".execution-prompt-block-limited:not(.execution-prompt-block-expanded)",
     );
     expect(workbenchStyles).toContain(
+      "--execution-prompt-collapsed-fade-size: calc(0.8 * var(--aw-line-height-base));",
+    );
+    expect(workbenchStyles).toContain(
+      "3 * var(--aw-line-height-base) + var(--execution-prompt-collapsed-fade-size)",
+    );
+    expect(workbenchStyles).not.toContain(
+      "--execution-prompt-collapsed-content-height: 32px;",
+    );
+    expect(workbenchStyles).not.toContain(
+      "--execution-prompt-collapsed-content-height: 40px;",
+    );
+    expect(workbenchStyles).not.toContain(
       "--execution-prompt-collapsed-content-height: 48px;",
     );
     expect(workbenchStyles).not.toContain(

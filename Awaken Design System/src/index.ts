@@ -5,6 +5,10 @@ export {
   installAwakenFocusModality,
   type AwakenFocusModality,
 } from "./focusModality";
+export {
+  splitAwakenTraceTitle,
+  type AwakenTraceTitleParts,
+} from "./splitAwakenTraceTitle";
 export { useAwakenAutoScrollTail } from "./hooks/useAwakenAutoScrollTail";
 export type {
   PlatformKind,

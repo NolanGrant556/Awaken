@@ -115,7 +115,7 @@ export const StoredToolTraceGroup = memo(function StoredToolTraceGroup({
 
 export type StoredExecutionProcessDisclosureProps = Pick<
   AwakenDisclosureProps,
-  "title" | "children"
+  "title" | "children" | "meta"
 > & {
   disclosureKey: string;
   store: WorkbenchDisclosureStore;
@@ -127,6 +127,7 @@ export const StoredExecutionProcessDisclosure = memo(
     disclosureKey,
     store,
     title,
+    meta,
   }: StoredExecutionProcessDisclosureProps) {
     const [open, setOpen] = useWorkbenchDisclosure(store, disclosureKey);
     return (
@@ -135,7 +136,12 @@ export const StoredExecutionProcessDisclosure = memo(
           open ? " execution-process-disclosure-open" : ""
         }`}
       >
-        <Disclosure open={open} onOpenChange={setOpen} title={title}>
+        <Disclosure
+          open={open}
+          onOpenChange={setOpen}
+          title={title}
+          meta={meta}
+        >
           {children}
         </Disclosure>
       </div>

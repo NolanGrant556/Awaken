@@ -28,7 +28,7 @@ export const AwakenUserPromptBlockStates: AwakenUserPromptBlockState[] = [
     id: "follow-up",
     label: "追问提示",
     props: {
-      text: "继续上一轮修改，再检查 states 里是否还有临时示例文案。",
+      text: "继续上一轮修改。\n再检查 states 里是否还有临时示例文案。\n确认追问气泡也会折叠到两行。",
       timestampLabel: "星期六 09:53",
       timestampDateTime: "2026-09-05T01:53:00.000Z",
     } as unknown as Partial<ComponentProps<typeof AwakenUserPromptBlock>>,

@@ -15,12 +15,12 @@
   width: fit-content;
   max-width: 100%;
   min-width: 0;
-  min-height: 28px;
-  padding: 4px 0;
+  min-height: 20px;
+  padding: 0;
   box-sizing: border-box;
   border: 0;
   background: transparent;
-  color: var(--aw-text-secondary);
+  color: var(--aw-text-subtle);
   font-size: 13px;
   font-weight: 400;
   line-height: 20px;
@@ -43,6 +43,21 @@ button.tool-trace-line:focus-visible {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.aw-trace-title {
+  min-width: 0;
+}
+.aw-trace-verb {
+  color: var(--aw-text-primary);
+}
+.aw-trace-fact {
+  color: var(--aw-text-disabled);
+}
+.tool-trace-group-heading:hover .aw-trace-fact,
+.tool-trace-group-heading:focus-visible .aw-trace-fact,
+button.tool-trace-line:hover .aw-trace-fact,
+button.tool-trace-line:focus-visible .aw-trace-fact {
+  color: var(--aw-text-subtle);
 }
 .tool-trace-group-label {
   white-space: normal;
@@ -123,7 +138,7 @@ button.tool-trace-line:focus-visible {
   display: flex;
   align-items: center;
   gap: 5px;
-  min-height: 28px;
+  min-height: 20px;
   font-size: 13px;
   line-height: 20px;
 }
@@ -132,14 +147,10 @@ button.tool-trace-line:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.tool-trace-attention,
-.tool-trace-failure-label {
+.tool-trace-attention {
   color: var(--aw-status-danger-text);
   font-size: 12px;
   line-height: 20px;
-}
-.tool-trace-failure-label {
-  flex: 0 0 auto;
 }
 .tool-trace-file-link,
 .tool-trace-detail-toggle,
@@ -186,26 +197,9 @@ button.tool-trace-line:focus-visible {
   background: var(--aw-surface-code);
   overflow: hidden;
 }
-.tool-trace-output-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 3px 8px;
-  color: var(--aw-text-secondary);
-}
-.tool-trace-output-copy {
-  display: grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-}
 .tool-trace-output-truncated {
+  display: block;
+  padding: 6px 10px 8px;
   font-size: 12px;
   color: var(--aw-status-warning-text);
 }

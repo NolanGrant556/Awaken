@@ -25,11 +25,9 @@ import type {
   DeliverableFile,
   RunNarrativeItem,
 } from "./run-narrative";
-import { RunElapsedTime } from "./RunElapsedTime";
 import type { RuntimeViewState } from "./runtime/reducer";
 import {
   StoredExecutionProcessDisclosure,
-  StoredToolTraceGroup,
   StoredToolTraceLine,
   StoredThoughtTrace,
 } from "./StoredExecutionDisclosures";
@@ -37,11 +35,13 @@ import { subagentElapsedMs } from "./subagentPresentation";
 import { toolResultPatch } from "./tracePatch";
 import {
   activityBatchSummary,
+  type ActivitySummaryInput,
   detailCardFromSections,
   toolRecordIdForNarrativeItem,
   rawToolId,
   argumentRecord,
   firstStringArgument,
+  thoughtTraceTitle,
   traceOperation,
   normalizeTracePath,
   ToolTraceActionCacheEntry,
@@ -298,7 +298,9 @@ export function useNarrativeRenderer(options: Options) {
         }
         return {
           id: item.id,
-          title: item.title.replace(/\s*\{\s*$/, "").trim(),
+          title: item.title.startsWith("使用 ")
+            ? item.title.replace(/\s*\{\s*$/, "").trim()
+            : `使用 ${item.title.replace(/\s*\{\s*$/, "").trim()}`,
           status: item.status,
           kind: "skill",
           detailCard: detailCardFromSections("Skill 详情", sections),
@@ -334,7 +336,9 @@ export function useNarrativeRenderer(options: Options) {
           });
         return {
           id: item.id,
-          title: item.title,
+          title: item.title.startsWith("钩子 ")
+            ? item.title
+            : `钩子 ${item.title.replace(/^Hook\s*·\s*/i, "")}`,
           status: item.status,
           kind: "terminal",
           detailCard: detailCardFromSections("Hook 详情", sections),
@@ -347,12 +351,11 @@ export function useNarrativeRenderer(options: Options) {
     );
   }
 
-  function actionsForActivityBatch(
-    batch: NarrativeActivityBatch,
+  function actionsForNarrativeItems(
+    items: RunNarrativeItem[],
     animateToolEntry: boolean,
   ): ToolTraceAction[] {
-    return batch.items.flatMap((item) => {
-      if (item.kind === "thinking" || item.kind === "planning") return [];
+    return items.flatMap((item) => {
       if (item.kind === "exploring") {
         return item.actions.map((action) =>
           toolTraceActionFor(
@@ -369,7 +372,58 @@ export function useNarrativeRenderer(options: Options) {
       if (item.kind === "hook") {
         return [hookTraceAction(item, animateEntry)];
       }
-      return [toolTraceActionFor(item, animateEntry)];
+      if (item.kind === "tool") {
+        return [toolTraceActionFor(item, animateEntry)];
+      }
+      return [];
+    });
+  }
+
+  function actionsForActivityBatch(
+    batch: NarrativeActivityBatch,
+    animateToolEntry: boolean,
+  ): ToolTraceAction[] {
+    return actionsForNarrativeItems(batch.items, animateToolEntry);
+  }
+
+  function summaryInputsForActions(
+    actions: ToolTraceAction[],
+  ): ActivitySummaryInput[] {
+    return actions.map((action) => {
+      const id = rawToolId(action.id);
+      const record =
+        toolResultsById.get(id) ??
+        toolResultsById.get(toolRecordIdForNarrativeItem(action));
+      const patch =
+        patchPreviewsById.get(id) ??
+        patchPreviewsById.get(toolRecordIdForNarrativeItem(action)) ??
+        toolResultPatch(record);
+      const args = argumentRecord(record?.args);
+      const path = firstStringArgument(args, [
+        "file_path",
+        "path",
+        "filePath",
+      ]);
+      const paths = patch?.affectedPaths.length
+        ? patch.affectedPaths
+        : path
+          ? [path]
+          : [];
+      return {
+        id: action.id,
+        kind: action.kind ?? "tool",
+        title: action.title,
+        status: action.status,
+        toolName: record?.title,
+        patch,
+        paths: paths.map((path) =>
+          normalizeTracePath(
+            !/^(?:[/\\]|[A-Za-z]:)/.test(path) && options.traceRoot
+              ? `${options.traceRoot}/${path}`
+              : path,
+          ),
+        ),
+      };
     });
   }
 
@@ -412,44 +466,6 @@ export function useNarrativeRenderer(options: Options) {
         const actionsById = new Map(
           actions.map((action) => [action.id, action]),
         );
-        const summary = activityBatchSummary(
-          actions.map((action) => {
-            const id = rawToolId(action.id);
-            const record =
-              toolResultsById.get(id) ??
-              toolResultsById.get(toolRecordIdForNarrativeItem(action));
-            const patch =
-              patchPreviewsById.get(id) ??
-              patchPreviewsById.get(toolRecordIdForNarrativeItem(action)) ??
-              toolResultPatch(record);
-            const args = argumentRecord(record?.args);
-            const path = firstStringArgument(args, [
-              "file_path",
-              "path",
-              "filePath",
-            ]);
-            const paths = patch?.affectedPaths.length
-              ? patch.affectedPaths
-              : path
-                ? [path]
-                : [];
-            return {
-              id: action.id,
-              kind: action.kind ?? "tool",
-              title: action.title,
-              status: action.status,
-              toolName: record?.title,
-              patch,
-              paths: paths.map((path) =>
-                normalizeTracePath(
-                  !/^(?:[/\\]|[A-Za-z]:)/.test(path) && options.traceRoot
-                    ? `${options.traceRoot}/${path}`
-                    : path,
-                ),
-              ),
-            };
-          }),
-        );
         const entries = segment.items.flatMap<{
           id: string;
           action?: ToolTraceAction;
@@ -461,62 +477,14 @@ export function useNarrativeRenderer(options: Options) {
           if (item.kind === "exploring")
             return item.actions.map((action) => ({
               id: action.id,
-              action: actionsById.get(action.id)!,
+              action: actionsById.get(action.id),
             }));
           if (item.kind === "thinking" || item.kind === "planning")
             return [{ id: item.id, thought: item }];
-          return [{ id: item.id, action: actionsById.get(item.id)! }];
-        }) as Array<{
-          id: string;
-          action?: ToolTraceAction;
-          thought?: Extract<
-            RunNarrativeItem,
-            { kind: "thinking" | "planning" }
-          >;
-        }>;
-        const active = entries.filter(
-          (entry) =>
-            (entry.action?.status ?? entry.thought?.status) === "active",
-        );
-        const last = active.at(-1);
-        const currentLabel = last?.thought
-          ? last.thought.kind === "planning" && last.thought.phase
-            ? last.thought.text
-            : "思考中"
-          : last?.action
-            ? `正在${last.action.title.replace(/^正在/, "")}`
-            : undefined;
-        const failures = actions.filter(
-          (action) => action.status !== "active" && action.status !== "done",
-        );
+          return [{ id: item.id, action: actionsById.get(item.id) }];
+        });
         return (
-          <StoredToolTraceGroup
-            key={segment.id}
-            disclosureKey={`${scope}:${segment.id}`}
-            store={workbenchDisclosureStore}
-            actions={actions}
-            replayed={!animateToolEntry}
-            label={summary.label}
-            detail={summary.detail}
-            entryCount={entries.length}
-            activityStatus={active.length ? "active" : "done"}
-            currentActivity={
-              currentLabel
-                ? `${currentLabel}${active.length > 1 ? ` · 另有 ${active.length - 1} 项进行中` : ""}`
-                : undefined
-            }
-            attention={
-              failures.length
-                ? failures
-                    .map(
-                      (action) =>
-                        `${action.title}：${action.detail || "未成功完成"}`,
-                    )
-                    .join("；")
-                : undefined
-            }
-            animateItems={false}
-          >
+          <div key={segment.id} className="execution-activity-list">
             {entries.map((entry) =>
               entry.thought ? (
                 <StoredThoughtTrace
@@ -527,22 +495,18 @@ export function useNarrativeRenderer(options: Options) {
                     entry.thought.kind === "planning" ? "" : entry.thought.text
                   }
                   status={entry.thought.status}
-                  label={
-                    entry.thought.kind === "planning" && entry.thought.phase
-                      ? entry.thought.text
-                      : undefined
-                  }
+                  label={thoughtTraceTitle(entry.thought)}
                   animateEntry={false}
                 />
-              ) : (
+              ) : entry.action ? (
                 renderStoredToolTraceLine(
-                  entry.action!,
+                  entry.action,
                   entry.id,
                   `${entryKey(entry.id)}:tool`,
                 )
-              ),
+              ) : null,
             )}
-          </StoredToolTraceGroup>
+          </div>
         );
       },
     );
@@ -564,7 +528,7 @@ export function useNarrativeRenderer(options: Options) {
           animateEntry={
             animateToolEntry && !replayedNarrativeItemIds.has(item.id)
           }
-          label={item.kind === "planning" && item.phase ? item.text : undefined}
+          label={thoughtTraceTitle(item)}
           theme={appearanceTheme}
         />
       );
@@ -629,16 +593,15 @@ export function useNarrativeRenderer(options: Options) {
         );
       }
       return (
-        <StoredToolTraceGroup
-          key={key}
-          disclosureKey={`${disclosureKey}:batch`}
-          store={workbenchDisclosureStore}
-          actions={actions}
-          replayed={item.actions.every((action) =>
-            replayedNarrativeItemIds.has(action.id),
+        <div key={key} className="execution-activity-list">
+          {actions.map((action) =>
+            renderStoredToolTraceLine(
+              action,
+              action.id,
+              `${disclosureKey}:tool:${action.id}`,
+            ),
           )}
-          animateItems={animateToolEntry}
-        />
+        </div>
       );
     }
     if (item.kind === "tool") {
@@ -984,7 +947,7 @@ export function useNarrativeRenderer(options: Options) {
   function renderTurnBodySegment(
     turnId: string,
     segment: NarrativeTurnBodySegment,
-    timing: {
+    _timing: {
       startedAtMs?: number;
       completedAtMs?: number;
       running: boolean;
@@ -1006,10 +969,31 @@ export function useNarrativeRenderer(options: Options) {
       );
     }
 
-    const hasElapsedTime =
-      segment.elapsedMs !== undefined ||
-      (timing.startedAtMs !== undefined &&
-        (timing.running || timing.completedAtMs !== undefined));
+    const summary = activityBatchSummary(
+      summaryInputsForActions(
+        actionsForNarrativeItems(segment.items, false),
+      ),
+    );
+    const processMeta =
+      summary.added != null ||
+      summary.removed != null ||
+      summary.detail ? (
+        <span className="execution-process-diff">
+          {summary.added != null ? (
+            <span className="execution-process-diff-add">+{summary.added}</span>
+          ) : null}
+          {summary.removed != null ? (
+            <span className="execution-process-diff-remove">
+              −{summary.removed}
+            </span>
+          ) : null}
+          {summary.detail ? (
+            <span className="execution-process-diff-failed">
+              {summary.detail}
+            </span>
+          ) : null}
+        </span>
+      ) : undefined;
 
     return [
       <StoredExecutionProcessDisclosure
@@ -1018,18 +1002,10 @@ export function useNarrativeRenderer(options: Options) {
         store={workbenchDisclosureStore}
         title={
           <span className="execution-process-disclosure-title">
-            {hasElapsedTime ? (
-              <RunElapsedTime
-                elapsedMs={segment.elapsedMs}
-                startedAtMs={timing.startedAtMs}
-                completedAtMs={timing.completedAtMs}
-                running={timing.running}
-              />
-            ) : (
-              segment.title
-            )}
+            {summary.label}
           </span>
         }
+        meta={processMeta}
       >
         <div className="execution-process-disclosure-body">
           {renderNarrativeActivityItems(

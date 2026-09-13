@@ -8,6 +8,7 @@ import {
 import {
   Fragment,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ClipboardEvent as ReactClipboardEvent,
@@ -23,6 +24,27 @@ import { AwakenTooltip } from "../AwakenTooltip";
 const collapsedAttachmentLimit = 3;
 const expandDragThresholdPx = 4;
 const PROMPT_TOKEN_SELECTED_ATTRIBUTE = "data-prompt-token-selected";
+export const PROMPT_COLLAPSED_LINE_COUNT = 3;
+export const PROMPT_COLLAPSED_LINE_HEIGHT_PX = 20;
+
+export function promptTextExceedsCollapsedLines(text: string): boolean {
+  return text.split(/\r\n|\r|\n/).length > PROMPT_COLLAPSED_LINE_COUNT;
+}
+
+export function promptElementExceedsCollapsedLines(element: HTMLElement): boolean {
+  const scrollHeight = element.scrollHeight;
+  if (scrollHeight <= 0) {
+    return false;
+  }
+  const lineHeight = Number.parseFloat(
+    element.ownerDocument.defaultView?.getComputedStyle(element).lineHeight ?? "",
+  );
+  const collapsedHeight =
+    Number.isFinite(lineHeight) && lineHeight > 0
+      ? lineHeight * PROMPT_COLLAPSED_LINE_COUNT
+      : PROMPT_COLLAPSED_LINE_HEIGHT_PX * PROMPT_COLLAPSED_LINE_COUNT;
+  return scrollHeight > collapsedHeight + 1;
+}
 
 export function syncPromptTokenSelection(root: HTMLElement): void {
   const selection = root.ownerDocument.defaultView?.getSelection();
@@ -226,7 +248,9 @@ export function AwakenUserPromptBlock({
   timestampDateTime,
 }: AwakenUserPromptBlockProps) {
   const [uncontrolledExpanded, setUncontrolledExpanded] = useState(false);
+  const [hasVisualOverflow, setHasVisualOverflow] = useState(false);
   const blockRef = useRef<HTMLElement | null>(null);
+  const textRef = useRef<HTMLParagraphElement | null>(null);
   const selectRootRef = useRef<HTMLDivElement | null>(null);
   const pointerGestureRef = useRef<{
     x: number;
@@ -238,8 +262,7 @@ export function AwakenUserPromptBlock({
     .join("")}${text}`;
   const resolvedCopyText = copyText ?? buildUserPromptCopyText({ text, tokens, attachments });
   const canExpandText =
-    visiblePromptText.split(/\r\n|\r|\n/).length > 3 ||
-    visiblePromptText.trim().length > 160;
+    promptTextExceedsCollapsedLines(visiblePromptText) || hasVisualOverflow;
   const hasHiddenAttachments = attachments.length > collapsedAttachmentLimit;
   const hasPromptPayload =
     text.trim().length > 0 || tokens.length > 0 || attachments.length > 0;
@@ -278,6 +301,31 @@ export function AwakenUserPromptBlock({
       document.removeEventListener("pointerdown", handleDocumentPointerDown);
     };
   }, [isExpanded, expanded, onExpandedChange]);
+
+  useLayoutEffect(() => {
+    const textElement = textRef.current;
+    const blockElement = blockRef.current;
+    if (!textElement) {
+      setHasVisualOverflow(false);
+      return;
+    }
+
+    const measure = () => {
+      const next = promptElementExceedsCollapsedLines(textElement);
+      setHasVisualOverflow((current) => (current === next ? current : next));
+    };
+
+    measure();
+    if (typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const observer = new ResizeObserver(measure);
+    observer.observe(textElement);
+    if (blockElement) {
+      observer.observe(blockElement);
+    }
+    return () => observer.disconnect();
+  }, [visiblePromptText, isExpanded, editing]);
 
   useEffect(() => {
     const selectRoot = selectRootRef.current;
@@ -561,6 +609,7 @@ export function AwakenUserPromptBlock({
           {tokens.length > 0 || text.trim().length > 0 ? (
             <div className="execution-prompt-bubble-main">
               <p
+                ref={textRef}
                 className="execution-prompt-bubble-text aw-text-selectable"
                 data-aw-run-stage-scroll-boundary=""
               >

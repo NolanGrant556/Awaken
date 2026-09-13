@@ -161,8 +161,10 @@ describe("Cursor-style execution stages", () => {
       },
     ];
     expect(activityBatchSummary([...actions, actions[2]])).toEqual({
-      label: "读取 1 个文件 · 修改 1 个文件",
-      detail: "累计 +1 −1",
+      label: "修改 1 个文件、探索 1 个文件",
+      added: 1,
+      removed: 1,
+      detail: undefined,
     });
     expect(
       activityBatchSummary([
@@ -249,19 +251,10 @@ describe("Cursor-style execution stages", () => {
       },
     ];
     await act(async () => root.render(<Feed items={items} />));
-    expect(
-      container
-        .querySelector(".tool-trace-group-heading")
-        ?.getAttribute("aria-expanded"),
-    ).toBe("false");
-    expect(container.querySelectorAll(".tool-trace-current")).toHaveLength(1);
-    await act(async () =>
-      container
-        .querySelector<HTMLButtonElement>(".tool-trace-group-heading")!
-        .click(),
-    );
+    expect(container.querySelector(".tool-trace-group-heading")).toBeNull();
+    expect(container.querySelector(".execution-activity-list")).not.toBeNull();
     expect(container.textContent).toContain("已有记录");
-    expect(container.querySelector(".tool-trace-current")).toBeNull();
+    expect(container.textContent).toContain("思考 中");
     await act(async () =>
       container
         .querySelector<HTMLButtonElement>(".thought-trace-heading")!
@@ -279,8 +272,11 @@ describe("Cursor-style execution stages", () => {
       ".aw-disclosure-trigger",
     );
     expect(process).not.toBeNull();
+    expect(process?.textContent).not.toContain("执行时间");
+    expect(process?.textContent).toContain("使用 1 次工具或技能");
     await act(async () => process!.click());
     expect(container.textContent).toContain("进一步分析");
+    expect(container.textContent).toContain("思考 片刻");
     expect(container.querySelector(".aw-trace-dots")).toBeNull();
   });
 

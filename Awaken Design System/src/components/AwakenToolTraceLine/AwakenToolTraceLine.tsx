@@ -3,6 +3,8 @@ import { memo, useId, useState, type ReactNode } from "react";
 
 import { AwakenIcon } from "../AwakenIcon";
 import { useAwakenDisclosurePresence } from "../../hooks/useAwakenDisclosurePresence";
+import { splitAwakenTraceTitle } from "../../splitAwakenTraceTitle";
+import { AwakenTraceTitle } from "../AwakenTraceTitle";
 import { TraceDiff } from "./TraceDiff";
 
 export type ToolTraceStatus =
@@ -45,6 +47,7 @@ export type AwakenToolTraceLineProps = {
   defaultOpen?: boolean;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  /** Kept for API compatibility; the detail card no longer renders a copy control. */
   onCopyDetail?: (copyText: string) => void;
   /** Disable the mount animation when a consumer reveals already-finished history. */
   animateEntry?: boolean;
@@ -65,7 +68,6 @@ export const AwakenToolTraceLine = memo(function AwakenToolTraceLine({
   defaultOpen,
   open,
   onOpenChange,
-  onCopyDetail,
   animateEntry = true,
   onSelect,
   fileLabel,
@@ -102,26 +104,14 @@ export const AwakenToolTraceLine = memo(function AwakenToolTraceLine({
     onSelect?.();
   }
 
-  const failureLabel =
-    status !== "active" && status !== "done" ? (
-      <span className="tool-trace-failure-label">
-        {
-          {
-            error: "失败",
-            denied: "未获授权",
-            cancelled: "已取消",
-            interrupted: "已中断",
-            blocked: "待处理",
-            unsupported: "不支持",
-          }[status]
-        }
-      </span>
-    ) : null;
+  const { verb, fact } = splitAwakenTraceTitle(title);
+  const titleNode = <AwakenTraceTitle title={title} />;
+  const fileFact = fileLabel || fact || verb;
 
   const rowContent = (
     <>
       <span className="tool-trace-line-copy">
-        <span className="tool-trace-line-title">{title}</span>
+        <span className="tool-trace-line-title">{titleNode}</span>
         {detail ? (
           <span className="tool-trace-line-detail">{detail}</span>
         ) : null}
@@ -133,7 +123,6 @@ export const AwakenToolTraceLine = memo(function AwakenToolTraceLine({
           <i />
         </span>
       ) : null}
-      {failureLabel}
       <span
         className="tool-trace-line-chevron"
         aria-hidden="true"
@@ -156,15 +145,27 @@ export const AwakenToolTraceLine = memo(function AwakenToolTraceLine({
     >
       {onOpenFile ? (
         <div className={`${lineClassName} tool-trace-file-row`}>
-          <button
-            type="button"
-            className="tool-trace-file-link"
-            title="打开当前磁盘文件"
-            aria-label={`打开文件 ${fileLabel || title}`}
-            onClick={onOpenFile}
-          >
-            {title}
-          </button>
+          <span className="tool-trace-line-copy">
+            <span className="tool-trace-line-title">
+              <span className="aw-trace-title">
+                <span className="aw-trace-verb">{verb}</span>
+                {fact || fileLabel ? (
+                  <>
+                    {" "}
+                    <button
+                      type="button"
+                      className="tool-trace-file-link aw-trace-fact"
+                      title="打开当前磁盘文件"
+                      aria-label={`打开文件 ${fileFact}`}
+                      onClick={onOpenFile}
+                    >
+                      {fileFact}
+                    </button>
+                  </>
+                ) : null}
+              </span>
+            </span>
+          </span>
           {detail ? (
             <span className="tool-trace-line-detail">{detail}</span>
           ) : null}
@@ -175,7 +176,6 @@ export const AwakenToolTraceLine = memo(function AwakenToolTraceLine({
               <i />
             </span>
           ) : null}
-          {failureLabel}
           {hasDetail ? (
             <button
               type="button"
@@ -220,25 +220,6 @@ export const AwakenToolTraceLine = memo(function AwakenToolTraceLine({
                 aria-label={detailLabel}
                 data-output-truncated={outputTruncated ? "true" : "false"}
               >
-                {outputTruncated || (detailCard?.copyText && onCopyDetail) ? (
-                  <div className="tool-trace-output-actions">
-                    {outputTruncated ? (
-                      <span className="tool-trace-output-truncated">
-                        内容已截断
-                      </span>
-                    ) : null}
-                    {detailCard?.copyText && onCopyDetail ? (
-                      <button
-                        type="button"
-                        className="tool-trace-output-copy"
-                        aria-label="复制详情"
-                        onClick={() => onCopyDetail(detailCard.copyText || "")}
-                      >
-                        <AwakenIcon concept="copy" size={14} />
-                      </button>
-                    ) : null}
-                  </div>
-                ) : null}
                 {detailCard ? (
                   <div
                     className="tool-trace-detail-sections"
@@ -281,6 +262,9 @@ export const AwakenToolTraceLine = memo(function AwakenToolTraceLine({
                     {output}
                   </pre>
                 )}
+                {outputTruncated ? (
+                  <span className="tool-trace-output-truncated">内容已截断</span>
+                ) : null}
               </section>
             </div>
           ) : null}

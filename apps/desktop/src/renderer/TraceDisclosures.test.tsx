@@ -56,7 +56,7 @@ describe("execution trace disclosures", () => {
           ? <AwakenThoughtTrace key={item.id} text={item.text} status={item.status} /> : null)} />;
       await act(async () => root.render(renderPanel()));
       expect(container.querySelector(".thought-trace-active")).not.toBeNull();
-      expect(container.textContent).toContain("思考中");
+      expect(container.textContent).toContain("思考 中");
 
       state = reduceRuntimeState(state, { type: "run/event", event: {
         ...identity, type: "AWAKEN_SUBAGENT_CHANGED", subagentStatus: status,
@@ -65,8 +65,8 @@ describe("execution trace disclosures", () => {
       await act(async () => root.render(renderPanel()));
       expect(container.querySelector(".thought-trace-active")).toBeNull();
       expect(container.querySelector(".thought-trace-status")).toBeNull();
-      expect(container.textContent).not.toContain("思考中");
-      expect(container.textContent).toContain("思考过程");
+      expect(container.textContent).not.toContain("思考 中");
+      expect(container.textContent).toContain("思考 片刻");
       if (status !== "completed") expect(container.querySelector('[role="alert"]')?.textContent).toContain(`subagent_${status}`);
       await act(async () => container.querySelector<HTMLButtonElement>(".thought-trace-heading")?.click());
       expect(container.querySelector(".thought-trace-body p")?.textContent).toBe("已读取24块，480行");
@@ -92,7 +92,7 @@ describe("execution trace disclosures", () => {
       );
     });
     expect(heading?.getAttribute("aria-expanded")).toBe("false");
-    expect(heading?.textContent).toContain("思考过程");
+    expect(heading?.textContent).toContain("思考 片刻");
 
     await act(async () => heading?.click());
     expect(heading?.getAttribute("aria-expanded")).toBe("true");
@@ -290,12 +290,11 @@ describe("execution trace disclosures", () => {
       expect(container.querySelector(".tool-trace-line-icon")).toBeNull();
       expect(container.textContent).toContain("查询订单");
       expect(Boolean(container.querySelector(".aw-trace-dots"))).toBe(status === "active");
-      if (status === "error") expect(container.textContent).toContain("失败");
+      expect(container.textContent).not.toContain("失败");
     }
   });
 
-  it("renders structured selectable detail sections and invokes the copy callback", async () => {
-    const onCopyDetail = vi.fn();
+  it("renders structured selectable detail sections without a copy chrome row", async () => {
     await act(async () => {
       root.render(
         <AwakenToolTraceLine
@@ -315,7 +314,6 @@ describe("execution trace disclosures", () => {
               },
             ],
           }}
-          onCopyDetail={onCopyDetail}
         />,
       );
     });
@@ -330,17 +328,13 @@ describe("execution trace disclosures", () => {
       container.querySelector(".tool-trace-output-card")?.textContent,
     ).not.toContain("Shell 详情");
     expect(container.querySelector(".tool-trace-output-heading")).toBeNull();
+    expect(container.querySelector(".tool-trace-output-actions")).toBeNull();
+    expect(container.querySelector(".tool-trace-output-copy")).toBeNull();
     expect(
       container
         .querySelector(".tool-trace-detail-sections")
         ?.hasAttribute("data-aw-run-stage-scroll-boundary"),
     ).toBe(true);
-    await act(async () =>
-      container
-        .querySelector<HTMLButtonElement>(".tool-trace-output-copy")
-        ?.click(),
-    );
-    expect(onCopyDetail).toHaveBeenCalledWith("$ npm test\n4 tests passed");
   });
 
 

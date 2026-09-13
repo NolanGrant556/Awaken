@@ -19,4 +19,4 @@
 - 仅包含 UI：不产生 runtime、Electron、AG-UI、A2UI 或文件系统副作用。
 - 通过 props 输入，通过回调输出。
 - 公共 API 变化时同步更新可观测状态。
-- 原 `awaken-disclosure` URL 跳转到 `awaken-tool-trace`，用于观察 Desktop 中“执行时间”兼任过程标题并收纳工具轨迹的真实组合。
+- 原 `awaken-disclosure` URL 跳转到 `awaken-tool-trace`，用于观察 Desktop 中过程 disclosure 以活动统计为标题并收纳扁平行轨迹的真实组合。

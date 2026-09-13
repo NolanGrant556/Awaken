@@ -482,6 +482,105 @@ describe("FilePreviewHost", () => {
     expect(container.querySelector(".project-file-preview-heading")).toBeNull();
   });
 
+  it("activates a local view so the empty workbench can still show a page", async () => {
+    const idleState = {
+      url: "",
+      title: "",
+      canGoBack: false,
+      canGoForward: false,
+      loading: false,
+      secure: false,
+      hasPage: false,
+    };
+    let emitState:
+      | ((payload: {
+          viewId: string;
+          threadId: string;
+          state: typeof idleState & { url: string; hasPage: boolean };
+        }) => void)
+      | undefined;
+    const setActive = vi.fn(async () => undefined);
+    const navigate = vi.fn(async (ref: { threadId: string; viewId: string }, url: string) => {
+      const next = { ...idleState, url, hasPage: true };
+      emitState?.({ ...ref, state: next });
+      return next;
+    });
+    const embeddedBrowser = {
+      navigate,
+      back: vi.fn(async () => idleState),
+      forward: vi.fn(async () => idleState),
+      reload: vi.fn(async () => idleState),
+      stop: vi.fn(async () => idleState),
+      close: vi.fn(async () => undefined),
+      getState: vi.fn(async () => idleState),
+      setViewport: vi.fn(async () => undefined),
+      setActive,
+      onStateChanged: vi.fn((handler) => {
+        emitState = handler;
+        return () => {
+          emitState = undefined;
+        };
+      }),
+      onGuestHttpNavigate: vi.fn(() => () => {}),
+    };
+
+    await act(async () => {
+      root.render(
+        <FilePreviewHost
+          runtimeClient={{
+            startProjectFilePreview: vi.fn(),
+            closeProjectFilePreview: vi.fn(async () => undefined),
+            openProjectFileExternally: vi.fn(async () => ({
+              ok: true as const,
+            })),
+            revealProjectFile: vi.fn(async () => ({ ok: true as const })),
+            saveProjectMarkdownFile: vi.fn(async () => ({
+              ok: true as const,
+              byteLength: 0,
+            })),
+          }}
+          mode="browser"
+          onModeChange={vi.fn()}
+          viewId="project-file-slot:9"
+          embeddedBrowser={embeddedBrowser}
+        />,
+      );
+    });
+
+    expect(setActive).toHaveBeenCalledWith({
+      threadId: "local",
+      viewId: "project-file-slot:9",
+    });
+
+    const input = container.querySelector(
+      'input[aria-label="当前地址"]',
+    ) as HTMLInputElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        "value",
+      )?.set;
+      setter?.call(input, "http://127.0.0.1:8765/");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      container
+        .querySelector("form.embedded-browser__toolbar")
+        ?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+
+    expect(navigate).toHaveBeenCalledWith(
+      { threadId: "local", viewId: "project-file-slot:9" },
+      "http://127.0.0.1:8765/",
+    );
+    const page = container.querySelector(".embedded-browser__page");
+    expect(page).not.toBeNull();
+    expect(page?.querySelector(".project-files-preview-empty")).toBeNull();
+    expect(
+      container.querySelector(".project-files-preview-empty")?.closest("[hidden]"),
+    ).not.toBeNull();
+  });
+
   it("keeps an Office webview mounted while switching between browser and files", async () => {
     let interactionHandler:
       | ((interaction: { previewId: string; type: "primary-click" }) => void)

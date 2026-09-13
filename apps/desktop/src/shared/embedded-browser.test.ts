@@ -3,9 +3,12 @@ import {
   browserActionAllowed,
   deriveBrowserState,
   EMBEDDED_BROWSER_PARTITION,
+  LOCAL_EMBEDDED_BROWSER_THREAD_ID,
+  LOCAL_EMBEDDED_BROWSER_VIEW_ID,
   normalizeBrowserAddressInput,
   originOf,
   parseNavigable,
+  resolveEmbeddedBrowserTabRef,
   safeExternalUrl,
   viewportBounds,
 } from "./embedded-browser.js";
@@ -162,5 +165,33 @@ describe("session isolation", () => {
     expect(EMBEDDED_BROWSER_PARTITION).toBe("persist:awaken-browser");
     expect(EMBEDDED_BROWSER_PARTITION.startsWith("awaken-preview")).toBe(false);
     expect(EMBEDDED_BROWSER_PARTITION.includes("preview")).toBe(false);
+  });
+});
+
+describe("resolveEmbeddedBrowserTabRef", () => {
+  it("keeps a real thread and inspector slot", () => {
+    expect(
+      resolveEmbeddedBrowserTabRef({
+        threadId: "thread-1",
+        viewId: "project-file-slot:1",
+      }),
+    ).toEqual({ threadId: "thread-1", viewId: "project-file-slot:1" });
+  });
+
+  it("uses a local workbench key when no conversation exists yet", () => {
+    expect(resolveEmbeddedBrowserTabRef({})).toEqual({
+      threadId: LOCAL_EMBEDDED_BROWSER_THREAD_ID,
+      viewId: LOCAL_EMBEDDED_BROWSER_VIEW_ID,
+    });
+    expect(resolveEmbeddedBrowserTabRef({ threadId: "  ", viewId: "" })).toEqual({
+      threadId: LOCAL_EMBEDDED_BROWSER_THREAD_ID,
+      viewId: LOCAL_EMBEDDED_BROWSER_VIEW_ID,
+    });
+    expect(
+      resolveEmbeddedBrowserTabRef({ viewId: "project-file-slot:2" }),
+    ).toEqual({
+      threadId: LOCAL_EMBEDDED_BROWSER_THREAD_ID,
+      viewId: "project-file-slot:2",
+    });
   });
 });

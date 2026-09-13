@@ -11,6 +11,7 @@ function fakeController() {
       controller.hasViewport = false;
     }),
     loadsLocalFiles: false,
+    ownsGuest: vi.fn(() => false),
     setBounds: vi.fn((rect: { width: number; height: number } | null) => {
       controller.shown = Boolean(rect && rect.width > 0 && rect.height > 0);
       controller.hasViewport = controller.shown;
@@ -39,6 +40,8 @@ function fakeController() {
   return controller;
 }
 
+const guest = {} as never;
+
 describe("EmbeddedBrowserViewManager", () => {
   it("keeps thread pages isolated and hides inactive views", async () => {
     const created: ReturnType<typeof fakeController>[] = [];
@@ -57,7 +60,9 @@ describe("EmbeddedBrowserViewManager", () => {
     const first = { viewId: "slot:1", threadId: "thread-a" };
     const second = { viewId: "slot:1", threadId: "thread-b" };
     await manager.navigate(first, "https://one.example/");
+    manager.attachGuest(first, guest, false);
     await manager.navigate(second, "https://two.example/");
+    manager.attachGuest(second, guest, false);
     expect(created).toHaveLength(2);
     expect(created[0].hide).toHaveBeenCalled();
     expect(created[1].navigate).toHaveBeenCalledWith("https://two.example/");
@@ -68,7 +73,7 @@ describe("EmbeddedBrowserViewManager", () => {
     expect(created[0].setBounds).toHaveBeenCalled();
   });
 
-  it("hides the active covering page when the renderer reloads", async () => {
+  it("drops guests when the renderer reloads", async () => {
     const created: ReturnType<typeof fakeController>[] = [];
     const manager = new EmbeddedBrowserViewManager({
       getWindow: () => ({ isDestroyed: () => false }) as never,
@@ -84,19 +89,19 @@ describe("EmbeddedBrowserViewManager", () => {
 
     const first = { viewId: "slot:1", threadId: "thread-a" };
     await manager.navigate(first, "https://one.example/");
+    manager.attachGuest(first, guest, false);
     manager.setActive(first);
     manager.setViewport(first, { x: 10, y: 20, width: 400, height: 300 });
     expect(created[0].shown).toBe(true);
 
     manager.hideAll();
-    expect(created[0].hide).toHaveBeenCalled();
-    expect(created[0].shown).toBe(false);
+    expect(created[0].destroy).toHaveBeenCalled();
 
     manager.setViewport(first, { x: 10, y: 20, width: 400, height: 300 });
-    expect(created[0].shown).toBe(false);
+    expect(created[0].setBounds).toHaveBeenCalledTimes(1);
   });
 
-  it("opens local HTML on an isolated view and does not keep the public web session", async () => {
+  it("opens local HTML on an isolated guest and does not keep the public web session", async () => {
     const created: ReturnType<typeof fakeController>[] = [];
     const manager = new EmbeddedBrowserViewManager({
       getWindow: () => ({ isDestroyed: () => false }) as never,
@@ -112,15 +117,31 @@ describe("EmbeddedBrowserViewManager", () => {
 
     const first = { viewId: "slot:1", threadId: "thread-a" };
     await manager.navigate(first, "file:///tmp/index.html");
+    manager.attachGuest(first, guest, true);
     expect(created).toHaveLength(1);
     expect(created[0].loadsLocalFiles).toBe(true);
     expect(created[0].navigate).toHaveBeenCalledWith("file:///tmp/index.html");
 
     await manager.navigate(first, "https://example.com/");
-    expect(created).toHaveLength(2);
     expect(created[0].destroy).toHaveBeenCalled();
+    manager.attachGuest(first, guest, false);
+    expect(created).toHaveLength(2);
     expect(created[1].loadsLocalFiles).toBe(false);
     expect(created[1].navigate).toHaveBeenCalledWith("https://example.com/");
+  });
+
+  it("does not create a window overlay before a renderer guest attaches", async () => {
+    const createView = vi.fn(() => fakeController() as never);
+    const manager = new EmbeddedBrowserViewManager({
+      getWindow: () => ({ isDestroyed: () => false }) as never,
+      onState: vi.fn(),
+      onRequestShow: vi.fn(),
+      createView,
+    });
+    const first = { viewId: "slot:1", threadId: "thread-a" };
+    const state = await manager.navigate(first, "https://example.com/");
+    expect(createView).not.toHaveBeenCalled();
+    expect(state).toMatchObject({ url: "https://example.com/", hasPage: true });
   });
 
   it("fails agent visibility when the renderer never focuses a tab", async () => {

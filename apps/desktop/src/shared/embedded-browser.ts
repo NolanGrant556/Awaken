@@ -29,6 +29,8 @@ export const EMBEDDED_BROWSER_CHANNELS = {
   getState: "awaken:embedded-browser:get-state",
   setViewport: "awaken:embedded-browser:set-viewport",
   setActive: "awaken:embedded-browser:set-active",
+  attachGuest: "awaken:embedded-browser:attach-guest",
+  detachGuest: "awaken:embedded-browser:detach-guest",
   stateChanged: "awaken:embedded-browser:state-changed",
   guestHttpNavigate: "awaken:embedded-browser:guest-http-navigate",
   requestShow: "awaken:embedded-browser:request-show",
@@ -96,6 +98,26 @@ const EXTERNAL_SCHEMES = new Set(["mailto:", "tel:"]);
 export function localHtmlPartition(viewId: string): string {
   const safe = viewId.trim().replace(/[^A-Za-z0-9._-]+/g, "-") || "preview";
   return `${LOCAL_HTML_PARTITION_PREFIX}-${safe}`;
+}
+
+export function isEmbeddedBrowserPartition(partition: string): boolean {
+  return (
+    partition === EMBEDDED_BROWSER_PARTITION ||
+    partition.startsWith(`${LOCAL_HTML_PARTITION_PREFIX}-`)
+  );
+}
+
+export const EMBEDDED_BROWSER_OVERLAY_SELECTOR = [
+  '[aria-modal="true"]',
+  '[role="dialog"]',
+  '[role="menu"]',
+  '[role="listbox"]',
+].join(", ");
+
+export function embeddedBrowserGuestWebPreferences(allowFile: boolean): string {
+  return allowFile
+    ? "contextIsolation=yes,nodeIntegration=no,sandbox=yes,webSecurity=yes,allowFileAccessFromFileUrls=yes"
+    : "contextIsolation=yes,nodeIntegration=no,sandbox=yes,webSecurity=yes";
 }
 
 function looksLikeAbsoluteFilePath(raw: string): boolean {
@@ -246,6 +268,8 @@ export function createIdleEmbeddedBrowserClient(): EmbeddedBrowserBridge {
     getState: idle,
     setViewport: async () => undefined,
     setActive: async () => undefined,
+    attachGuest: async () => undefined,
+    detachGuest: async () => undefined,
     onStateChanged: () => () => undefined,
     onGuestHttpNavigate: () => () => undefined,
     onRequestShow: () => () => undefined,
@@ -269,6 +293,12 @@ export type EmbeddedBrowserBridge = {
     rect: EmbeddedBrowserViewRect | null,
   ) => Promise<void>;
   setActive: (ref: EmbeddedBrowserTabRef | null) => Promise<void>;
+  attachGuest: (
+    ref: EmbeddedBrowserTabRef,
+    webContentsId: number,
+    allowFile: boolean,
+  ) => Promise<void>;
+  detachGuest: (ref: EmbeddedBrowserTabRef) => Promise<void>;
   onStateChanged: (
     handler: (payload: EmbeddedBrowserStatePayload) => void,
   ) => () => void;

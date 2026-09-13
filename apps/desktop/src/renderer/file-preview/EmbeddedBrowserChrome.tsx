@@ -1,8 +1,13 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import type { WebviewTag } from "electron";
 import { AwakenIcon } from "@awaken/design-system";
 import {
   EMBEDDED_BROWSER_EMPTY_HINT,
+  EMBEDDED_BROWSER_OVERLAY_SELECTOR,
+  EMBEDDED_BROWSER_PARTITION,
   EMPTY_EMBEDDED_BROWSER_STATE,
+  embeddedBrowserGuestWebPreferences,
+  localHtmlPartition,
   normalizeBrowserAddressInput,
   type EmbeddedBrowserBridge,
   type EmbeddedBrowserState,
@@ -20,6 +25,8 @@ export type EmbeddedBrowserClient = Pick<
   | "getState"
   | "setViewport"
   | "setActive"
+  | "attachGuest"
+  | "detachGuest"
   | "onStateChanged"
 >;
 
@@ -33,6 +40,12 @@ export type EmbeddedHtmlNavigation = {
   reload: () => void;
 };
 
+type GuestSession = {
+  partition: string;
+  src: string;
+  allowFile: boolean;
+};
+
 type Props = {
   client: EmbeddedBrowserClient;
   viewRef: EmbeddedBrowserTabRef;
@@ -44,8 +57,35 @@ type Props = {
   children?: React.ReactNode;
 };
 
-function chromeCoveredByModal(): boolean {
-  return Boolean(document.querySelector('[aria-modal="true"]'));
+export function overlayCoversEmbeddedBrowser(): boolean {
+  for (const node of document.querySelectorAll(EMBEDDED_BROWSER_OVERLAY_SELECTOR)) {
+    if (!(node instanceof HTMLElement)) continue;
+    const style = getComputedStyle(node);
+    if (style.display === "none" || style.visibility === "hidden") continue;
+    const rect = node.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) return true;
+  }
+  return false;
+}
+
+function guestSessionFor(
+  url: string,
+  viewId: string,
+): GuestSession | null {
+  const parsed = normalizeBrowserAddressInput(url);
+  if (!parsed.ok) return null;
+  const allowFile = parsed.kind === "file";
+  return {
+    partition: allowFile
+      ? localHtmlPartition(viewId)
+      : EMBEDDED_BROWSER_PARTITION,
+    src: parsed.url,
+    allowFile,
+  };
+}
+
+function sessionMatches(current: GuestSession | null, next: GuestSession): boolean {
+  return current?.partition === next.partition && current.allowFile === next.allowFile;
 }
 
 export default function EmbeddedBrowserChrome({
@@ -59,9 +99,12 @@ export default function EmbeddedBrowserChrome({
   children,
 }: Props) {
   const stripRef = useRef<HTMLDivElement>(null);
+  const webviewRef = useRef<WebviewTag>(null);
   const htmlOccupiedRef = useRef(htmlOccupied);
   const [state, setState] = useState<EmbeddedBrowserState>(EMPTY_EMBEDDED_BROWSER_STATE);
   const [address, setAddress] = useState("");
+  const [guestSession, setGuestSession] = useState<GuestSession | null>(null);
+  const [guestCovered, setGuestCovered] = useState(false);
   const editingRef = useRef(false);
   const [addressError, setAddressError] = useState<string | undefined>();
   htmlOccupiedRef.current = htmlOccupied;
@@ -98,15 +141,28 @@ export default function EmbeddedBrowserChrome({
     };
   }, [active, client, enabled, viewRef.threadId, viewRef.viewId]);
 
-  const showPage = enabled && active && state.hasPage && !htmlOccupied;
+  useEffect(() => {
+    if (!enabled || !active || htmlOccupied) {
+      setGuestSession(null);
+      return;
+    }
+    const next = state.url ? guestSessionFor(state.url, viewRef.viewId) : null;
+    if (!next) return;
+    setGuestSession((current) => (sessionMatches(current, next) ? current : next));
+  }, [active, enabled, htmlOccupied, state.url, viewRef.viewId]);
+
+  const showPage = enabled && active && Boolean(guestSession) && !htmlOccupied;
   useEffect(() => {
     if (!showPage) {
       void client.setViewport(viewRef, null);
+      setGuestCovered(false);
       return;
     }
     let frame = 0;
     const report = () => {
-      if (chromeCoveredByModal()) {
+      const covered = overlayCoversEmbeddedBrowser();
+      setGuestCovered(covered);
+      if (covered) {
         void client.setViewport(viewRef, null);
       } else {
         const rect = stripRef.current?.getBoundingClientRect();
@@ -125,6 +181,35 @@ export default function EmbeddedBrowserChrome({
       void client.setViewport(viewRef, null);
     };
   }, [client, showPage, viewRef.threadId, viewRef.viewId]);
+
+  useEffect(() => {
+    const webview = webviewRef.current;
+    const session = guestSession;
+    if (!enabled || !active || htmlOccupied || !session || !webview) {
+      return;
+    }
+    const attach = () => {
+      try {
+        void client.attachGuest(viewRef, webview.getWebContentsId(), session.allowFile);
+      } catch {
+        /* guest not attached yet */
+      }
+    };
+    webview.addEventListener("did-attach", attach);
+    attach();
+    return () => {
+      webview.removeEventListener("did-attach", attach);
+      void client.detachGuest(viewRef);
+    };
+  }, [
+    active,
+    client,
+    enabled,
+    guestSession,
+    htmlOccupied,
+    viewRef.threadId,
+    viewRef.viewId,
+  ]);
 
   const showingHtml =
     enabled && (htmlOccupied || (Boolean(htmlNavigation) && !state.hasPage));
@@ -155,6 +240,10 @@ export default function EmbeddedBrowserChrome({
     editingRef.current = false;
     setAddress(parsed.url);
     if (parsed.kind === "http") onLeaveHtmlPreview?.();
+    const next = guestSessionFor(parsed.url, viewRef.viewId);
+    if (next) {
+      setGuestSession((current) => (sessionMatches(current, next) ? current : next));
+    }
     void client.navigate(viewRef, parsed.url);
   };
 
@@ -237,12 +326,27 @@ export default function EmbeddedBrowserChrome({
           {addressError}
         </p>
       ) : null}
-      {showPage ? (
+      {showPage && guestSession ? (
         <div
           key="native-page"
           ref={stripRef}
           className="embedded-browser__page"
-        />
+        >
+          <webview
+            key={guestSession.partition}
+            ref={webviewRef}
+            className={
+              guestCovered
+                ? "embedded-browser__guest is-covered"
+                : "embedded-browser__guest"
+            }
+            src={guestSession.src}
+            partition={guestSession.partition}
+            webpreferences={embeddedBrowserGuestWebPreferences(
+              guestSession.allowFile,
+            )}
+          />
+        </div>
       ) : null}
       <div
         key="preview-body"

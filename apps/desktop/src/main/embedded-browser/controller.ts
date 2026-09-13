@@ -1,4 +1,4 @@
-import { type BrowserWindow, type Session, shell, WebContentsView } from "electron";
+import { type BrowserWindow, type Session, type WebContents, shell } from "electron";
 import {
   type EmbeddedBrowserState,
   type EmbeddedBrowserViewRect,
@@ -10,7 +10,6 @@ import {
   safeExternalUrl,
   viewportBounds,
 } from "../../shared/embedded-browser.js";
-import { browserViewWebPreferences } from "./options.js";
 
 const backstopInstalledFor = new WeakSet<Session>();
 const VIEWPORT_RESTORE_POLL_MS = 16;
@@ -18,34 +17,31 @@ const VIEWPORT_RESTORE_POLL_MS = 16;
 export type EmbeddedBrowserViewControllerOptions = {
   allowFile?: boolean;
   partition?: string;
+  guest: WebContents;
   onHandoffHttp?: (url: string) => void;
 };
 
 export class EmbeddedBrowserViewController {
-  private readonly view: WebContentsView;
   private destroyed = false;
   private shownWithBounds = false;
   private admittedOrigin = "";
   private readonly onState: (state: EmbeddedBrowserState) => void;
   private readonly allowFile: boolean;
+  private readonly guest: WebContents;
   private readonly onHandoffHttp?: (url: string) => void;
 
   constructor(
-    private readonly window: BrowserWindow,
+    _window: BrowserWindow,
     onState: (state: EmbeddedBrowserState) => void,
-    options: EmbeddedBrowserViewControllerOptions = {},
+    options: EmbeddedBrowserViewControllerOptions,
   ) {
     this.onState = onState;
     this.allowFile = Boolean(options.allowFile);
     this.onHandoffHttp = options.onHandoffHttp;
-    this.view = new WebContentsView({
-      webPreferences: browserViewWebPreferences({
-        partition: options.partition,
-        allowFile: this.allowFile,
-      }),
-    });
-    this.window.contentView.addChildView(this.view);
-    this.hide();
+    if (!options.guest || options.guest.isDestroyed()) {
+      throw new Error("embedded browser guest is not available");
+    }
+    this.guest = options.guest;
     this.applySecurityBackstop();
     this.wireEvents();
   }
@@ -62,8 +58,12 @@ export class EmbeddedBrowserViewController {
     return this.shownWithBounds;
   }
 
+  ownsGuest(guest: WebContents): boolean {
+    return this.guest === guest;
+  }
+
   private get wc() {
-    return this.view.webContents;
+    return this.guest;
   }
 
   private applySecurityBackstop(): void {
@@ -83,6 +83,9 @@ export class EmbeddedBrowserViewController {
     wc.on("did-navigate-in-page", () => this.recordNavigation());
     wc.on("page-title-updated", () => this.emitState());
     wc.on("did-fail-load", () => this.emitState());
+    wc.on("destroyed", () => {
+      this.destroyed = true;
+    });
 
     wc.setWindowOpenHandler(({ url }) => {
       if (this.handoffHttp(url)) return { action: "deny" };
@@ -166,8 +169,9 @@ export class EmbeddedBrowserViewController {
     const navigable = resolveEmbeddedBrowserNavigation(url, this.allowFile);
     if (!navigable) return this.state();
     this.admitOrigin(navigable);
-    await this.loadInternal(navigable);
-    if (!this.shownWithBounds) this.hide();
+    if (this.currentURL() !== navigable) {
+      await this.loadInternal(navigable);
+    }
     return this.state();
   }
 
@@ -192,16 +196,7 @@ export class EmbeddedBrowserViewController {
   }
 
   setBounds(rect: EmbeddedBrowserViewRect | null): void {
-    const bounds = viewportBounds(rect);
-    if (!bounds) {
-      this.shownWithBounds = false;
-      this.view.setVisible(false);
-      this.view.setBounds({ x: 0, y: 0, width: 0, height: 0 });
-      return;
-    }
-    this.view.setBounds(bounds);
-    this.view.setVisible(true);
-    this.shownWithBounds = true;
+    this.shownWithBounds = Boolean(viewportBounds(rect));
   }
 
   hide(): void {
@@ -228,12 +223,6 @@ export class EmbeddedBrowserViewController {
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
-    this.hide();
-    try {
-      this.window.contentView.removeChildView(this.view);
-    } catch {
-      /* already detached */
-    }
-    if (!this.wc.isDestroyed()) this.wc.close({ waitForBeforeUnload: false });
+    this.shownWithBounds = false;
   }
 }

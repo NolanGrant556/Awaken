@@ -23,6 +23,7 @@ import type {
   RuntimePluginComponent,
   RuntimeThread,
 } from "../shared/runtime";
+import { resolveEmbeddedBrowserTabRef } from "../shared/embedded-browser";
 import { MACOS_WINDOW_CHROME_GEOMETRY } from "../shared/window-chrome";
 import { ComposerSurface } from "./ComposerSurface";
 import { ComputerHandoffIndicator } from "./ComputerHandoffIndicator";
@@ -1023,14 +1024,17 @@ export function App() {
       runPlanEntry.closePanel(false);
     },
     onInspectorFileTabClosed: (viewId) => {
-      const threadId = runtimeState.activeThreadId ?? runtimeState.threadId;
-      if (!threadId) return;
-      void runtimeClient.embeddedBrowser.close({ viewId, threadId });
+      const ref = resolveEmbeddedBrowserTabRef({
+        threadId: runtimeState.activeThreadId ?? runtimeState.threadId,
+        viewId,
+      });
+      void runtimeClient.embeddedBrowser.close(ref);
     },
     onFileWorkspaceClosed: () => {
-      const threadId = runtimeState.activeThreadId ?? runtimeState.threadId;
-      if (!threadId) return;
-      void runtimeClient.embeddedBrowser.closeThread(threadId);
+      const ref = resolveEmbeddedBrowserTabRef({
+        threadId: runtimeState.activeThreadId ?? runtimeState.threadId,
+      });
+      void runtimeClient.embeddedBrowser.closeThread(ref.threadId);
     },
   });
   const {

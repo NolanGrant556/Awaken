@@ -16,6 +16,7 @@ import type {
 import type { RuntimeClient } from "../runtime/client";
 import {
   createIdleEmbeddedBrowserClient,
+  resolveEmbeddedBrowserTabRef,
   type EmbeddedBrowserBridge,
 } from "../../shared/embedded-browser";
 import ImagePreview from "./ImagePreview";
@@ -232,22 +233,23 @@ export default function FilePreviewHost({
     state.status === "ready" && state.preview.kind === "html"
       ? state.preview.previewId
       : undefined;
-  const browserRef =
-    threadId && viewId ? { threadId, viewId } : undefined;
+  const browserRef = useMemo(
+    () => resolveEmbeddedBrowserTabRef({ threadId, viewId }),
+    [threadId, viewId],
+  );
 
   useEffect(() => {
-    if (!htmlPreviewId || !browserRef) return;
+    if (!htmlPreviewId) return;
     void browserClient.close(browserRef);
-  }, [browserClient, htmlPreviewId, threadId, viewId]);
+  }, [browserClient, browserRef, htmlPreviewId]);
 
   useEffect(() => {
-    if (!browserRef) return;
     return browserClient.onGuestHttpNavigate?.((payload) => {
       if (!htmlPreviewId || payload.previewId !== htmlPreviewId) return;
       onLeaveHtmlPreview?.();
       void browserClient.navigate(browserRef, payload.url);
     });
-  }, [browserClient, browserRef?.threadId, browserRef?.viewId, htmlPreviewId, onLeaveHtmlPreview]);
+  }, [browserClient, browserRef, htmlPreviewId, onLeaveHtmlPreview]);
 
   const actionRequest: ProjectFilePreviewActionRequest | undefined =
     state.status === "ready" ? state.request : projectId && folderPath && selection
@@ -350,16 +352,15 @@ export default function FilePreviewHost({
       : undefined;
 
   const wrapBrowser = (children?: React.ReactNode) => {
-    const ref = browserRef ?? { threadId: "local", viewId: "preview" };
     const htmlOccupied =
       Boolean(htmlPreviewId) ||
       (Boolean(selection) && state.status !== "ready");
     return (
       <EmbeddedBrowserChrome
         client={browserClient}
-        viewRef={ref}
+        viewRef={browserRef}
         enabled={mode === "browser"}
-        active={Boolean(browserRef) && browserActive}
+        active={browserActive}
         htmlOccupied={htmlOccupied}
         onLeaveHtmlPreview={onLeaveHtmlPreview}
         htmlNavigation={htmlNavigation}

@@ -1,5 +1,21 @@
 export const EMBEDDED_BROWSER_PARTITION = "persist:awaken-browser";
 
+/** Workbench home has no Core thread yet; user browsing still needs a stable view key. */
+export const LOCAL_EMBEDDED_BROWSER_THREAD_ID = "local";
+export const LOCAL_EMBEDDED_BROWSER_VIEW_ID = "preview";
+
+export function resolveEmbeddedBrowserTabRef(input: {
+  threadId?: string;
+  viewId?: string;
+}): EmbeddedBrowserTabRef {
+  const threadId = input.threadId?.trim();
+  const viewId = input.viewId?.trim();
+  return {
+    threadId: threadId || LOCAL_EMBEDDED_BROWSER_THREAD_ID,
+    viewId: viewId || LOCAL_EMBEDDED_BROWSER_VIEW_ID,
+  };
+}
+
 export const EMBEDDED_BROWSER_CHANNELS = {
   navigate: "awaken:embedded-browser:navigate",
   back: "awaken:embedded-browser:back",

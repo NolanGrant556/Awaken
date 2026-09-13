@@ -162,6 +162,16 @@ export function parseNavigable(input: string): string | null {
   return result.ok && result.kind === "http" ? result.url : null;
 }
 
+export function resolveEmbeddedBrowserNavigation(
+  input: string,
+  allowFile = false,
+): string | null {
+  const result = normalizeBrowserAddressInput(input);
+  if (!result.ok) return null;
+  if (result.kind === "http") return result.url;
+  return allowFile ? result.url : null;
+}
+
 export function safeExternalUrl(url: string): string | null {
   const scheme = url.slice(0, url.indexOf(":") + 1).toLowerCase();
   return EXTERNAL_SCHEMES.has(scheme) ? url : null;

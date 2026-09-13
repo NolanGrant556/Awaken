@@ -1,4 +1,4 @@
-import { ipcMain, type BrowserWindow, type IpcMainInvokeEvent } from "electron";
+import { ipcMain, webContents, type BrowserWindow, type IpcMainInvokeEvent } from "electron";
 import {
   EMBEDDED_BROWSER_CHANNELS,
   type EmbeddedBrowserTabRef,
@@ -59,5 +59,23 @@ export function registerEmbeddedBrowserIpc(options: {
   ipcMain.handle(EMBEDDED_BROWSER_CHANNELS.setActive, (event, ref: EmbeddedBrowserTabRef | null) => {
     requireSender(event);
     options.manager.setActive(ref);
+  });
+  ipcMain.handle(
+    EMBEDDED_BROWSER_CHANNELS.attachGuest,
+    (event, ref: EmbeddedBrowserTabRef, webContentsId: number, allowFile: boolean) => {
+      requireSender(event);
+      const guest = webContents.fromId(Number(webContentsId));
+      if (!guest || guest.isDestroyed()) {
+        throw new Error("embedded browser guest is not available");
+      }
+      if (guest.hostWebContents?.id !== event.sender.id) {
+        throw new Error("embedded browser guest is not from the main window");
+      }
+      options.manager.attachGuest(ref, guest, Boolean(allowFile));
+    },
+  );
+  ipcMain.handle(EMBEDDED_BROWSER_CHANNELS.detachGuest, (event, ref: EmbeddedBrowserTabRef) => {
+    requireSender(event);
+    options.manager.detachGuest(ref);
   });
 }

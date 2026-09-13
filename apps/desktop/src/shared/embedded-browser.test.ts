@@ -8,6 +8,7 @@ import {
   LOCAL_EMBEDDED_BROWSER_VIEW_ID,
   localHtmlPartition,
   LOCAL_HTML_PARTITION_PREFIX,
+  isEmbeddedBrowserPartition,
   normalizeBrowserAddressInput,
   originOf,
   parseNavigable,
@@ -212,6 +213,11 @@ describe("session isolation", () => {
       "awaken-local-html-project-file-slot-1",
     );
     expect(localHtmlPartition("project-file-slot:1").startsWith("persist:")).toBe(
+      false,
+    );
+    expect(isEmbeddedBrowserPartition(EMBEDDED_BROWSER_PARTITION)).toBe(true);
+    expect(isEmbeddedBrowserPartition(localHtmlPartition("slot:1"))).toBe(true);
+    expect(isEmbeddedBrowserPartition("awaken-preview-preview-office")).toBe(
       false,
     );
     expect(LOCAL_HTML_PARTITION_PREFIX.startsWith("awaken-preview")).toBe(false);

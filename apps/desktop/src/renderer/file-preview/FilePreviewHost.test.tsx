@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import FilePreviewHost from "./FilePreviewHost";
 import { EMBEDDED_BROWSER_EMPTY_HINT } from "../../shared/embedded-browser";
+import { overlayCoversEmbeddedBrowser } from "./EmbeddedBrowserChrome";
 
 async function settleUntil(isReady: () => boolean): Promise<void> {
   await act(async () => {
@@ -334,6 +335,8 @@ describe("FilePreviewHost", () => {
       getState: vi.fn(async () => idleState),
       setViewport: vi.fn(async () => undefined),
       setActive: vi.fn(async () => undefined),
+      attachGuest: vi.fn(async () => undefined),
+      detachGuest: vi.fn(async () => undefined),
       onStateChanged: vi.fn(() => () => {}),
       onGuestHttpNavigate: vi.fn(() => () => {}),
     };
@@ -388,9 +391,12 @@ describe("FilePreviewHost", () => {
       1,
     );
     expect(container.querySelector(".project-file-preview-heading")).toBeNull();
+    const webview = container.querySelector("webview");
+    expect(webview?.getAttribute("src")).toBe("https://example.com/");
+    expect(webview?.getAttribute("partition")).toBe("persist:awaken-browser");
   });
 
-  it("opens a local HTML path through the native view instead of a renderer webview", async () => {
+  it("opens a local HTML path in a page-slot webview under the address bar", async () => {
     const idleState = {
       url: "",
       title: "",
@@ -416,6 +422,8 @@ describe("FilePreviewHost", () => {
       getState: vi.fn(async () => idleState),
       setViewport: vi.fn(async () => undefined),
       setActive: vi.fn(async () => undefined),
+      attachGuest: vi.fn(async () => undefined),
+      detachGuest: vi.fn(async () => undefined),
       onStateChanged: vi.fn(() => () => {}),
       onGuestHttpNavigate: vi.fn(() => () => {}),
     };
@@ -483,7 +491,11 @@ describe("FilePreviewHost", () => {
       { threadId: "thread-1", viewId: "project-file-slot:1" },
       "file:///tmp/index.html",
     );
-    expect(container.querySelector("webview")).toBeNull();
+    const localGuest = container.querySelector("webview");
+    expect(localGuest?.getAttribute("src")).toBe("file:///tmp/index.html");
+    expect(localGuest?.getAttribute("partition")).toBe(
+      "awaken-local-html-project-file-slot-1",
+    );
     expect(input.value).toBe("file:///tmp/index.html");
 
     await act(async () => {
@@ -503,7 +515,9 @@ describe("FilePreviewHost", () => {
       { threadId: "thread-1", viewId: "project-file-slot:1" },
       "https://example.com/",
     );
-    expect(container.querySelector("webview")).toBeNull();
+    const httpGuest = container.querySelector("webview");
+    expect(httpGuest?.getAttribute("src")).toBe("https://example.com/");
+    expect(httpGuest?.getAttribute("partition")).toBe("persist:awaken-browser");
   });
 
   it("activates a local view so the empty workbench can still show a page", async () => {
@@ -539,6 +553,8 @@ describe("FilePreviewHost", () => {
       getState: vi.fn(async () => idleState),
       setViewport: vi.fn(async () => undefined),
       setActive,
+      attachGuest: vi.fn(async () => undefined),
+      detachGuest: vi.fn(async () => undefined),
       onStateChanged: vi.fn((handler) => {
         emitState = handler;
         return () => {
@@ -603,6 +619,9 @@ describe("FilePreviewHost", () => {
     expect(
       container.querySelector(".project-files-preview-empty")?.closest("[hidden]"),
     ).not.toBeNull();
+    expect(page?.querySelector("webview")?.getAttribute("src")).toBe(
+      "http://127.0.0.1:8765/",
+    );
   });
 
   it("keeps an Office webview mounted while switching between browser and files", async () => {
@@ -686,5 +705,29 @@ describe("FilePreviewHost", () => {
       webview?.closest(".project-file-preview-mode-stack__preview")?.classList,
     ).not.toContain("is-hidden");
     expect(runtimeClient.startProjectFilePreview).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("overlayCoversEmbeddedBrowser", () => {
+  it("treats a visible dialog as covering the in-page guest", () => {
+    const dialog = document.createElement("div");
+    dialog.setAttribute("role", "dialog");
+    Object.defineProperty(dialog, "getBoundingClientRect", {
+      value: () => ({
+        width: 320,
+        height: 180,
+        x: 0,
+        y: 0,
+        top: 0,
+        left: 0,
+        right: 320,
+        bottom: 180,
+        toJSON() {},
+      }),
+    });
+    document.body.append(dialog);
+    expect(overlayCoversEmbeddedBrowser()).toBe(true);
+    dialog.remove();
+    expect(overlayCoversEmbeddedBrowser()).toBe(false);
   });
 });

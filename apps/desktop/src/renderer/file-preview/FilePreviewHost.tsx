@@ -73,6 +73,8 @@ export type FilePreviewHostProps = {
     | "getState"
     | "setViewport"
     | "setActive"
+    | "attachGuest"
+    | "detachGuest"
     | "onStateChanged"
     | "onGuestHttpNavigate"
   >;

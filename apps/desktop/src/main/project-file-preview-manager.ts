@@ -641,7 +641,6 @@ export class ProjectFilePreviewManager {
         (candidate) => candidate.active && candidate.session === guest.session,
       );
     if (!record) {
-      guest.close({ waitForBeforeUnload: false });
       return;
     }
     guest.setWindowOpenHandler(({ url }) => {

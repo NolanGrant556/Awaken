@@ -1,6 +1,7 @@
-import type { BrowserWindow } from "electron";
+import type { BrowserWindow, WebContents } from "electron";
 import {
   browserActionAllowed,
+  deriveBrowserState,
   EMPTY_EMBEDDED_BROWSER_STATE,
   localHtmlPartition,
   normalizeBrowserAddressInput,
@@ -14,6 +15,12 @@ import { EmbeddedBrowserViewController } from "./controller.js";
 
 const VIEWPORT_RESTORE_WAIT_MS = 4000;
 
+export type EmbeddedBrowserCreateViewOptions = {
+  allowFile: boolean;
+  partition?: string;
+  guest: WebContents;
+};
+
 export type EmbeddedBrowserViewManagerOptions = {
   getWindow: () => BrowserWindow | null;
   onState: (viewId: string, threadId: string, state: EmbeddedBrowserState) => void;
@@ -21,7 +28,7 @@ export type EmbeddedBrowserViewManagerOptions = {
   createView?: (
     window: BrowserWindow,
     onState: (state: EmbeddedBrowserState) => void,
-    options: { allowFile: boolean; partition?: string },
+    options: EmbeddedBrowserCreateViewOptions,
   ) => EmbeddedBrowserViewController;
 };
 
@@ -30,12 +37,28 @@ type ViewRecord = {
   controller: EmbeddedBrowserViewController;
 };
 
+type PendingNavigation = {
+  url: string;
+  allowFile: boolean;
+};
+
 function viewKey(ref: EmbeddedBrowserTabRef): string {
   return `${ref.threadId}::${ref.viewId}`;
 }
 
+function optimisticState(url: string): EmbeddedBrowserState {
+  return deriveBrowserState({
+    url,
+    title: "",
+    canGoBack: false,
+    canGoForward: false,
+    loading: true,
+  });
+}
+
 export class EmbeddedBrowserViewManager {
   private readonly views = new Map<string, ViewRecord>();
+  private readonly pendingNav = new Map<string, PendingNavigation>();
   private activeKey: string | null = null;
   private pendingActive: EmbeddedBrowserTabRef | null = null;
 
@@ -50,12 +73,94 @@ export class EmbeddedBrowserViewManager {
     if (!parsed.ok) {
       throw new Error("unsupported_scheme");
     }
-    const controller = this.ensure(ref, parsed.kind === "file");
-    this.activeKey = viewKey(ref);
+    const allowFile = parsed.kind === "file";
+    const key = viewKey(ref);
+    this.pendingNav.set(key, { url: parsed.url, allowFile });
+    this.activeKey = key;
     this.pendingActive = ref;
-    this.hideAllExcept(this.activeKey);
-    if (!controller.shown) controller.hide();
-    return controller.navigate(parsed.url);
+    this.hideAllExcept(key);
+
+    const existing = this.views.get(key);
+    if (existing && existing.controller.loadsLocalFiles !== allowFile) {
+      existing.controller.destroy();
+      this.views.delete(key);
+    }
+
+    const current = this.views.get(key);
+    if (current) {
+      return current.controller.navigate(parsed.url);
+    }
+
+    const state = optimisticState(parsed.url);
+    this.options.onState(ref.viewId, ref.threadId, state);
+    return state;
+  }
+
+  attachGuest(
+    ref: EmbeddedBrowserTabRef,
+    guest: WebContents,
+    allowFile: boolean,
+  ): EmbeddedBrowserState {
+    if (guest.isDestroyed?.()) {
+      throw new Error("embedded browser guest is not available");
+    }
+    const key = viewKey(ref);
+    const existing = this.views.get(key);
+    if (
+      existing &&
+      existing.controller.loadsLocalFiles === allowFile &&
+      existing.controller.ownsGuest(guest)
+    ) {
+      return existing.controller.state();
+    }
+    if (existing) {
+      existing.controller.destroy();
+      this.views.delete(key);
+    }
+
+    const window = this.options.getWindow();
+    if (!window || window.isDestroyed()) {
+      throw new Error("main window is not available");
+    }
+    const create =
+      this.options.createView ??
+      ((owner, onState, options) =>
+        new EmbeddedBrowserViewController(owner, onState, {
+          allowFile: options.allowFile,
+          partition: options.partition,
+          guest: options.guest,
+          onHandoffHttp: options.allowFile
+            ? (httpUrl) => {
+                void this.navigate(ref, httpUrl);
+              }
+            : undefined,
+        }));
+    const controller = create(
+      window,
+      (state) => {
+        this.options.onState(ref.viewId, ref.threadId, state);
+      },
+      {
+        allowFile,
+        partition: allowFile ? localHtmlPartition(ref.viewId) : undefined,
+        guest,
+      },
+    );
+    this.views.set(key, { ref, controller });
+
+    const pending = this.pendingNav.get(key);
+    if (pending && pending.allowFile === allowFile) {
+      void controller.navigate(pending.url);
+    }
+    return controller.state();
+  }
+
+  detachGuest(ref: EmbeddedBrowserTabRef): void {
+    const key = viewKey(ref);
+    const record = this.views.get(key);
+    if (!record) return;
+    record.controller.destroy();
+    this.views.delete(key);
   }
 
   back(ref: EmbeddedBrowserTabRef): EmbeddedBrowserState {
@@ -93,9 +198,11 @@ export class EmbeddedBrowserViewManager {
   close(ref: EmbeddedBrowserTabRef): void {
     const key = viewKey(ref);
     const record = this.views.get(key);
-    if (!record) return;
-    record.controller.destroy();
-    this.views.delete(key);
+    if (record) {
+      record.controller.destroy();
+      this.views.delete(key);
+    }
+    this.pendingNav.delete(key);
     if (this.activeKey === key) this.activeKey = null;
     if (this.pendingActive && viewKey(this.pendingActive) === key) {
       this.pendingActive = null;
@@ -105,7 +212,9 @@ export class EmbeddedBrowserViewManager {
   hideAll(): void {
     this.activeKey = null;
     this.pendingActive = null;
-    this.hideAllExcept(null);
+    this.pendingNav.clear();
+    for (const record of this.views.values()) record.controller.destroy();
+    this.views.clear();
   }
 
   closeThread(threadId: string): void {
@@ -113,6 +222,7 @@ export class EmbeddedBrowserViewManager {
       if (record.ref.threadId !== threadId) continue;
       record.controller.destroy();
       this.views.delete(key);
+      this.pendingNav.delete(key);
       if (this.activeKey === key) this.activeKey = null;
     }
     if (this.pendingActive?.threadId === threadId) this.pendingActive = null;
@@ -121,6 +231,7 @@ export class EmbeddedBrowserViewManager {
   dispose(): void {
     for (const record of this.views.values()) record.controller.destroy();
     this.views.clear();
+    this.pendingNav.clear();
     this.activeKey = null;
     this.pendingActive = null;
   }
@@ -140,21 +251,6 @@ export class EmbeddedBrowserViewManager {
     while (Date.now() < deadline) {
       const shown = this.shownRecordForThread(threadId);
       if (shown) return shown.controller;
-      const pending =
-        this.pendingActive?.threadId === threadId ? this.pendingActive : null;
-      if (pending) {
-        const controller = this.ensure(pending);
-        this.activeKey = viewKey(pending);
-        this.hideAllExcept(this.activeKey);
-        return controller;
-      }
-      const any = this.anyRecordForThread(threadId);
-      if (any) {
-        this.activeKey = viewKey(any.ref);
-        this.pendingActive = any.ref;
-        this.hideAllExcept(this.activeKey);
-        return any.controller;
-      }
       await new Promise((resolve) => setTimeout(resolve, 16));
     }
     throw new Error("browser_view_not_visible");
@@ -178,49 +274,6 @@ export class EmbeddedBrowserViewManager {
       if (record.ref.threadId === threadId) return record;
     }
     return undefined;
-  }
-
-  private ensure(
-    ref: EmbeddedBrowserTabRef,
-    allowFile = false,
-  ): EmbeddedBrowserViewController {
-    const key = viewKey(ref);
-    const existing = this.views.get(key);
-    if (existing && existing.controller.loadsLocalFiles === allowFile) {
-      return existing.controller;
-    }
-    if (existing) {
-      existing.controller.destroy();
-      this.views.delete(key);
-    }
-    const window = this.options.getWindow();
-    if (!window || window.isDestroyed()) {
-      throw new Error("main window is not available");
-    }
-    const create =
-      this.options.createView ??
-      ((owner, onState, options) =>
-        new EmbeddedBrowserViewController(owner, onState, {
-          allowFile: options.allowFile,
-          partition: options.partition,
-          onHandoffHttp: options.allowFile
-            ? (httpUrl) => {
-                void this.navigate(ref, httpUrl);
-              }
-            : undefined,
-        }));
-    const controller = create(
-      window,
-      (state) => {
-        this.options.onState(ref.viewId, ref.threadId, state);
-      },
-      {
-        allowFile,
-        partition: allowFile ? localHtmlPartition(ref.viewId) : undefined,
-      },
-    );
-    this.views.set(key, { ref, controller });
-    return controller;
   }
 
   private hideAllExcept(key: string | null): void {

@@ -382,6 +382,15 @@ const bridge: AwakenBridge = {
     setViewport: (ref, rect) =>
       ipcRenderer.invoke(EMBEDDED_BROWSER_CHANNELS.setViewport, ref, rect),
     setActive: (ref) => ipcRenderer.invoke(EMBEDDED_BROWSER_CHANNELS.setActive, ref),
+    attachGuest: (ref, webContentsId, allowFile) =>
+      ipcRenderer.invoke(
+        EMBEDDED_BROWSER_CHANNELS.attachGuest,
+        ref,
+        webContentsId,
+        allowFile,
+      ),
+    detachGuest: (ref) =>
+      ipcRenderer.invoke(EMBEDDED_BROWSER_CHANNELS.detachGuest, ref),
     onStateChanged: (callback) => {
       const handler = (_event: IpcRendererEvent, payload: EmbeddedBrowserStatePayload) =>
         callback(payload);

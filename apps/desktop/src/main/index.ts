@@ -142,6 +142,7 @@ import { EMBEDDED_BROWSER_CHANNELS } from "../shared/embedded-browser.js";
 import { EmbeddedBrowserHost } from "./embedded-browser/host.js";
 import { registerEmbeddedBrowserIpc } from "./embedded-browser/ipc.js";
 import { EmbeddedBrowserViewManager } from "./embedded-browser/manager.js";
+import { authorizeEmbeddedBrowserWebview } from "./embedded-browser/options.js";
 
 const { autoUpdater } = electronUpdaterPkg;
 
@@ -1026,6 +1027,7 @@ function createMainWindow(): BrowserWindow {
   });
 
   mainWindow.webContents.on("will-attach-webview", (event, webPreferences, params) => {
+    if (authorizeEmbeddedBrowserWebview(webPreferences, params)) return;
     if (!projectFilePreviewManager?.authorizeWebview(webPreferences, params)) {
       event.preventDefault();
     }

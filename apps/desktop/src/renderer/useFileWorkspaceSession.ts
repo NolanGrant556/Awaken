@@ -297,13 +297,15 @@ export function useFileWorkspaceSession(options: Options) {
     handleShowFileWorkspaceSurface();
   }
 
-  function handleAddProjectFileTab(): void {
+  function handleCreateProjectFileTab(mode: ProjectFileWorkspaceMode): void {
     onBeforeFileOpen();
-    dispatchTabs({ type: "chooser" });
+    setFileWorkspaceOpen(true);
+    setExpandedWorkspaceSurface("file");
     setInspectorCollapsed(false);
     if (inspectorCollapsedBeforeResponsiveRef.current !== null) {
       inspectorCollapsedBeforeResponsiveRef.current = false;
     }
+    dispatchTabs({ type: "add-file", projectId: fileWorkspaceProjectId, mode });
   }
 
   function handleActivateInspectorTab(id: string): void {
@@ -430,7 +432,7 @@ export function useFileWorkspaceSession(options: Options) {
     handleExpandedFilePreviewPrimaryClick,
     handleCloseFileWorkspace,
     handleOpenProjectFileTab,
-    handleAddProjectFileTab,
+    handleCreateProjectFileTab,
     handleActivateProjectFileTab,
     handleCloseProjectFileTab,
     handleShowBrowserTab,

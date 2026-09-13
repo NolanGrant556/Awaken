@@ -536,16 +536,24 @@ body.is-project-file-list-resizing .project-files-workspace__body {
 }
 
 .project-files-folder-picker {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
   min-width: 0;
-  padding: 10px 10px 8px;
+  height: 44px;
+  min-height: 44px;
+  max-height: 44px;
+  padding: 0 8px 0 10px;
   border-bottom: 1px solid var(--aw-border-light);
 }
 
 .project-files-folder-picker > div,
 .project-files-folder-picker > div > div {
   display: flex !important;
+  align-items: center;
   width: 100%;
   min-width: 0;
+  height: 100%;
 }
 
 .project-files-folder-trigger {
@@ -555,8 +563,9 @@ body.is-project-file-list-resizing .project-files-workspace__body {
   gap: 8px;
   width: 100%;
   min-width: 0;
-  min-height: 38px;
-  padding: 0 12px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0 10px;
   border: 1px solid var(--aw-border-main);
   border-radius: 10px;
   background: var(--aw-surface-panel-muted);
@@ -1757,6 +1766,34 @@ body.is-project-file-list-resizing .project-files-workspace__body {
 .project-files-tab-add:disabled {
   cursor: default;
   opacity: 0.42;
+}
+
+.project-files-tab-add-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 220px;
+}
+
+.project-files-tab-add-menu [role="menuitem"] {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--aw-text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.project-files-tab-add-menu [role="menuitem"]:hover,
+.project-files-tab-add-menu [role="menuitem"]:focus-visible {
+  background: var(--aw-bg-fill-light);
 }
 
 .project-files-tab__activate {

@@ -163,6 +163,18 @@ describe("ProjectFilesWorkspace", () => {
     );
   });
 
+  it("matches the folder picker height to the preview heading", () => {
+    expect(projectFileStyles).toMatch(
+      /\.project-files-folder-picker\s*\{[^}]*height:\s*44px;[^}]*min-height:\s*44px;[^}]*max-height:\s*44px;/s,
+    );
+    expect(projectFileStyles).toMatch(
+      /\.project-file-preview-heading\s*\{[^}]*min-height:\s*44px;/s,
+    );
+    expect(projectFileStyles).toMatch(
+      /\.project-files-folder-trigger\s*\{[^}]*height:\s*32px;[^}]*min-height:\s*32px;/s,
+    );
+  });
+
   it("labels the filter as loaded-tree filtering and clears it without changing layout", async () => {
     const listProjectDirectory = vi.fn(async () => ({
       ok: true as const,

@@ -330,6 +330,19 @@
   min-height: 0;
 }
 
+.project-file-webview-preview.is-embedded {
+  display: grid;
+  position: relative;
+}
+
+.project-file-webview-preview.is-embedded .embedded-browser__error {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  z-index: 1;
+}
+
 .project-files-navigator {
   grid-area: navigator;
   display: grid;

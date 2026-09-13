@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { AwakenIcon } from "@awaken/design-system";
 import {
+  EMBEDDED_BROWSER_EMPTY_HINT,
   EMPTY_EMBEDDED_BROWSER_STATE,
   normalizeBrowserAddressInput,
   type EmbeddedBrowserBridge,
@@ -39,6 +40,7 @@ type Props = {
   active: boolean;
   htmlOccupied?: boolean;
   onLeaveHtmlPreview?: () => void;
+  onOpenLocalFile?: (url: string) => void;
   htmlNavigation?: EmbeddedHtmlNavigation;
   children?: React.ReactNode;
 };
@@ -54,33 +56,38 @@ export default function EmbeddedBrowserChrome({
   active,
   htmlOccupied = false,
   onLeaveHtmlPreview,
+  onOpenLocalFile,
   htmlNavigation,
   children,
 }: Props) {
   const stripRef = useRef<HTMLDivElement>(null);
+  const htmlOccupiedRef = useRef(htmlOccupied);
   const [state, setState] = useState<EmbeddedBrowserState>(EMPTY_EMBEDDED_BROWSER_STATE);
   const [address, setAddress] = useState("");
   const editingRef = useRef(false);
   const [addressError, setAddressError] = useState<string | undefined>();
+  htmlOccupiedRef.current = htmlOccupied;
 
   useEffect(() => {
     editingRef.current = false;
     setAddressError(undefined);
     void client.getState(viewRef).then((next) => {
       setState(next);
-      if (!editingRef.current) setAddress(next.url);
+      if (!editingRef.current && !htmlOccupiedRef.current) setAddress(next.url);
     });
     return client.onStateChanged((payload) => {
       if (payload.viewId !== viewRef.viewId || payload.threadId !== viewRef.threadId) return;
       setState(payload.state);
-      if (!editingRef.current) setAddress(payload.state.url);
+      if (!editingRef.current && !htmlOccupiedRef.current) {
+        setAddress(payload.state.url);
+      }
     });
   }, [client, viewRef.threadId, viewRef.viewId]);
 
   useEffect(() => {
-    if (editingRef.current || state.hasPage || !htmlNavigation) return;
-    setAddress(htmlNavigation.address);
-  }, [htmlNavigation, state.hasPage]);
+    if (editingRef.current || !htmlNavigation) return;
+    if (htmlOccupied || !state.hasPage) setAddress(htmlNavigation.address);
+  }, [htmlNavigation, htmlOccupied, state.hasPage]);
 
   useEffect(() => {
     if (!enabled || !active) {
@@ -139,15 +146,21 @@ export default function EmbeddedBrowserChrome({
     if (!parsed.ok) {
       setAddressError(
         parsed.reason === "unsupported_scheme"
-          ? "只支持 http 或 https 地址"
+          ? "只支持 http、https 或本地 HTML"
           : parsed.reason === "empty"
-            ? "请输入网址"
+            ? `请${EMBEDDED_BROWSER_EMPTY_HINT}`
             : "地址无效",
       );
       return;
     }
     setAddressError(undefined);
     editingRef.current = false;
+    setAddress(parsed.url);
+    if (parsed.kind === "file") {
+      htmlOccupiedRef.current = true;
+      onOpenLocalFile?.(parsed.url);
+      return;
+    }
     onLeaveHtmlPreview?.();
     void client.navigate(viewRef, parsed.url);
   };
@@ -156,7 +169,7 @@ export default function EmbeddedBrowserChrome({
     <div className="project-files-preview-empty is-centered">
       <AwakenIcon concept="browser" size={24} />
       <strong>浏览器</strong>
-      <span>输入网址</span>
+      <span>{EMBEDDED_BROWSER_EMPTY_HINT}</span>
     </div>
   );
 
@@ -207,7 +220,7 @@ export default function EmbeddedBrowserChrome({
           <input
             className="embedded-browser__address"
             aria-label="当前地址"
-            placeholder="输入网址"
+            placeholder={EMBEDDED_BROWSER_EMPTY_HINT}
             value={address}
             onChange={(event) => {
               editingRef.current = true;

@@ -30,6 +30,7 @@ describe("authorizeEmbeddedBrowserWebview", () => {
     expect(webPreferences.nodeIntegration).toBe(false);
     expect(webPreferences.sandbox).toBe(true);
     expect(webPreferences.webSecurity).toBe(true);
+    expect(webPreferences).toHaveProperty("disablePopups", false);
   });
 
   it("allows local HTML only on the isolated file partition", () => {

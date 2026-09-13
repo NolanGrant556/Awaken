@@ -1033,6 +1033,8 @@ function createMainWindow(): BrowserWindow {
     }
   });
   mainWindow.webContents.on("did-attach-webview", (_event, guest) => {
+    // Deny native windows before the browser controller installs same-tab routing.
+    guest.setWindowOpenHandler(() => ({ action: "deny" }));
     guest.on("before-input-event", (event, input) => {
       if (isDesktopTabNavigation(input)) {
         event.preventDefault();

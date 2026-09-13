@@ -50,5 +50,7 @@ export function authorizeEmbeddedBrowserWebview(
   webPreferences.sandbox = true;
   webPreferences.webSecurity = !allowFile;
   webPreferences.plugins = false;
+  // Forward popup requests to Main, whose handlers always deny native windows.
+  Object.assign(webPreferences, { disablePopups: false });
   return true;
 }

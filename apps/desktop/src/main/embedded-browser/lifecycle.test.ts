@@ -39,6 +39,32 @@ function attach(manager: EmbeddedBrowserViewManager, guest: Guest, allowFile = f
 }
 
 describe("browser guest lifecycle and Agent admission", () => {
+  it("routes popup links into the current public guest without admitting a new origin", async () => {
+    const manager = managerWithState();
+    const guest = new Guest();
+    attach(manager, guest);
+    await manager.navigate(ref, "https://example.com/");
+    const open = guest.setWindowOpenHandler.mock.calls[0][0] as (details: { url: string }) => { action: string };
+    expect(open({ url: "https://other.example/page" })).toEqual({ action: "deny" });
+    await Promise.resolve();
+    expect(guest.url).toBe("https://other.example/page");
+    expect(await runBrowserAutomation(manager, { action: "click", threadId: ref.threadId, ref: "1" })).toMatchObject({ ok: false, error: "origin_lease_expired" });
+    const loads = guest.loadURL.mock.calls.length;
+    expect(open({ url: "javascript:alert(1)" })).toEqual({ action: "deny" });
+    expect(open({ url: "file:///tmp/private.html" })).toEqual({ action: "deny" });
+    expect(guest.loadURL).toHaveBeenCalledTimes(loads);
+  });
+
+  it("hands local popup HTTP links to the manager to switch guest partitions", async () => {
+    const manager = managerWithState();
+    const guest = new Guest();
+    guest.url = "file:///tmp/local.html";
+    attach(manager, guest, true);
+    const open = guest.setWindowOpenHandler.mock.calls[0][0] as (details: { url: string }) => { action: string };
+    expect(open({ url: "https://example.com/page" })).toEqual({ action: "deny" });
+    expect(guest.loadURL).not.toHaveBeenCalled();
+    expect(manager.getState(ref).url).toBe("https://example.com/page");
+  });
   it("clears browser views only for main-document reloads, not guest loading", () => {
     const contents = new EventEmitter();
     const hide = vi.fn();

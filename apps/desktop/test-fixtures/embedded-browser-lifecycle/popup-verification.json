@@ -1,0 +1,35 @@
+{
+  "date": "2026-09-13",
+  "platform": "macOS",
+  "entry": "npm run open:desktop",
+  "base": "ca07450b701ab7bf3d5680a29339f4df0682c52f + 新窗口链接修复",
+  "checks": [
+    {
+      "case": "target=_blank",
+      "result": "夹具 A 新窗口链接在当前标签打开另一 origin 的 B，后退按钮可用",
+      "screenshot": "popup-same-tab.png"
+    },
+    {
+      "case": "百度热搜和搜索结果",
+      "result": "百度热搜可进入搜索结果；点击中国政府网结果在当前标签打开目标网页",
+      "screenshot": "baidu-popup-navigation.png"
+    },
+    {
+      "case": "后退",
+      "result": "从目标网页后退恢复百度搜索结果",
+      "screenshot": "baidu-search-back.png"
+    }
+  ],
+  "user_confirmation": "用户确认：正常了",
+  "automation": {
+    "tests": 33,
+    "scope": "embedded-browser 与 FilePreviewHost",
+    "typecheck": "通过",
+    "build": "通过",
+    "docs": "通过",
+    "diff_check": "通过"
+  },
+  "not_executed": [
+    "Windows/Linux 真实 Desktop"
+  ]
+}

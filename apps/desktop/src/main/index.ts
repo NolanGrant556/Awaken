@@ -140,7 +140,7 @@ import { DesktopShutdownCoordinator } from "./desktop-shutdown-coordinator.js";
 import { DesktopUpdateManager } from "./desktop-update-manager.js";
 import { EMBEDDED_BROWSER_CHANNELS } from "../shared/embedded-browser.js";
 import { EmbeddedBrowserHost } from "./embedded-browser/host.js";
-import { registerEmbeddedBrowserIpc } from "./embedded-browser/ipc.js";
+import { registerEmbeddedBrowserIpc, registerEmbeddedBrowserReloadHandler } from "./embedded-browser/ipc.js";
 import { EmbeddedBrowserViewManager } from "./embedded-browser/manager.js";
 import { authorizeEmbeddedBrowserWebview } from "./embedded-browser/options.js";
 
@@ -1081,7 +1081,7 @@ function createMainWindow(): BrowserWindow {
   const hideEmbeddedBrowserViews = () => {
     embeddedBrowserManager?.hideAll();
   };
-  mainWindow.webContents.on("did-start-loading", hideEmbeddedBrowserViews);
+  registerEmbeddedBrowserReloadHandler(mainWindow.webContents, hideEmbeddedBrowserViews);
 
   mainWindow.webContents.on("render-process-gone", (_event, details) => {
     hideEmbeddedBrowserViews();

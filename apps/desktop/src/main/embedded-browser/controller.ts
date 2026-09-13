@@ -25,6 +25,8 @@ export class EmbeddedBrowserViewController {
   private destroyed = false;
   private shownWithBounds = false;
   private admittedOrigin = "";
+  private readonly eventDisposers: Array<() => void> = [];
+  private navigationInFlight: { url: string; promise: Promise<void> } | null = null;
   private readonly onState: (state: EmbeddedBrowserState) => void;
   private readonly allowFile: boolean;
   private readonly guest: WebContents;
@@ -75,15 +77,23 @@ export class EmbeddedBrowserViewController {
     session.on("will-download", (event) => event.preventDefault());
   }
 
+  get authorizedOrigin(): string {
+    return this.admittedOrigin;
+  }
+
   private wireEvents(): void {
     const wc = this.wc;
-    wc.on("did-start-loading", () => this.emitState());
-    wc.on("did-stop-loading", () => this.emitState());
-    wc.on("did-navigate", () => this.recordNavigation());
-    wc.on("did-navigate-in-page", () => this.recordNavigation());
-    wc.on("page-title-updated", () => this.emitState());
-    wc.on("did-fail-load", () => this.emitState());
-    wc.on("destroyed", () => {
+    const listen = (name: string, listener: (...args: any[]) => void) => {
+      wc.on(name as "did-navigate", listener);
+      this.eventDisposers.push(() => wc.removeListener(name as "did-navigate", listener));
+    };
+    listen("did-start-loading", () => this.emitState());
+    listen("did-stop-loading", () => this.emitState());
+    listen("did-navigate", () => this.recordNavigation());
+    listen("did-navigate-in-page", () => this.recordNavigation());
+    listen("page-title-updated", () => this.emitState());
+    listen("did-fail-load", () => this.emitState());
+    listen("destroyed", () => {
       this.destroyed = true;
     });
 
@@ -95,7 +105,7 @@ export class EmbeddedBrowserViewController {
       return { action: "deny" };
     });
 
-    wc.on("will-navigate", (event, url) => {
+    const guardNavigation = (event: Electron.Event, url: string) => {
       if (this.handoffHttp(url)) {
         event.preventDefault();
         return;
@@ -103,7 +113,9 @@ export class EmbeddedBrowserViewController {
       if (resolveEmbeddedBrowserNavigation(url, this.allowFile)) return;
       event.preventDefault();
       this.openExternal(url);
-    });
+    };
+    listen("will-navigate", guardNavigation);
+    listen("will-redirect", guardNavigation);
   }
 
   private handoffHttp(url: string): boolean {
@@ -129,7 +141,7 @@ export class EmbeddedBrowserViewController {
 
   private recordNavigation(): void {
     const origin = originOf(this.wc.getURL());
-    if (origin) this.admittedOrigin = origin;
+    if (origin !== this.admittedOrigin) this.admittedOrigin = "";
     this.emitState();
   }
 
@@ -156,23 +168,36 @@ export class EmbeddedBrowserViewController {
   }
 
   admitOrigin(url: string): void {
-    const origin = originOf(url);
-    if (origin) this.admittedOrigin = origin;
+    this.admittedOrigin = parseNavigable(url) ? originOf(url) : "";
   }
 
   originAdmitted(url: string): boolean {
     const origin = originOf(url);
-    return origin !== "" && origin === this.admittedOrigin;
+    return !this.allowFile && Boolean(parseNavigable(url)) && origin !== "" && origin === this.admittedOrigin;
   }
 
   async navigate(url: string): Promise<EmbeddedBrowserState> {
     const navigable = resolveEmbeddedBrowserNavigation(url, this.allowFile);
-    if (!navigable) return this.state();
+    if (!navigable || (this.allowFile && parseNavigable(navigable))) {
+      throw new Error("unsupported_scheme");
+    }
     this.admitOrigin(navigable);
-    if (this.currentURL() !== navigable) {
-      await this.loadInternal(navigable);
+    if (this.navigationInFlight?.url === navigable) {
+      await this.navigationInFlight.promise;
+    } else if (this.currentURL() !== navigable || this.wc.isLoading()) {
+      const navigation = { url: navigable, promise: this.loadInternal(navigable) };
+      this.navigationInFlight = navigation;
+      try {
+        await navigation.promise;
+      } finally {
+        if (this.navigationInFlight === navigation) this.navigationInFlight = null;
+      }
     }
     return this.state();
+  }
+
+  async waitForNavigation(): Promise<void> {
+    await this.navigationInFlight?.promise;
   }
 
   back(): EmbeddedBrowserState {
@@ -217,6 +242,9 @@ export class EmbeddedBrowserViewController {
     if (this.destroyed || this.wc.isDestroyed()) {
       throw new Error("browser view is destroyed");
     }
+    if (this.allowFile || !parseNavigable(this.currentURL())) {
+      throw new Error("unsupported_scheme");
+    }
     return this.wc.executeJavaScript(code, true) as Promise<T>;
   }
 
@@ -224,5 +252,7 @@ export class EmbeddedBrowserViewController {
     if (this.destroyed) return;
     this.destroyed = true;
     this.shownWithBounds = false;
+    for (const dispose of this.eventDisposers) dispose();
+    this.eventDisposers.length = 0;
   }
 }

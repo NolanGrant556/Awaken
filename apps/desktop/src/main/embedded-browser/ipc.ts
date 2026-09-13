@@ -1,4 +1,4 @@
-import { ipcMain, webContents, type BrowserWindow, type IpcMainInvokeEvent } from "electron";
+import { ipcMain, webContents, type BrowserWindow, type IpcMainInvokeEvent, type WebContents } from "electron";
 import {
   EMBEDDED_BROWSER_CHANNELS,
   type EmbeddedBrowserTabRef,
@@ -77,5 +77,14 @@ export function registerEmbeddedBrowserIpc(options: {
   ipcMain.handle(EMBEDDED_BROWSER_CHANNELS.detachGuest, (event, ref: EmbeddedBrowserTabRef) => {
     requireSender(event);
     options.manager.detachGuest(ref);
+  });
+}
+
+export function registerEmbeddedBrowserReloadHandler(
+  contents: WebContents,
+  hide: () => void,
+): void {
+  contents.on("did-start-navigation", (details) => {
+    if (details.isMainFrame && !details.isSameDocument) hide();
   });
 }

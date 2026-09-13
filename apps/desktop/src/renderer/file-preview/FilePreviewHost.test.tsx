@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import FilePreviewHost from "./FilePreviewHost";
-import { EMBEDDED_BROWSER_EMPTY_HINT } from "../../shared/embedded-browser";
+import { createIdleEmbeddedBrowserClient, EMPTY_EMBEDDED_BROWSER_STATE, EMBEDDED_BROWSER_EMPTY_HINT } from "../../shared/embedded-browser";
 import { overlayCoversEmbeddedBrowser } from "./EmbeddedBrowserChrome";
 
 async function settleUntil(isReady: () => boolean): Promise<void> {
@@ -33,6 +33,51 @@ describe("FilePreviewHost", () => {
     await act(async () => root.unmount());
     document.body.replaceChildren();
     vi.restoreAllMocks();
+  });
+
+  it("isolates browser guests across tabs and threads, including empty tabs", async () => {
+    const states = new Map([
+      ["thread-1/a", { ...EMPTY_EMBEDDED_BROWSER_STATE, url: "https://one.example/", hasPage: true }],
+      ["thread-1/b", { ...EMPTY_EMBEDDED_BROWSER_STATE, url: "https://two.example/", hasPage: true }],
+    ]);
+    const embeddedBrowser = {
+      ...createIdleEmbeddedBrowserClient(),
+      attachGuest: vi.fn(async () => undefined),
+      getState: vi.fn(async (ref: { threadId: string; viewId: string }) =>
+        states.get(`${ref.threadId}/${ref.viewId}`) ?? EMPTY_EMBEDDED_BROWSER_STATE),
+    };
+    const render = (threadId: string, viewId: string) => (
+      <FilePreviewHost
+        runtimeClient={{
+          startProjectFilePreview: vi.fn(),
+          closeProjectFilePreview: vi.fn(async () => undefined),
+          openProjectFileExternally: vi.fn(async () => ({ ok: true as const })),
+          revealProjectFile: vi.fn(async () => ({ ok: true as const })),
+          saveProjectMarkdownFile: vi.fn(async () => ({ ok: true as const, byteLength: 0 })),
+        }}
+        mode="browser" onModeChange={vi.fn()} threadId={threadId} viewId={viewId}
+        embeddedBrowser={embeddedBrowser}
+      />
+    );
+    await act(async () => root.render(render("thread-1", "a")));
+    const firstGuest = container.querySelector("webview");
+    expect(firstGuest?.getAttribute("src")).toBe("https://one.example/");
+    // Electron exposes getWebContentsId only after dom-ready, not at did-attach.
+    Object.defineProperty(firstGuest, "getWebContentsId", { value: () => 17 });
+    await act(async () => firstGuest?.dispatchEvent(new Event("dom-ready")));
+    expect(embeddedBrowser.attachGuest).toHaveBeenCalledWith(
+      { threadId: "thread-1", viewId: "a" }, 17, false,
+    );
+    await act(async () => root.render(render("thread-1", "b")));
+    expect(container.querySelector("webview")).not.toBe(firstGuest);
+    expect(container.querySelector("webview")?.getAttribute("src")).toBe("https://two.example/");
+    await act(async () => root.render(render("thread-1", "empty")));
+    expect(container.querySelector("webview")).toBeNull();
+    await act(async () => root.render(render("thread-1", "a")));
+    expect(container.querySelector("webview")?.getAttribute("src")).toBe("https://one.example/");
+    await act(async () => root.render(render("thread-2", "a")));
+    expect(container.querySelector("webview")).toBeNull();
+    expect((container.querySelector('input[aria-label="当前地址"]') as HTMLInputElement).value).toBe("");
   });
 
   it("centers the browser empty state with an address-only prompt", async () => {

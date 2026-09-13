@@ -4,6 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import FilePreviewHost from "./FilePreviewHost";
+import { EMBEDDED_BROWSER_EMPTY_HINT } from "../../shared/embedded-browser";
 
 async function settleUntil(isReady: () => boolean): Promise<void> {
   await act(async () => {
@@ -60,7 +61,9 @@ describe("FilePreviewHost", () => {
     );
     expect(emptyState).not.toBeNull();
     expect(emptyState?.querySelector("strong")?.textContent).toBe("浏览器");
-    expect(emptyState?.querySelector("span")?.textContent).toBe("输入网址");
+    expect(emptyState?.querySelector("span")?.textContent).toBe(
+      EMBEDDED_BROWSER_EMPTY_HINT,
+    );
     expect(
       container.querySelector('input[aria-label="当前地址"]'),
     ).not.toBeNull();
@@ -387,6 +390,124 @@ describe("FilePreviewHost", () => {
     expect(container.querySelector(".project-file-preview-heading")).toBeNull();
   });
 
+  it("opens a local HTML path in an isolated guest instead of the public web session", async () => {
+    const idleState = {
+      url: "",
+      title: "",
+      canGoBack: false,
+      canGoForward: false,
+      loading: false,
+      secure: false,
+      hasPage: false,
+    };
+    const navigate = vi.fn(async (_ref: unknown, url: string) => ({
+      ...idleState,
+      url,
+      hasPage: true,
+      secure: url.startsWith("https:"),
+    }));
+    const embeddedBrowser = {
+      navigate,
+      back: vi.fn(async () => idleState),
+      forward: vi.fn(async () => idleState),
+      reload: vi.fn(async () => idleState),
+      stop: vi.fn(async () => idleState),
+      close: vi.fn(async () => undefined),
+      getState: vi.fn(async () => idleState),
+      setViewport: vi.fn(async () => undefined),
+      setActive: vi.fn(async () => undefined),
+      onStateChanged: vi.fn(() => () => {}),
+      onGuestHttpNavigate: vi.fn(() => () => {}),
+    };
+
+    await act(async () => {
+      root.render(
+        <FilePreviewHost
+          runtimeClient={{
+            startProjectFilePreview: vi.fn(),
+            closeProjectFilePreview: vi.fn(async () => undefined),
+            openProjectFileExternally: vi.fn(async () => ({
+              ok: true as const,
+            })),
+            revealProjectFile: vi.fn(async () => ({ ok: true as const })),
+            saveProjectMarkdownFile: vi.fn(async () => ({
+              ok: true as const,
+              byteLength: 0,
+            })),
+          }}
+          mode="browser"
+          onModeChange={vi.fn()}
+          threadId="thread-1"
+          viewId="project-file-slot:1"
+          embeddedBrowser={embeddedBrowser}
+        />,
+      );
+    });
+
+    const input = container.querySelector(
+      'input[aria-label="当前地址"]',
+    ) as HTMLInputElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        "value",
+      )?.set;
+      setter?.call(input, "javascript:alert(1)");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      container
+        .querySelector("form.embedded-browser__toolbar")
+        ?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+      "只支持 http、https 或本地 HTML",
+    );
+    expect(navigate).not.toHaveBeenCalled();
+
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        "value",
+      )?.set;
+      setter?.call(input, "/tmp/index.html");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      container
+        .querySelector("form.embedded-browser__toolbar")
+        ?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+
+    expect(navigate).not.toHaveBeenCalled();
+    const guest = container.querySelector("webview");
+    expect(guest?.getAttribute("src")).toBe("file:///tmp/index.html");
+    expect(guest?.getAttribute("partition")).toBe(
+      "awaken-local-html-project-file-slot-1",
+    );
+    expect(guest?.getAttribute("partition")?.startsWith("persist:")).toBe(false);
+    expect(input.value).toBe("file:///tmp/index.html");
+
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        "value",
+      )?.set;
+      setter?.call(input, "example.com");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      container
+        .querySelector("form.embedded-browser__toolbar")
+        ?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+    expect(navigate).toHaveBeenCalledWith(
+      { threadId: "thread-1", viewId: "project-file-slot:1" },
+      "https://example.com/",
+    );
+    expect(container.querySelector("webview")).toBeNull();
+  });
+
   it("activates a local view so the empty workbench can still show a page", async () => {
     const idleState = {
       url: "",
@@ -559,7 +680,7 @@ describe("FilePreviewHost", () => {
     ).toContain("is-hidden");
     expect(
       container.querySelector(".project-files-preview-empty")?.textContent,
-    ).toContain("输入网址");
+    ).toContain(EMBEDDED_BROWSER_EMPTY_HINT);
 
     await act(async () => root.render(render("files")));
     expect(container.querySelector("webview")).toBe(webview);

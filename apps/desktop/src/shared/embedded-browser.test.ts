@@ -3,8 +3,11 @@ import {
   browserActionAllowed,
   deriveBrowserState,
   EMBEDDED_BROWSER_PARTITION,
+  filePathToFileUrl,
   LOCAL_EMBEDDED_BROWSER_THREAD_ID,
   LOCAL_EMBEDDED_BROWSER_VIEW_ID,
+  localHtmlPartition,
+  LOCAL_HTML_PARTITION_PREFIX,
   normalizeBrowserAddressInput,
   originOf,
   parseNavigable,
@@ -17,6 +20,7 @@ describe("normalizeBrowserAddressInput", () => {
   it("treats a bare host as https", () => {
     expect(normalizeBrowserAddressInput("example.com")).toEqual({
       ok: true,
+      kind: "http",
       url: "https://example.com/",
     });
   });
@@ -24,22 +28,46 @@ describe("normalizeBrowserAddressInput", () => {
   it("accepts explicit http and https", () => {
     expect(normalizeBrowserAddressInput("http://localhost:3000/path")).toEqual({
       ok: true,
+      kind: "http",
       url: "http://localhost:3000/path",
     });
     expect(normalizeBrowserAddressInput("https://awaken.dev")).toEqual({
       ok: true,
+      kind: "http",
       url: "https://awaken.dev/",
     });
   });
 
-  it("rejects empty, file, javascript and custom schemes", () => {
+  it("accepts file URLs and absolute local paths", () => {
+    expect(normalizeBrowserAddressInput("file:///tmp/index.html")).toEqual({
+      ok: true,
+      kind: "file",
+      url: "file:///tmp/index.html",
+    });
+    expect(normalizeBrowserAddressInput("/tmp/index.html")).toEqual({
+      ok: true,
+      kind: "file",
+      url: "file:///tmp/index.html",
+    });
+    expect(normalizeBrowserAddressInput("/tmp/My File.html")).toEqual({
+      ok: true,
+      kind: "file",
+      url: "file:///tmp/My%20File.html",
+    });
+    expect(
+      normalizeBrowserAddressInput("C:\\Users\\me\\page.html"),
+    ).toEqual({
+      ok: true,
+      kind: "file",
+      url: "file:///C:/Users/me/page.html",
+    });
+    expect(filePathToFileUrl("/tmp/about.html")).toBe("file:///tmp/about.html");
+  });
+
+  it("rejects empty, javascript and custom schemes", () => {
     expect(normalizeBrowserAddressInput("  ")).toEqual({
       ok: false,
       reason: "empty",
-    });
-    expect(normalizeBrowserAddressInput("file:///tmp/index.html")).toEqual({
-      ok: false,
-      reason: "unsupported_scheme",
     });
     expect(normalizeBrowserAddressInput("javascript:alert(1)")).toEqual({
       ok: false,
@@ -60,8 +88,9 @@ describe("normalizeBrowserAddressInput", () => {
 });
 
 describe("parseNavigable and external schemes", () => {
-  it("returns null for non-web input", () => {
+  it("returns null for non-web input including local files", () => {
     expect(parseNavigable("file:///etc/passwd")).toBeNull();
+    expect(parseNavigable("/tmp/index.html")).toBeNull();
     expect(parseNavigable("")).toBeNull();
   });
 
@@ -161,10 +190,17 @@ describe("originOf", () => {
 });
 
 describe("session isolation", () => {
-  it("keeps the public web partition distinct from project HTML preview", () => {
+  it("keeps the public web partition distinct from local HTML and Office preview", () => {
     expect(EMBEDDED_BROWSER_PARTITION).toBe("persist:awaken-browser");
     expect(EMBEDDED_BROWSER_PARTITION.startsWith("awaken-preview")).toBe(false);
     expect(EMBEDDED_BROWSER_PARTITION.includes("preview")).toBe(false);
+    expect(localHtmlPartition("project-file-slot:1")).toBe(
+      "awaken-local-html-project-file-slot-1",
+    );
+    expect(localHtmlPartition("project-file-slot:1").startsWith("persist:")).toBe(
+      false,
+    );
+    expect(LOCAL_HTML_PARTITION_PREFIX.startsWith("awaken-preview")).toBe(false);
   });
 });
 

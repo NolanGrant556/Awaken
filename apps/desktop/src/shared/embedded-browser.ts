@@ -1,4 +1,6 @@
 export const EMBEDDED_BROWSER_PARTITION = "persist:awaken-browser";
+export const LOCAL_HTML_PARTITION_PREFIX = "awaken-local-html";
+export const EMBEDDED_BROWSER_EMPTY_HINT = "输入网址或本地 HTML 路径";
 
 /** Workbench home has no Core thread yet; user browsing still needs a stable view key. */
 export const LOCAL_EMBEDDED_BROWSER_THREAD_ID = "local";
@@ -74,7 +76,7 @@ export type EmbeddedBrowserAddressFailureReason =
   | "invalid_url";
 
 export type EmbeddedBrowserAddressResult =
-  | { ok: true; url: string }
+  | { ok: true; kind: "http" | "file"; url: string }
   | { ok: false; reason: EmbeddedBrowserAddressFailureReason };
 
 export type EmbeddedBrowserActionKind = "observe" | "mutate" | "navigate";
@@ -91,15 +93,53 @@ export const EMPTY_EMBEDDED_BROWSER_STATE: EmbeddedBrowserState = {
 
 const EXTERNAL_SCHEMES = new Set(["mailto:", "tel:"]);
 
+export function localHtmlPartition(viewId: string): string {
+  const safe = viewId.trim().replace(/[^A-Za-z0-9._-]+/g, "-") || "preview";
+  return `${LOCAL_HTML_PARTITION_PREFIX}-${safe}`;
+}
+
+function looksLikeAbsoluteFilePath(raw: string): boolean {
+  if (raw.startsWith("\\\\")) return true;
+  if (raw.startsWith("//")) return false;
+  if (raw.startsWith("/")) return true;
+  return /^[A-Za-z]:[\\/]/.test(raw);
+}
+
+export function filePathToFileUrl(filePath: string): string | null {
+  const trimmed = filePath.trim();
+  if (!trimmed) return null;
+  try {
+    if (trimmed.startsWith("\\\\")) {
+      return new URL(`file:${trimmed.replace(/\\/g, "/")}`).href;
+    }
+    const normalized = trimmed.replace(/\\/g, "/");
+    if (/^[A-Za-z]:\//.test(normalized)) {
+      return new URL(`file:///${encodeURI(normalized)}`).href;
+    }
+    if (normalized.startsWith("/")) {
+      return new URL(`file://${encodeURI(normalized)}`).href;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 export function normalizeBrowserAddressInput(
   input: string,
 ): EmbeddedBrowserAddressResult {
   const trimmed = input.trim();
   if (!trimmed) return { ok: false, reason: "empty" };
 
+  if (looksLikeAbsoluteFilePath(trimmed)) {
+    const fileUrl = filePathToFileUrl(trimmed);
+    return fileUrl
+      ? { ok: true, kind: "file", url: fileUrl }
+      : { ok: false, reason: "invalid_url" };
+  }
+
   const hasScheme = /^[a-z][a-z0-9+.-]*:/i.test(trimmed);
   const candidate = hasScheme ? trimmed : `https://${trimmed}`;
-
   let url: URL;
   try {
     url = new URL(candidate);
@@ -107,16 +147,19 @@ export function normalizeBrowserAddressInput(
     return { ok: false, reason: "invalid_url" };
   }
 
+  if (url.protocol === "file:") {
+    return { ok: true, kind: "file", url: url.href };
+  }
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     return { ok: false, reason: "unsupported_scheme" };
   }
 
-  return { ok: true, url: url.toString() };
+  return { ok: true, kind: "http", url: url.toString() };
 }
 
 export function parseNavigable(input: string): string | null {
   const result = normalizeBrowserAddressInput(input);
-  return result.ok ? result.url : null;
+  return result.ok && result.kind === "http" ? result.url : null;
 }
 
 export function safeExternalUrl(url: string): string | null {

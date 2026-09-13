@@ -16,6 +16,8 @@ import type {
 import type { RuntimeClient } from "../runtime/client";
 import {
   createIdleEmbeddedBrowserClient,
+  EMBEDDED_BROWSER_EMPTY_HINT,
+  localHtmlPartition,
   resolveEmbeddedBrowserTabRef,
   type EmbeddedBrowserBridge,
 } from "../../shared/embedded-browser";
@@ -24,7 +26,10 @@ import PreviewFrame, { type PreviewFrameProps } from "./PreviewFrame";
 import PreviewErrorBoundary from "./PreviewErrorBoundary";
 import { useProjectFilePreviewPrimaryClick } from "./useProjectFilePreviewPrimaryClick";
 import WebviewPreview from "./WebviewPreview";
-import EmbeddedBrowserChrome from "./EmbeddedBrowserChrome";
+import IsolatedHtmlPreview from "./IsolatedHtmlPreview";
+import EmbeddedBrowserChrome, {
+  type EmbeddedHtmlNavigation,
+} from "./EmbeddedBrowserChrome";
 
 const MarkdownPreview = lazy(() => import("./MarkdownPreview"));
 const CodePreview = lazy(() => import("./CodePreview"));
@@ -122,6 +127,10 @@ export default function FilePreviewHost({
   const [state, setState] = useState<PreviewState>({ status: "idle" });
   const [retryGeneration, setRetryGeneration] = useState(0);
   const [guestLoading, setGuestLoading] = useState(false);
+  const [localHtmlSrc, setLocalHtmlSrc] = useState<string | null>(null);
+  const [htmlNavigation, setHtmlNavigation] = useState<
+    EmbeddedHtmlNavigation | undefined
+  >(undefined);
   const activePreviewIdRef = useRef<string | undefined>(undefined);
   const generationRef = useRef(0);
   const onModeChangeRef = useRef(onModeChange);
@@ -321,11 +330,32 @@ export default function FilePreviewHost({
       viewRef={browserRef}
       enabled={mode === "browser"}
       active={browserActive}
-      onLeaveHtmlPreview={onLeaveHtmlPreview}
+      htmlOccupied={Boolean(localHtmlSrc) && mode === "browser"}
+      htmlNavigation={mode === "browser" ? htmlNavigation : undefined}
+      onOpenLocalFile={setLocalHtmlSrc}
+      onLeaveHtmlPreview={() => {
+        setLocalHtmlSrc(null);
+        setHtmlNavigation(undefined);
+        onLeaveHtmlPreview?.();
+      }}
     >
       {children}
     </EmbeddedBrowserChrome>
   );
+
+  const localHtmlGuest =
+    mode === "browser" && localHtmlSrc ? (
+      <IsolatedHtmlPreview
+        src={localHtmlSrc}
+        partition={localHtmlPartition(browserRef.viewId)}
+        onHttpNavigate={(url) => {
+          setLocalHtmlSrc(null);
+          setHtmlNavigation(undefined);
+          void browserClient.navigate(browserRef, url);
+        }}
+        onNavigationChange={setHtmlNavigation}
+      />
+    ) : null;
 
   if (mode === "browser" && state.status !== "ready") {
     if (state.status === "loading") {
@@ -345,10 +375,10 @@ export default function FilePreviewHost({
         </div>,
       );
     }
-    return wrapBrowser();
+    return wrapBrowser(localHtmlGuest);
   }
 
-  if (state.status === "idle") return wrapBrowser();
+  if (state.status === "idle") return wrapBrowser(localHtmlGuest);
 
   if (state.status === "loading") {
     return wrapBrowser(
@@ -527,11 +557,13 @@ export default function FilePreviewHost({
         </PreviewErrorBoundary>
       </div>
       {!previewVisible ? (
-        <div className="project-files-preview-empty is-centered">
-          <AwakenIcon concept="browser" size={24} />
-          <strong>浏览器</strong>
-          <span>输入网址</span>
-        </div>
+        localHtmlGuest ?? (
+          <div className="project-files-preview-empty is-centered">
+            <AwakenIcon concept="browser" size={24} />
+            <strong>浏览器</strong>
+            <span>{EMBEDDED_BROWSER_EMPTY_HINT}</span>
+          </div>
+        )
       ) : null}
     </div>
   );

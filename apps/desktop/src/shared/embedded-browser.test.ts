@@ -11,6 +11,7 @@ import {
   normalizeBrowserAddressInput,
   originOf,
   parseNavigable,
+  resolveEmbeddedBrowserNavigation,
   resolveEmbeddedBrowserTabRef,
   safeExternalUrl,
   viewportBounds,
@@ -92,6 +93,19 @@ describe("parseNavigable and external schemes", () => {
     expect(parseNavigable("file:///etc/passwd")).toBeNull();
     expect(parseNavigable("/tmp/index.html")).toBeNull();
     expect(parseNavigable("")).toBeNull();
+  });
+
+  it("lets the address bar resolve local files without admitting them to agent tools", () => {
+    expect(resolveEmbeddedBrowserNavigation("file:///tmp/index.html", true)).toBe(
+      "file:///tmp/index.html",
+    );
+    expect(resolveEmbeddedBrowserNavigation("/tmp/index.html", true)).toBe(
+      "file:///tmp/index.html",
+    );
+    expect(resolveEmbeddedBrowserNavigation("file:///tmp/index.html")).toBeNull();
+    expect(resolveEmbeddedBrowserNavigation("example.com", true)).toBe(
+      "https://example.com/",
+    );
   });
 
   it("only escapes mailto and tel to the OS", () => {

@@ -6,6 +6,7 @@ import {
   EMPTY_EMBEDDED_BROWSER_STATE,
   originOf,
   parseNavigable,
+  resolveEmbeddedBrowserNavigation,
   safeExternalUrl,
   viewportBounds,
 } from "../../shared/embedded-browser.js";
@@ -14,23 +15,43 @@ import { browserViewWebPreferences } from "./options.js";
 const backstopInstalledFor = new WeakSet<Session>();
 const VIEWPORT_RESTORE_POLL_MS = 16;
 
+export type EmbeddedBrowserViewControllerOptions = {
+  allowFile?: boolean;
+  partition?: string;
+  onHandoffHttp?: (url: string) => void;
+};
+
 export class EmbeddedBrowserViewController {
   private readonly view: WebContentsView;
   private destroyed = false;
   private shownWithBounds = false;
   private admittedOrigin = "";
   private readonly onState: (state: EmbeddedBrowserState) => void;
+  private readonly allowFile: boolean;
+  private readonly onHandoffHttp?: (url: string) => void;
 
   constructor(
     private readonly window: BrowserWindow,
     onState: (state: EmbeddedBrowserState) => void,
+    options: EmbeddedBrowserViewControllerOptions = {},
   ) {
     this.onState = onState;
-    this.view = new WebContentsView({ webPreferences: browserViewWebPreferences() });
+    this.allowFile = Boolean(options.allowFile);
+    this.onHandoffHttp = options.onHandoffHttp;
+    this.view = new WebContentsView({
+      webPreferences: browserViewWebPreferences({
+        partition: options.partition,
+        allowFile: this.allowFile,
+      }),
+    });
     this.window.contentView.addChildView(this.view);
     this.hide();
     this.applySecurityBackstop();
     this.wireEvents();
+  }
+
+  get loadsLocalFiles(): boolean {
+    return this.allowFile;
   }
 
   get shown(): boolean {
@@ -64,17 +85,30 @@ export class EmbeddedBrowserViewController {
     wc.on("did-fail-load", () => this.emitState());
 
     wc.setWindowOpenHandler(({ url }) => {
-      const navigable = parseNavigable(url);
+      if (this.handoffHttp(url)) return { action: "deny" };
+      const navigable = resolveEmbeddedBrowserNavigation(url, this.allowFile);
       if (navigable) void this.loadInternal(navigable);
       else this.openExternal(url);
       return { action: "deny" };
     });
 
     wc.on("will-navigate", (event, url) => {
-      if (parseNavigable(url)) return;
+      if (this.handoffHttp(url)) {
+        event.preventDefault();
+        return;
+      }
+      if (resolveEmbeddedBrowserNavigation(url, this.allowFile)) return;
       event.preventDefault();
       this.openExternal(url);
     });
+  }
+
+  private handoffHttp(url: string): boolean {
+    if (!this.allowFile || !this.onHandoffHttp) return false;
+    const httpUrl = parseNavigable(url);
+    if (!httpUrl) return false;
+    this.onHandoffHttp(httpUrl);
+    return true;
   }
 
   private openExternal(url: string): void {
@@ -129,7 +163,7 @@ export class EmbeddedBrowserViewController {
   }
 
   async navigate(url: string): Promise<EmbeddedBrowserState> {
-    const navigable = parseNavigable(url);
+    const navigable = resolveEmbeddedBrowserNavigation(url, this.allowFile);
     if (!navigable) return this.state();
     this.admitOrigin(navigable);
     await this.loadInternal(navigable);

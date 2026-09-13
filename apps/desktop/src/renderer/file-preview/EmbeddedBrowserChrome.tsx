@@ -40,7 +40,6 @@ type Props = {
   active: boolean;
   htmlOccupied?: boolean;
   onLeaveHtmlPreview?: () => void;
-  onOpenLocalFile?: (url: string) => void;
   htmlNavigation?: EmbeddedHtmlNavigation;
   children?: React.ReactNode;
 };
@@ -56,7 +55,6 @@ export default function EmbeddedBrowserChrome({
   active,
   htmlOccupied = false,
   onLeaveHtmlPreview,
-  onOpenLocalFile,
   htmlNavigation,
   children,
 }: Props) {
@@ -156,12 +154,7 @@ export default function EmbeddedBrowserChrome({
     setAddressError(undefined);
     editingRef.current = false;
     setAddress(parsed.url);
-    if (parsed.kind === "file") {
-      htmlOccupiedRef.current = true;
-      onOpenLocalFile?.(parsed.url);
-      return;
-    }
-    onLeaveHtmlPreview?.();
+    if (parsed.kind === "http") onLeaveHtmlPreview?.();
     void client.navigate(viewRef, parsed.url);
   };
 

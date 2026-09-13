@@ -10,6 +10,7 @@ function fakeController() {
       controller.shown = false;
       controller.hasViewport = false;
     }),
+    loadsLocalFiles: false,
     setBounds: vi.fn((rect: { width: number; height: number } | null) => {
       controller.shown = Boolean(rect && rect.width > 0 && rect.height > 0);
       controller.hasViewport = controller.shown;
@@ -45,8 +46,9 @@ describe("EmbeddedBrowserViewManager", () => {
       getWindow: () => ({ isDestroyed: () => false }) as never,
       onState: vi.fn(),
       onRequestShow: vi.fn(),
-      createView: () => {
+      createView: (_window, _onState, options) => {
         const controller = fakeController();
+        controller.loadsLocalFiles = Boolean(options?.allowFile);
         created.push(controller);
         return controller as never;
       },
@@ -72,8 +74,9 @@ describe("EmbeddedBrowserViewManager", () => {
       getWindow: () => ({ isDestroyed: () => false }) as never,
       onState: vi.fn(),
       onRequestShow: vi.fn(),
-      createView: () => {
+      createView: (_window, _onState, options) => {
         const controller = fakeController();
+        controller.loadsLocalFiles = Boolean(options?.allowFile);
         created.push(controller);
         return controller as never;
       },
@@ -91,6 +94,33 @@ describe("EmbeddedBrowserViewManager", () => {
 
     manager.setViewport(first, { x: 10, y: 20, width: 400, height: 300 });
     expect(created[0].shown).toBe(false);
+  });
+
+  it("opens local HTML on an isolated view and does not keep the public web session", async () => {
+    const created: ReturnType<typeof fakeController>[] = [];
+    const manager = new EmbeddedBrowserViewManager({
+      getWindow: () => ({ isDestroyed: () => false }) as never,
+      onState: vi.fn(),
+      onRequestShow: vi.fn(),
+      createView: (_window, _onState, options) => {
+        const controller = fakeController();
+        controller.loadsLocalFiles = Boolean(options?.allowFile);
+        created.push(controller);
+        return controller as never;
+      },
+    });
+
+    const first = { viewId: "slot:1", threadId: "thread-a" };
+    await manager.navigate(first, "file:///tmp/index.html");
+    expect(created).toHaveLength(1);
+    expect(created[0].loadsLocalFiles).toBe(true);
+    expect(created[0].navigate).toHaveBeenCalledWith("file:///tmp/index.html");
+
+    await manager.navigate(first, "https://example.com/");
+    expect(created).toHaveLength(2);
+    expect(created[0].destroy).toHaveBeenCalled();
+    expect(created[1].loadsLocalFiles).toBe(false);
+    expect(created[1].navigate).toHaveBeenCalledWith("https://example.com/");
   });
 
   it("fails agent visibility when the renderer never focuses a tab", async () => {

@@ -390,7 +390,7 @@ describe("FilePreviewHost", () => {
     expect(container.querySelector(".project-file-preview-heading")).toBeNull();
   });
 
-  it("opens a local HTML path in an isolated guest instead of the public web session", async () => {
+  it("opens a local HTML path through the native view instead of a renderer webview", async () => {
     const idleState = {
       url: "",
       title: "",
@@ -479,13 +479,11 @@ describe("FilePreviewHost", () => {
         ?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     });
 
-    expect(navigate).not.toHaveBeenCalled();
-    const guest = container.querySelector("webview");
-    expect(guest?.getAttribute("src")).toBe("file:///tmp/index.html");
-    expect(guest?.getAttribute("partition")).toBe(
-      "awaken-local-html-project-file-slot-1",
+    expect(navigate).toHaveBeenCalledWith(
+      { threadId: "thread-1", viewId: "project-file-slot:1" },
+      "file:///tmp/index.html",
     );
-    expect(guest?.getAttribute("partition")?.startsWith("persist:")).toBe(false);
+    expect(container.querySelector("webview")).toBeNull();
     expect(input.value).toBe("file:///tmp/index.html");
 
     await act(async () => {

@@ -2,12 +2,13 @@ import type { BrowserWindow } from "electron";
 import {
   browserActionAllowed,
   EMPTY_EMBEDDED_BROWSER_STATE,
+  localHtmlPartition,
+  normalizeBrowserAddressInput,
+  originOf,
   type EmbeddedBrowserActionKind,
   type EmbeddedBrowserState,
   type EmbeddedBrowserTabRef,
   type EmbeddedBrowserViewRect,
-  originOf,
-  parseNavigable,
 } from "../../shared/embedded-browser.js";
 import { EmbeddedBrowserViewController } from "./controller.js";
 
@@ -20,6 +21,7 @@ export type EmbeddedBrowserViewManagerOptions = {
   createView?: (
     window: BrowserWindow,
     onState: (state: EmbeddedBrowserState) => void,
+    options: { allowFile: boolean; partition?: string },
   ) => EmbeddedBrowserViewController;
 };
 
@@ -44,16 +46,16 @@ export class EmbeddedBrowserViewManager {
   }
 
   async navigate(ref: EmbeddedBrowserTabRef, url: string): Promise<EmbeddedBrowserState> {
-    const navigable = parseNavigable(url);
-    if (!navigable) {
+    const parsed = normalizeBrowserAddressInput(url);
+    if (!parsed.ok) {
       throw new Error("unsupported_scheme");
     }
-    const controller = this.ensure(ref);
+    const controller = this.ensure(ref, parsed.kind === "file");
     this.activeKey = viewKey(ref);
     this.pendingActive = ref;
     this.hideAllExcept(this.activeKey);
     if (!controller.shown) controller.hide();
-    return controller.navigate(navigable);
+    return controller.navigate(parsed.url);
   }
 
   back(ref: EmbeddedBrowserTabRef): EmbeddedBrowserState {
@@ -178,20 +180,45 @@ export class EmbeddedBrowserViewManager {
     return undefined;
   }
 
-  private ensure(ref: EmbeddedBrowserTabRef): EmbeddedBrowserViewController {
+  private ensure(
+    ref: EmbeddedBrowserTabRef,
+    allowFile = false,
+  ): EmbeddedBrowserViewController {
     const key = viewKey(ref);
     const existing = this.views.get(key);
-    if (existing) return existing.controller;
+    if (existing && existing.controller.loadsLocalFiles === allowFile) {
+      return existing.controller;
+    }
+    if (existing) {
+      existing.controller.destroy();
+      this.views.delete(key);
+    }
     const window = this.options.getWindow();
     if (!window || window.isDestroyed()) {
       throw new Error("main window is not available");
     }
     const create =
       this.options.createView ??
-      ((owner, onState) => new EmbeddedBrowserViewController(owner, onState));
-    const controller = create(window, (state) => {
-      this.options.onState(ref.viewId, ref.threadId, state);
-    });
+      ((owner, onState, options) =>
+        new EmbeddedBrowserViewController(owner, onState, {
+          allowFile: options.allowFile,
+          partition: options.partition,
+          onHandoffHttp: options.allowFile
+            ? (httpUrl) => {
+                void this.navigate(ref, httpUrl);
+              }
+            : undefined,
+        }));
+    const controller = create(
+      window,
+      (state) => {
+        this.options.onState(ref.viewId, ref.threadId, state);
+      },
+      {
+        allowFile,
+        partition: allowFile ? localHtmlPartition(ref.viewId) : undefined,
+      },
+    );
     this.views.set(key, { ref, controller });
     return controller;
   }

@@ -44,6 +44,7 @@ describe("authorizeEmbeddedBrowserWebview", () => {
       (webPreferences as { allowFileAccessFromFileUrls?: boolean })
         .allowFileAccessFromFileUrls,
     ).toBe(true);
+    expect(webPreferences.webSecurity).toBe(false);
 
     expect(
       authorizeEmbeddedBrowserWebview(prefs(), {

@@ -1,5 +1,6 @@
 import {
   type EmbeddedBrowserActionKind,
+  type EmbeddedBrowserState,
   originOf,
   parseNavigable,
 } from "../../shared/embedded-browser.js";
@@ -24,7 +25,7 @@ export type BrowserHostRequest = {
 };
 
 export type BrowserAutomationHost = {
-  ensureVisibleForAgent(threadId: string): Promise<EmbeddedBrowserViewController>;
+  navigateForAgent(threadId: string, url: string): Promise<EmbeddedBrowserState>;
   viewForAction(
     threadId: string,
     kind: EmbeddedBrowserActionKind,
@@ -74,9 +75,7 @@ export async function runBrowserAutomation(
   if (request.action === "navigate") {
     const url = parseNavigable(request.url ?? "");
     if (!url) return { ok: false, error: "unsupported_scheme" };
-    const controller = await manager.ensureVisibleForAgent(threadId);
-    await controller.navigate(url);
-    const state = controller.state();
+    const state = await manager.navigateForAgent(threadId, url);
     return { ok: true, url: state.url, title: state.title };
   }
 

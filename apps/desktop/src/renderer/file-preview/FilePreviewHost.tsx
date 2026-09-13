@@ -320,6 +320,7 @@ export default function FilePreviewHost({
 
   const wrapBrowser = (children?: React.ReactNode) => (
     <EmbeddedBrowserChrome
+      key={JSON.stringify([browserRef.threadId, browserRef.viewId])}
       client={browserClient}
       viewRef={browserRef}
       enabled={mode === "browser"}

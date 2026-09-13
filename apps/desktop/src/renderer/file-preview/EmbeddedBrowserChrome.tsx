@@ -112,19 +112,25 @@ export default function EmbeddedBrowserChrome({
   htmlOccupiedRef.current = htmlOccupied;
 
   useEffect(() => {
+    let disposed = false;
     editingRef.current = false;
     setAddressError(undefined);
     void client.getState(viewRef).then((next) => {
+      if (disposed) return;
       setState(next);
       if (!editingRef.current && !htmlOccupiedRef.current) setAddress(next.url);
     });
-    return client.onStateChanged((payload) => {
+    const unsubscribe = client.onStateChanged((payload) => {
       if (payload.viewId !== viewRef.viewId || payload.threadId !== viewRef.threadId) return;
       setState(payload.state);
       if (!editingRef.current && !htmlOccupiedRef.current) {
         setAddress(payload.state.url);
       }
     });
+    return () => {
+      disposed = true;
+      unsubscribe();
+    };
   }, [client, viewRef.threadId, viewRef.viewId]);
 
   useEffect(() => {
@@ -225,9 +231,11 @@ export default function EmbeddedBrowserChrome({
       }
     };
     webview.addEventListener("did-attach", attach);
+    webview.addEventListener("dom-ready", attach);
     attach();
     return () => {
       webview.removeEventListener("did-attach", attach);
+      webview.removeEventListener("dom-ready", attach);
       void client.detachGuest(viewRef);
     };
   }, [

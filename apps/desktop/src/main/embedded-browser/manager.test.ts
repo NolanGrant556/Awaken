@@ -154,7 +154,7 @@ describe("EmbeddedBrowserViewManager", () => {
     vi.useFakeTimers();
     try {
       const pending = expect(
-        manager.ensureVisibleForAgent("thread-z"),
+        manager.ensureVisibleForAgent("thread-z", "https://example.com/"),
       ).rejects.toThrow("browser_view_not_visible");
       await vi.advanceTimersByTimeAsync(4100);
       await pending;

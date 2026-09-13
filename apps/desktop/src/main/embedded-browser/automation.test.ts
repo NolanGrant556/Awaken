@@ -43,7 +43,7 @@ function asHost(manager: object): BrowserAutomationHost {
 describe("runBrowserAutomation", () => {
   it("rejects missing thread and non-http navigate", async () => {
     const manager = {
-      ensureVisibleForAgent: vi.fn(),
+      navigateForAgent: vi.fn(),
       viewForAction: vi.fn(),
     };
     expect(await runBrowserAutomation(asHost(manager), { action: "snapshot", threadId: "" })).toEqual({
@@ -62,7 +62,7 @@ describe("runBrowserAutomation", () => {
   it("navigates a visible view and snapshots numbered refs", async () => {
     const controller = fakeController();
     const manager = {
-      ensureVisibleForAgent: vi.fn(async () => controller),
+      navigateForAgent: vi.fn(async (_threadId: string, url: string) => controller.navigate(url)),
       viewForAction: vi.fn(() => controller),
     };
     const navigated = await runBrowserAutomation(asHost(manager), {
@@ -71,6 +71,7 @@ describe("runBrowserAutomation", () => {
       url: "example.com",
     });
     expect(navigated.ok).toBe(true);
+    expect(manager.navigateForAgent).toHaveBeenCalledWith("thread", "https://example.com/");
     expect(controller.navigate).toHaveBeenCalledWith("https://example.com/");
 
     const snapshot = await runBrowserAutomation(asHost(manager), {
@@ -82,7 +83,7 @@ describe("runBrowserAutomation", () => {
 
   it("fails mutate when the view is hidden", async () => {
     const manager = {
-      ensureVisibleForAgent: vi.fn(),
+      navigateForAgent: vi.fn(),
       viewForAction: vi.fn(() => null),
     };
     expect(
@@ -97,7 +98,7 @@ describe("runBrowserAutomation", () => {
   it("fails click after the page origin changes", async () => {
     const controller = fakeController({ originAdmitted: () => false });
     const manager = {
-      ensureVisibleForAgent: vi.fn(),
+      navigateForAgent: vi.fn(),
       viewForAction: vi.fn(() => controller),
     };
     expect(

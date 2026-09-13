@@ -1,0 +1,61 @@
+{
+  "date": "2026-09-13",
+  "platform": "macOS",
+  "entry": "npm run open:desktop",
+  "source_base": "e50d5f6c82ccbefbbb4e63b224640d06c2c701e9 + 本次修复",
+  "http_fixture": "server.py，127.0.0.1:18758/18759；支持 /a、/b 和 .html 路径",
+  "checks": [
+    {
+      "case": "首次 Agent navigate + snapshot",
+      "result": "两项一次成功，标题 Awaken Browser A，4 个控件；截图回看首轮历史，右侧为后续 B 页",
+      "screenshot": "first-agent-result.png"
+    },
+    {
+      "case": "标签隔离和最新地址恢复",
+      "result": "第二标签初始空白，打开 A；返回第一标签仍为页内导航后的 B",
+      "screenshot": "tab-restoration.png"
+    },
+    {
+      "case": "跨 origin 点击拒绝",
+      "result": "snapshot 成功，click 返回 origin_lease_expired",
+      "screenshot": "cross-origin-denied.png"
+    },
+    {
+      "case": "本地 Agent 读取拒绝",
+      "result": "snapshot 与 extract 均返回 browser_not_shown，本地内容未返回",
+      "screenshot": "local-agent-denied.png"
+    },
+    {
+      "case": "本地页 HTTP 链接切换",
+      "result": "点击后显示公开 A 页与 HTTP 地址",
+      "screenshot": "local-http-handoff.png"
+    },
+    {
+      "case": "Agent 从本地切换公开分区并准入",
+      "result": "navigate 到另一 origin 的 B.html、snapshot、click 均一次成功",
+      "screenshot": "agent-navigation-success.png"
+    },
+    {
+      "case": "切换任务不串页",
+      "result": "新建任务页面为空；返回原任务恢复 B.html",
+      "screenshot": "new-thread-empty.png"
+    },
+    {
+      "case": "菜单覆盖层",
+      "result": "菜单显示时保留页面截图；Escape 后 AX 恢复 live guest",
+      "screenshot": "menu-placeholder.png"
+    }
+  ],
+  "not_executed": [
+    "Windows/Linux 本轮真实验收",
+    "主窗口刷新真实验收（自动化覆盖）"
+  ],
+  "automation": {
+    "desktop_focused_tests": 534,
+    "typecheck": "通过",
+    "build": "通过",
+    "docs": "通过",
+    "diff_check": "通过",
+    "go": "browserhost、tools/browser 与 server 浏览器聚焦测试通过"
+  }
+}

@@ -46,7 +46,8 @@ var (
 )
 
 // RunSnapshotFilter lets a builtin omit itself from a run availability
-// snapshot. WebFetch uses this when search channels are disabled.
+// snapshot. WebFetch uses this when search channels are disabled. Embedded
+// browser tools use it when the Desktop host is not registered.
 type RunSnapshotFilter interface {
 	IncludeInRunSnapshot(ExecutionEnvironmentSnapshot) bool
 }

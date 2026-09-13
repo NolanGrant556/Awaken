@@ -21,6 +21,7 @@ export type InspectorTabsCommand = (
   | { type: "add-file"; projectId?: string; mode: ProjectFileWorkspaceMode }
   | { type: "activate" | "close"; id: string }
   | { type: "set-mode"; mode: ProjectFileWorkspaceMode }
+  | { type: "clear-file" }
   | { type: "project"; projectId?: string }
   | { type: "chooser" | "sync-thread" | "remove-subagents" | "remove-workspace" }
 );
@@ -67,5 +68,6 @@ export function inspectorTabsReducer(previous: InspectorTabsState, action: Inspe
       return { ...next, nextOrdinal: state.nextOrdinal + (current ? 0 : 1) };
     }
     case "set-mode": return { ...state, tabs: state.tabs.map(tab => tab.id === state.activeId && tab.kind === "file" ? { ...tab, mode: action.mode } : tab) };
+    case "clear-file": return { ...state, tabs: state.tabs.map(tab => tab.id === state.activeId && tab.kind === "file" ? { ...tab, tab: undefined, mode: "browser" } : tab) };
   }
 }

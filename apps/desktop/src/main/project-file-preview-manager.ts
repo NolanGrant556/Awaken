@@ -94,6 +94,7 @@ export type ProjectFilePreviewManagerOptions = {
   showItemInFolder: (filePath: string) => void;
   savePdfAs: (defaultPath: string) => Promise<string | undefined>;
   onPreviewInteraction: (interaction: ProjectFilePreviewInteraction) => void;
+  onGuestHttpNavigate?: (payload: { previewId: string; url: string }) => void;
 };
 
 type PreviewPrimaryPointerGesture = {
@@ -649,13 +650,13 @@ export class ProjectFilePreviewManager {
       return;
     }
     guest.setWindowOpenHandler(({ url }) => {
-      if (isHttpUrl(url)) void this.options.openExternal(url);
+      if (isHttpUrl(url)) this.routeGuestHttp(record, url);
       return { action: "deny" };
     });
     const handleNavigation = (event: Electron.Event, url: string) => {
       if (isAllowedGuestInternalUrl(url)) return;
       event.preventDefault();
-      if (isHttpUrl(url)) void this.options.openExternal(url);
+      if (isHttpUrl(url)) this.routeGuestHttp(record, url);
     };
     guest.on("will-navigate", handleNavigation);
     guest.on("will-redirect", handleNavigation);
@@ -676,6 +677,14 @@ export class ProjectFilePreviewManager {
     guest.on("destroyed", () => {
       this.release(record.previewId);
     });
+  }
+
+  private routeGuestHttp(record: PreviewRecord, url: string): void {
+    if (record.kind === "html" && this.options.onGuestHttpNavigate) {
+      this.options.onGuestHttpNavigate({ previewId: record.previewId, url });
+      return;
+    }
+    void this.options.openExternal(url);
   }
 
   async openExternally(

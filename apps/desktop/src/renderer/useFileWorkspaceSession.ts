@@ -44,6 +44,9 @@ type Options = {
   requestComposerFocus: () => void;
   onBeforeFileOpen: () => void;
   onBeforeFileExpand: () => void;
+  onInspectorFileTabClosed?: (viewId: string) => void;
+  onFileWorkspaceClosed?: () => void;
+  onShowBrowserTab?: (viewId?: string) => void;
 };
 export function useFileWorkspaceSession(options: Options) {
   const {
@@ -286,6 +289,7 @@ export function useFileWorkspaceSession(options: Options) {
     setExpandedFileComposerTrackedRun(undefined);
     dispatchTabs({ type: "remove-workspace" });
     setFileWorkspaceInspectorWidth(undefined);
+    options.onFileWorkspaceClosed?.();
   }
 
   function handleOpenProjectFileTab(tab: ProjectFileWorkspaceTab): void {
@@ -309,7 +313,31 @@ export function useFileWorkspaceSession(options: Options) {
   function handleActivateProjectFileTab(slot: InspectorFileTab): void {
     handleActivateInspectorTab(slot.id);
   }
-  function handleCloseProjectFileTab(id: string): void { dispatchTabs({ type: "close", id }); }
+  function handleCloseProjectFileTab(id: string): void {
+    dispatchTabs({ type: "close", id });
+    options.onInspectorFileTabClosed?.(id);
+  }
+  function handleShowBrowserTab(viewId?: string): void {
+    onBeforeFileOpen();
+    setFileWorkspaceOpen(true);
+    setExpandedWorkspaceSurface("file");
+    setInspectorCollapsed(false);
+    if (inspectorCollapsedBeforeResponsiveRef.current !== null) {
+      inspectorCollapsedBeforeResponsiveRef.current = false;
+    }
+    if (viewId && tabsState.tabs.some((tab) => tab.id === viewId)) {
+      dispatchTabs({ type: "activate", id: viewId });
+      return;
+    }
+    const existing = tabsState.tabs.find(
+      (tab) => tab.kind === "file" && tab.mode === "browser",
+    );
+    if (existing) {
+      dispatchTabs({ type: "activate", id: existing.id });
+      return;
+    }
+    dispatchTabs({ type: "add-file", projectId: fileWorkspaceProjectId, mode: "browser" });
+  }
 
   function handleOpenDeliverablePreview(
     file: Pick<DeliverableFile, "artifactId" | "runId" | "title" | "fileType">,
@@ -405,6 +433,7 @@ export function useFileWorkspaceSession(options: Options) {
     handleAddProjectFileTab,
     handleActivateProjectFileTab,
     handleCloseProjectFileTab,
+    handleShowBrowserTab,
     handleOpenDeliverablePreview,
     fileWorkspaceProjectId,
     fileWorkspaceProjectLabel,

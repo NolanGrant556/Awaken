@@ -1022,6 +1022,16 @@ export function App() {
       setContextUsagePanelOpen(false);
       runPlanEntry.closePanel(false);
     },
+    onInspectorFileTabClosed: (viewId) => {
+      const threadId = runtimeState.activeThreadId ?? runtimeState.threadId;
+      if (!threadId) return;
+      void runtimeClient.embeddedBrowser.close({ viewId, threadId });
+    },
+    onFileWorkspaceClosed: () => {
+      const threadId = runtimeState.activeThreadId ?? runtimeState.threadId;
+      if (!threadId) return;
+      void runtimeClient.embeddedBrowser.closeThread(threadId);
+    },
   });
   const {
     fileWorkspaceOpen,
@@ -1056,10 +1066,12 @@ export function App() {
     handleCloseFileWorkspace,
     handleOpenProjectFileTab,
     handleOpenDeliverablePreview,
+    handleShowBrowserTab,
     fileWorkspaceProjectId,
     fileWorkspaceProjectLabel,
     fileWorkspaceFolders,
     activeFileWorkspaceTab,
+    activeFileWorkspaceTabSlot,
   } = fileWorkspace;
 
   const dockComposerMetaItems = composerMetaItemsForFileWorkspaceSurface(
@@ -1082,6 +1094,18 @@ export function App() {
     fileWorkspaceExpanded,
     expandedWorkspaceSurface,
   });
+  useEffect(() => {
+    return runtimeClient.embeddedBrowser.onRequestShow((payload) => {
+      const currentThread = runtimeState.activeThreadId ?? runtimeState.threadId;
+      if (!currentThread || payload.threadId !== currentThread) return;
+      handleShowBrowserTab(payload.viewId || undefined);
+    });
+  }, [
+    handleShowBrowserTab,
+    runtimeClient,
+    runtimeState.activeThreadId,
+    runtimeState.threadId,
+  ]);
   const scrollController = useRunStageScrollController({
     showCenterComposer,
     narrativeItems: visibleNarrativeItems,
@@ -2039,6 +2063,17 @@ export function App() {
                         folders={fileWorkspaceFolders}
                         initialMode={fileWorkspaceMode}
                         activeTab={activeFileWorkspaceTab}
+                        threadId={runtimeState.activeThreadId ?? runtimeState.threadId}
+                        inspectorViewId={activeFileWorkspaceTabSlot?.id}
+                        embeddedBrowser={runtimeClient.embeddedBrowser}
+                        browserActive={
+                          !openSubagent &&
+                          !fileWorkspace.inspectorChooserActive &&
+                          !inspectorPresentation.effectiveCollapsed
+                        }
+                        onLeaveHtmlPreview={() => {
+                          workbenchPanels.inspectorTabs.dispatch({ type: "clear-file" });
+                        }}
                         artifactPreview={deliverablePreview}
                         artifactMediaSource={
                           typeof deliverablePreviewMediaSourceState === "string"

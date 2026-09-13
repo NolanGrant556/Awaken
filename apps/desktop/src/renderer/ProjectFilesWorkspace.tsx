@@ -936,42 +936,6 @@ export function ProjectFilesWorkspace({
 
   return (
     <section className="project-files-workspace" aria-label="项目文件">
-      <header className="project-files-pathbar">
-        <div className="project-files-mode-switch" role="tablist" aria-label="文件工作区">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={workspaceMode === "files"}
-            onClick={() => changeWorkspaceMode("files")}
-          >
-            <AwakenIcon concept="file-text" size={16} />
-            文件
-          </button>
-        </div>
-        <div className="project-files-pathbar__actions">
-          <button
-            type="button"
-            className={`project-files-pathbar__icon${fileListExpanded ? " is-expanded" : ""}`}
-            aria-label={fileListExpanded ? "收起文件列表" : "展开文件列表"}
-            aria-expanded={fileListExpanded}
-            aria-controls="awaken-project-files-navigator"
-            onClick={() => {
-              setFolderMenuOpen(false);
-              setFileListExpanded((current) => !current);
-            }}
-          >
-            <span className="project-files-pathbar__folder-icon" aria-hidden="true">
-              <span className="project-files-pathbar__folder-icon-state project-files-pathbar__folder-icon-state--collapsed">
-                <AwakenIcon concept="project" size={20} />
-              </span>
-              <span className="project-files-pathbar__folder-icon-state project-files-pathbar__folder-icon-state--expanded">
-                <AwakenIcon concept="folder-expanded" size={20} />
-              </span>
-            </span>
-          </button>
-        </div>
-      </header>
-
       <div
         ref={workspaceBodyRef}
         className={`project-files-workspace__body${

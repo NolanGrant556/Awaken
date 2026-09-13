@@ -1,8 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from "node:http";
-import type { EmbeddedBrowserViewManager } from "./manager";
-import { BROWSER_HOST_TOKEN_BYTES } from "./options";
-import { runBrowserAutomation, type BrowserHostRequest } from "./automation";
+import type { EmbeddedBrowserViewManager } from "./manager.js";
+import { BROWSER_HOST_TOKEN_BYTES } from "./options.js";
+import { runBrowserAutomation, type BrowserHostRequest } from "./automation.js";
 
 export type BrowserHostRegistration = {
   base_url: string;

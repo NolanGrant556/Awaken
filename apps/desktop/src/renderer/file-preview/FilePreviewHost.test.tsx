@@ -187,6 +187,7 @@ describe("FilePreviewHost", () => {
         .find((button) => button.textContent === "查看源代码")
         ?.click();
     });
+    await settleUntil(() => container.querySelector(".cm-editor") !== null);
     expect(container.querySelector(".cm-editor")).not.toBeNull();
 
     await act(async () => root.render(render(() => undefined)));

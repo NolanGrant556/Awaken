@@ -1,5 +1,5 @@
 import type { WebPreferences } from "electron";
-import { EMBEDDED_BROWSER_PARTITION } from "../../shared/embedded-browser";
+import { EMBEDDED_BROWSER_PARTITION } from "../../shared/embedded-browser.js";
 
 export const BROWSER_HOST_TOKEN_BYTES = 24;
 

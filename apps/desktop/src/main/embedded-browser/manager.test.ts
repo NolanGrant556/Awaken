@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { EMPTY_EMBEDDED_BROWSER_STATE } from "../../shared/embedded-browser";
-import { EmbeddedBrowserViewManager } from "./manager";
+import { EMPTY_EMBEDDED_BROWSER_STATE } from "../../shared/embedded-browser.js";
+import { EmbeddedBrowserViewManager } from "./manager.js";
 
 function fakeController() {
   const controller = {
@@ -74,9 +74,14 @@ describe("EmbeddedBrowserViewManager", () => {
       createView: () => fakeController() as never,
     });
     vi.useFakeTimers();
-    const pending = manager.ensureVisibleForAgent("thread-z");
-    await vi.advanceTimersByTimeAsync(4100);
-    await expect(pending).rejects.toThrow("browser_view_not_visible");
-    vi.useRealTimers();
+    try {
+      const pending = expect(
+        manager.ensureVisibleForAgent("thread-z"),
+      ).rejects.toThrow("browser_view_not_visible");
+      await vi.advanceTimersByTimeAsync(4100);
+      await pending;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

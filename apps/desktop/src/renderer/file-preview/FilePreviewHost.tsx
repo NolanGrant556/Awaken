@@ -3,6 +3,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -119,7 +120,8 @@ export default function FilePreviewHost({
   browserActive = true,
   onLeaveHtmlPreview,
 }: FilePreviewHostProps) {
-  const browserClient = embeddedBrowser ?? createIdleEmbeddedBrowserClient();
+  const idleBrowserClient = useMemo(() => createIdleEmbeddedBrowserClient(), []);
+  const browserClient = embeddedBrowser ?? idleBrowserClient;
   const [state, setState] = useState<PreviewState>({ status: "idle" });
   const [retryGeneration, setRetryGeneration] = useState(0);
   const [guestLoading, setGuestLoading] = useState(false);
@@ -348,9 +350,6 @@ export default function FilePreviewHost({
       : undefined;
 
   const wrapBrowser = (children?: React.ReactNode) => {
-    if (mode !== "browser") {
-      return children ?? null;
-    }
     const ref = browserRef ?? { threadId: "local", viewId: "preview" };
     const htmlOccupied =
       Boolean(htmlPreviewId) ||
@@ -359,6 +358,7 @@ export default function FilePreviewHost({
       <EmbeddedBrowserChrome
         client={browserClient}
         viewRef={ref}
+        enabled={mode === "browser"}
         active={Boolean(browserRef) && browserActive}
         htmlOccupied={htmlOccupied}
         onLeaveHtmlPreview={onLeaveHtmlPreview}
@@ -393,17 +393,17 @@ export default function FilePreviewHost({
   if (state.status === "idle") return wrapBrowser();
 
   if (state.status === "loading") {
-    return (
+    return wrapBrowser(
       <div className="project-file-preview-state" role="status">
         <span className="project-file-preview-spinner" aria-hidden="true" />
         <strong>{state.displayName}</strong>
         <span>正在准备预览…</span>
-      </div>
+      </div>,
     );
   }
 
   if (state.status === "error") {
-    return (
+    return wrapBrowser(
       <div className="project-file-preview-state is-error" role="alert">
         <strong>无法预览此文件</strong>
         <span>{state.message}</span>
@@ -432,7 +432,7 @@ export default function FilePreviewHost({
             在文件管理器中显示
           </button>
         </div>
-      </div>
+      </div>,
     );
   }
 
@@ -608,5 +608,5 @@ export default function FilePreviewHost({
       ) : null}
     </div>
   );
-  return mode === "browser" ? wrapBrowser(stack) : stack;
+  return wrapBrowser(stack);
 }

@@ -23,12 +23,8 @@ import ImagePreview from "./ImagePreview";
 import PreviewFrame, { type PreviewFrameProps } from "./PreviewFrame";
 import PreviewErrorBoundary from "./PreviewErrorBoundary";
 import { useProjectFilePreviewPrimaryClick } from "./useProjectFilePreviewPrimaryClick";
-import WebviewPreview, {
-  type WebviewNavigationHandle,
-} from "./WebviewPreview";
-import EmbeddedBrowserChrome, {
-  type EmbeddedHtmlNavigation,
-} from "./EmbeddedBrowserChrome";
+import WebviewPreview from "./WebviewPreview";
+import EmbeddedBrowserChrome from "./EmbeddedBrowserChrome";
 
 const MarkdownPreview = lazy(() => import("./MarkdownPreview"));
 const CodePreview = lazy(() => import("./CodePreview"));
@@ -126,11 +122,6 @@ export default function FilePreviewHost({
   const [state, setState] = useState<PreviewState>({ status: "idle" });
   const [retryGeneration, setRetryGeneration] = useState(0);
   const [guestLoading, setGuestLoading] = useState(false);
-  const [htmlNav, setHtmlNav] = useState<Omit<
-    EmbeddedHtmlNavigation,
-    "goBack" | "goForward" | "reload"
-  > | null>(null);
-  const htmlNavApiRef = useRef<WebviewNavigationHandle | null>(null);
   const activePreviewIdRef = useRef<string | undefined>(undefined);
   const generationRef = useRef(0);
   const onModeChangeRef = useRef(onModeChange);
@@ -179,7 +170,7 @@ export default function FilePreviewHost({
           return;
         }
         activePreviewIdRef.current = result.preview.previewId;
-        onModeChangeRef.current(result.preview.kind === "html" ? "browser" : "files");
+        onModeChangeRef.current("files");
         setState({
           status: "ready", preview: result.preview,
           request: { projectId, folderPath, relativePath: selection.relativePath },
@@ -229,27 +220,10 @@ export default function FilePreviewHost({
     onPreviewPrimaryClick,
   });
 
-  const htmlPreviewId =
-    state.status === "ready" && state.preview.kind === "html"
-      ? state.preview.previewId
-      : undefined;
   const browserRef = useMemo(
     () => resolveEmbeddedBrowserTabRef({ threadId, viewId }),
     [threadId, viewId],
   );
-
-  useEffect(() => {
-    if (!htmlPreviewId) return;
-    void browserClient.close(browserRef);
-  }, [browserClient, browserRef, htmlPreviewId]);
-
-  useEffect(() => {
-    return browserClient.onGuestHttpNavigate?.((payload) => {
-      if (!htmlPreviewId || payload.previewId !== htmlPreviewId) return;
-      onLeaveHtmlPreview?.();
-      void browserClient.navigate(browserRef, payload.url);
-    });
-  }, [browserClient, browserRef, htmlPreviewId, onLeaveHtmlPreview]);
 
   const actionRequest: ProjectFilePreviewActionRequest | undefined =
     state.status === "ready" ? state.request : projectId && folderPath && selection
@@ -341,34 +315,17 @@ export default function FilePreviewHost({
     else onCreateFileComment?.(item);
   };
 
-  const htmlNavigation: EmbeddedHtmlNavigation | undefined =
-    htmlPreviewId && htmlNav
-      ? {
-          ...htmlNav,
-          goBack: () => htmlNavApiRef.current?.goBack(),
-          goForward: () => htmlNavApiRef.current?.goForward(),
-          reload: () => htmlNavApiRef.current?.reload(),
-        }
-      : undefined;
-
-  const wrapBrowser = (children?: React.ReactNode) => {
-    const htmlOccupied =
-      Boolean(htmlPreviewId) ||
-      (Boolean(selection) && state.status !== "ready");
-    return (
-      <EmbeddedBrowserChrome
-        client={browserClient}
-        viewRef={browserRef}
-        enabled={mode === "browser"}
-        active={browserActive}
-        htmlOccupied={htmlOccupied}
-        onLeaveHtmlPreview={onLeaveHtmlPreview}
-        htmlNavigation={htmlNavigation}
-      >
-        {children}
-      </EmbeddedBrowserChrome>
-    );
-  };
+  const wrapBrowser = (children?: React.ReactNode) => (
+    <EmbeddedBrowserChrome
+      client={browserClient}
+      viewRef={browserRef}
+      enabled={mode === "browser"}
+      active={browserActive}
+      onLeaveHtmlPreview={onLeaveHtmlPreview}
+    >
+      {children}
+    </EmbeddedBrowserChrome>
+  );
 
   if (mode === "browser" && state.status !== "ready") {
     if (state.status === "loading") {
@@ -438,8 +395,7 @@ export default function FilePreviewHost({
   }
 
   const preview = state.preview;
-  const previewVisible =
-    preview.kind === "html" ? mode === "browser" : mode === "files";
+  const previewVisible = mode === "files";
   const frameProps: Omit<
     PreviewFrameProps,
     "children" | "formatActions" | "formatLabel"
@@ -548,25 +504,7 @@ export default function FilePreviewHost({
                   preview as Parameters<typeof WebviewPreview>[0]["preview"]
                 }
                 frameProps={frameProps}
-                embedded={mode === "browser" && preview.kind === "html"}
-                navigationRef={
-                  mode === "browser" && preview.kind === "html"
-                    ? htmlNavApiRef
-                    : undefined
-                }
-                onNavigationState={
-                  mode === "browser" && preview.kind === "html"
-                    ? (next) => setHtmlNav(next)
-                    : undefined
-                }
-                onLoadingChange={(loading) => {
-                  setGuestLoading(loading);
-                  if (mode === "browser" && preview.kind === "html") {
-                    setHtmlNav((current) =>
-                      current ? { ...current, loading } : current,
-                    );
-                  }
-                }}
+                onLoadingChange={setGuestLoading}
                 onLoadError={(message) =>
                   setState({
                     status: "error",
@@ -591,20 +529,8 @@ export default function FilePreviewHost({
       {!previewVisible ? (
         <div className="project-files-preview-empty is-centered">
           <AwakenIcon concept="browser" size={24} />
-          {preview.kind === "html" ? (
-            <>
-              <strong>{preview.displayName}</strong>
-              <span>HTML 文件统一在浏览器中预览</span>
-              <button type="button" onClick={() => onModeChange("browser")}>
-                打开浏览器
-              </button>
-            </>
-          ) : (
-            <>
-              <strong>浏览器</strong>
-              <span>输入网址，或从文件树打开 HTML 文件</span>
-            </>
-          )}
+          <strong>浏览器</strong>
+          <span>输入网址</span>
         </div>
       ) : null}
     </div>

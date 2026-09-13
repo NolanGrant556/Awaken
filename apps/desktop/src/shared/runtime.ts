@@ -532,7 +532,7 @@ export type ProjectEntryOpenWithRequest = ProjectEntryActionRequest & {
   application: ProjectEntryOpenApplication;
 };
 
-export type ProjectFilePreviewKind = "office" | "markdown" | "code" | "pdf" | "image" | "html";
+export type ProjectFilePreviewKind = "office" | "markdown" | "code" | "pdf" | "image";
 
 export type ProjectFilePreviewStartRequest = {
   /** Renderer-generated identity used to cancel work before a preview handle exists. */
@@ -559,7 +559,7 @@ export type ProjectFilePreviewTextHandle = {
 export type ProjectFilePreviewUrlHandle = {
   previewId: string;
   requestId: string;
-  kind: "office" | "pdf" | "image" | "html";
+  kind: "office" | "pdf" | "image";
   transport: "url";
   displayName: string;
   relativePath: string;

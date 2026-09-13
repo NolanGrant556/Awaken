@@ -939,7 +939,9 @@ export function ProjectFilesWorkspace({
       <div
         ref={workspaceBodyRef}
         className={`project-files-workspace__body${
-          fileListExpanded ? "" : " is-file-list-collapsed"
+          fileListExpanded && workspaceMode !== "browser"
+            ? ""
+            : " is-file-list-collapsed"
         }`}
         style={
           fileListWidth === undefined
@@ -1016,8 +1018,8 @@ export function ProjectFilesWorkspace({
           aria-valuemin={MIN_FILE_LIST_WIDTH}
           aria-valuemax={Math.round(fileListWidthBounds().maximum)}
           aria-valuenow={Math.round(fileListWidth ?? DEFAULT_FILE_LIST_WIDTH)}
-          aria-hidden={!fileListExpanded}
-          tabIndex={fileListExpanded ? 0 : -1}
+          aria-hidden={!fileListExpanded || workspaceMode === "browser"}
+          tabIndex={fileListExpanded && workspaceMode !== "browser" ? 0 : -1}
           onPointerDown={handleFileListResizeStart}
           onKeyDown={handleFileListResizeKeyDown}
         />
@@ -1027,7 +1029,7 @@ export function ProjectFilesWorkspace({
           id="awaken-project-files-navigator"
           className="project-files-navigator"
           aria-label="项目文件目录"
-          aria-hidden={!fileListExpanded}
+          aria-hidden={!fileListExpanded || workspaceMode === "browser"}
         >
           <div className="project-files-folder-picker">
             <Popover
@@ -1144,7 +1146,6 @@ export function ProjectFilesWorkspace({
                         if (directory) {
                           toggleDirectory(row.relativePath);
                         } else {
-                          const mode = /\.html?$/i.test(row.name) ? "browser" : "files";
                           if (projectId && selectedFolder?.path) {
                             onOpenTab?.({
                               id: projectFileTabId(
@@ -1156,10 +1157,10 @@ export function ProjectFilesWorkspace({
                               folderPath: selectedFolder.path,
                               name: row.name,
                               relativePath: row.relativePath,
-                              mode,
+                              mode: "files",
                             });
                           }
-                          changeWorkspaceMode(mode);
+                          changeWorkspaceMode("files");
                         }
                       }}
                     >

@@ -1076,7 +1076,13 @@ function createMainWindow(): BrowserWindow {
 
   ipcMain.on("awaken:renderer-ready", handleRendererReady);
 
+  const hideEmbeddedBrowserViews = () => {
+    embeddedBrowserManager?.hideAll();
+  };
+  mainWindow.webContents.on("did-start-loading", hideEmbeddedBrowserViews);
+
   mainWindow.webContents.on("render-process-gone", (_event, details) => {
+    hideEmbeddedBrowserViews();
     cleanupWindowSubscriptions(webContentsId);
     if (
       isQuitting ||
@@ -1130,6 +1136,7 @@ function createMainWindow(): BrowserWindow {
       rendererRecoveryTimer = undefined;
     }
     cleanupWindowSubscriptions(webContentsId);
+    embeddedBrowserManager?.hideAll();
     projectFilePreviewManager?.releaseAll();
   });
 

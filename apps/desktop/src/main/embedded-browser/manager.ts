@@ -52,6 +52,7 @@ export class EmbeddedBrowserViewManager {
     this.activeKey = viewKey(ref);
     this.pendingActive = ref;
     this.hideAllExcept(this.activeKey);
+    if (!controller.shown) controller.hide();
     return controller.navigate(navigable);
   }
 

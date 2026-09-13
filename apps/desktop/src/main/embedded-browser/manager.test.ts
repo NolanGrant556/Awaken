@@ -66,6 +66,33 @@ describe("EmbeddedBrowserViewManager", () => {
     expect(created[0].setBounds).toHaveBeenCalled();
   });
 
+  it("hides the active covering page when the renderer reloads", async () => {
+    const created: ReturnType<typeof fakeController>[] = [];
+    const manager = new EmbeddedBrowserViewManager({
+      getWindow: () => ({ isDestroyed: () => false }) as never,
+      onState: vi.fn(),
+      onRequestShow: vi.fn(),
+      createView: () => {
+        const controller = fakeController();
+        created.push(controller);
+        return controller as never;
+      },
+    });
+
+    const first = { viewId: "slot:1", threadId: "thread-a" };
+    await manager.navigate(first, "https://one.example/");
+    manager.setActive(first);
+    manager.setViewport(first, { x: 10, y: 20, width: 400, height: 300 });
+    expect(created[0].shown).toBe(true);
+
+    manager.hideAll();
+    expect(created[0].hide).toHaveBeenCalled();
+    expect(created[0].shown).toBe(false);
+
+    manager.setViewport(first, { x: 10, y: 20, width: 400, height: 300 });
+    expect(created[0].shown).toBe(false);
+  });
+
   it("fails agent visibility when the renderer never focuses a tab", async () => {
     const manager = new EmbeddedBrowserViewManager({
       getWindow: () => ({ isDestroyed: () => false }) as never,

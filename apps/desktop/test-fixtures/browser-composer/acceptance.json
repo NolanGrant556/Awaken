@@ -1,0 +1,55 @@
+{
+  "capturedAt": "2026-09-13T13:01:49.332707+00:00",
+  "entry": "npm run open:desktop",
+  "baselineCommit": "4772ae350c6017c8648f01a9b94d29b7c3775f65",
+  "candidate": "working tree browser composer change",
+  "window": {
+    "title": "Awaken Desktop",
+    "width": 1440,
+    "height": 903,
+    "theme": "light"
+  },
+  "identity": {
+    "electronPid": 90046,
+    "corePid": 90287,
+    "threadId": "local (new-thread draft, no run submitted)",
+    "browserUrl": "http://127.0.0.1:5199/"
+  },
+  "checks": {
+    "httpBrowserDraftCollapseAndRestore": "passed in real Desktop",
+    "dragSelectionKeepsComposer": "passed in real Desktop",
+    "addressBarKeepsComposer": "passed in real Desktop",
+    "webpageButtonExecutesAndCollapses": "passed in real Desktop, counter increased to 1",
+    "existingWordDraftCollapseAndRestore": "passed in real Desktop",
+    "structuredTokensAttachmentsSelection": "automated composition test",
+    "localHtmlGuestClickAndHiddenDetachedGuests": "automated lifecycle test"
+  },
+  "screenshots": [
+    "01-draft-full.jpg",
+    "02-selection-keeps-full.jpg",
+    "03-hidden.jpg",
+    "04-compact.jpg",
+    "05-draft-restored.jpg",
+    "06-page-button.jpg",
+    "07-office-draft-hidden.jpg",
+    "08-office-draft-restored.jpg"
+  ],
+  "notRun": [
+    "dark theme live acceptance",
+    "live running task or external authorization flow",
+    "local HTML browser live acceptance"
+  ],
+  "cleanup": {
+    "draft": "test-only text cleared without submitting",
+    "inspector": "closed after acceptance",
+    "testWorkspace": "/private/tmp/awaken-execution-stage-acceptance already absent; not deleted again"
+  },
+  "automatedValidation": {
+    "desktopTypecheck": "passed",
+    "desktopBuild": "passed; existing large chunk warning",
+    "vitest": "10 files, 325 tests passed",
+    "docs": "38 features, 76 documents",
+    "links": "552 local links passed",
+    "gitDiffCheck": "passed"
+  }
+}

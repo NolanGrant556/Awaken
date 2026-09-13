@@ -1,0 +1,5 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><title>浏览器输入框验收</title>
+<style>body{font:18px/1.8 system-ui;padding:48px;color:#202124;background:#fafafa}main{max-width:720px}button,input{font:inherit;padding:8px}section{height:650px}</style>
+<main><h1>浏览器输入框验收</h1><p>拖选这段文字时应保留输入框，单击页面时可以隐藏，重新展开后保留草稿。</p><button id="counter">点击计数：0</button><input aria-label="网页输入" placeholder="网页自身的输入框"><section><p>这里是用于验证空白单击的阅读区域。</p></section><h2>滚动末尾</h2></main>
+<script>let n=0;document.querySelector('#counter').onclick=e=>e.currentTarget.textContent=`点击计数：${++n}`;</script></html>

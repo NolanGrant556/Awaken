@@ -12,32 +12,14 @@ export type ExpandedFileComposerTrackedRun = {
   runId: string;
 };
 
-export function hasExpandedFileComposerDraft({
-  effectiveText,
-  attachmentCount,
-  tokenCount,
-  commentCount = 0,
-}: {
-  effectiveText: string;
-  attachmentCount: number;
-  tokenCount: number;
-  commentCount?: number;
-}): boolean {
-  return Boolean(
-    effectiveText.trim() || attachmentCount > 0 || tokenCount > 0 || commentCount > 0,
-  );
-}
-
 export function shouldCollapseExpandedFileComposer({
   active,
   forceFull,
-  hasDraft,
 }: {
   active: boolean;
   forceFull: boolean;
-  hasDraft: boolean;
 }): boolean {
-  return active && !forceFull && !hasDraft;
+  return active && !forceFull;
 }
 
 export function expandedFileComposerCompletionKey({

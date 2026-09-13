@@ -27,6 +27,7 @@ export type EmbeddedBrowserClient = Pick<
   | "setActive"
   | "attachGuest"
   | "detachGuest"
+  | "onInteraction"
   | "onStateChanged"
 >;
 
@@ -52,6 +53,7 @@ type Props = {
   enabled?: boolean;
   active: boolean;
   htmlOccupied?: boolean;
+  onPreviewPrimaryClick?: () => void;
   onLeaveHtmlPreview?: () => void;
   htmlNavigation?: EmbeddedHtmlNavigation;
   children?: React.ReactNode;
@@ -94,6 +96,7 @@ export default function EmbeddedBrowserChrome({
   enabled = true,
   active,
   htmlOccupied = false,
+  onPreviewPrimaryClick,
   onLeaveHtmlPreview,
   htmlNavigation,
   children,
@@ -160,6 +163,20 @@ export default function EmbeddedBrowserChrome({
   }, [active, enabled, htmlOccupied, state.url, viewRef.viewId]);
 
   const showPage = enabled && active && Boolean(guestSession) && !htmlOccupied;
+  const primaryClickRef = useRef(onPreviewPrimaryClick);
+  primaryClickRef.current = onPreviewPrimaryClick;
+  useEffect(() => {
+    if (!showPage) return;
+    return client.onInteraction((interaction) => {
+      if (
+        interaction.type === "primary-click" &&
+        interaction.threadId === viewRef.threadId &&
+        interaction.viewId === viewRef.viewId
+      ) {
+        primaryClickRef.current?.();
+      }
+    });
+  }, [client, showPage, viewRef.threadId, viewRef.viewId]);
   guestSnapshotRef.current = guestSnapshot;
   useEffect(() => {
     if (!showPage) {

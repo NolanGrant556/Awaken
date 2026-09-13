@@ -2,6 +2,8 @@
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { beforeEach, afterEach, describe, it, expect, vi } from "vitest";
+import { ExpandedFileComposer } from "./ExpandedFileComposer";
+import { useThreadComposerDraft } from "./useThreadComposerDraft";
 import { DesktopWorkbenchChrome } from "./DesktopWorkbenchChrome";
 import { DesktopExecutionFeed } from "./DesktopExecutionFeed";
 import { useFileWorkspaceSession } from "./useFileWorkspaceSession";
@@ -52,7 +54,6 @@ describe("Desktop composition boundaries", () => {
         registry,
         runtimeState: createInitialRuntimeState(),
         forceFull: false,
-        hasDraft: false,
         isBusy: false,
         requestComposerFocus: vi.fn(),
         onBeforeFileOpen: vi.fn(),
@@ -72,6 +73,44 @@ describe("Desktop composition boundaries", () => {
     return () => files;
   }
 
+  it.each(["files", "browser"] as const)("preserves the structured draft through %s collapse and reopening", async (mode) => {
+    let files!: ReturnType<typeof useFileWorkspaceSession>;
+    let draft!: ReturnType<typeof useThreadComposerDraft>;
+    await mount(() => {
+      const panels = useWorkbenchPanels("thread", { closePanel: vi.fn() }, vi.fn());
+      draft = useThreadComposerDraft("thread");
+      files = useFileWorkspaceSession({
+        inspectorTabs: panels.inspectorTabs,
+        registry: { workspaceLabelProjectId: "project", backendProjectIdFor: () => "project", projectLabelById: new Map(), foldersForProjectId: () => [] },
+        runtimeState: { ...createInitialRuntimeState(), activeThreadId: "thread" },
+        forceFull: false, isBusy: false, requestComposerFocus: vi.fn(), onBeforeFileOpen: vi.fn(), onBeforeFileExpand: vi.fn(),
+      });
+      return <ExpandedFileComposer active={files.fileWorkspaceSurfaceActive} idleMode={files.expandedFileComposerIdleMode}
+        running={false} completed={false} onShowCompact={() => files.setExpandedFileComposerIdleMode("compact")}
+        onShowFull={files.handleShowExpandedFileComposerFull}>
+        <textarea readOnly value={draft.draft.value} />
+      </ExpandedFileComposer>;
+    });
+    await act(async () => { files.handleOpenFileWorkspace(mode); files.handleExpandFileWorkspace(); });
+    await act(async () => {
+      draft.setValue("尚未发送的草稿");
+      draft.setTokens([{ id: "skill:test", type: "skill", label: "测试技能" }]);
+      draft.setAttachments([{ id: "fixture", kind: "file", mimeType: "text/plain", path: "/fixture/sample.txt", displayName: "sample.txt" }]);
+      draft.setSelection({ anchor: 2, focus: 3 });
+    });
+    const original = draft.draft;
+    expect(files.fileWorkspaceSurfaceActive).toBe(true);
+    await act(async () => files.handleExpandedFilePreviewPrimaryClick());
+    expect(host.querySelector("textarea")).toBeNull();
+    expect(host.querySelector('[aria-label="展开输入入口"]')).not.toBeNull();
+    expect(draft.draft).toBe(original);
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="展开输入入口"]')!.click());
+    expect(host.querySelector("textarea")).toBeNull();
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="展开完整输入框"]')!.click());
+    expect(host.querySelector("textarea")?.value).toBe(original.value);
+    expect(draft.draft).toBe(original);
+  });
+
   it("places stop-all on the center subagent group instead of the chrome", async () => {
     const stopAll = vi.fn();
     let files!: ReturnType<typeof useFileWorkspaceSession>;
@@ -87,7 +126,6 @@ describe("Desktop composition boundaries", () => {
         },
         runtimeState: { ...createInitialRuntimeState(), activeThreadId: "thread" },
         forceFull: false,
-        hasDraft: false,
         isBusy: false,
         requestComposerFocus: vi.fn(),
         onBeforeFileOpen: vi.fn(),
@@ -175,7 +213,6 @@ describe("Desktop composition boundaries", () => {
           activeThreadId: threadId,
         },
         forceFull: false,
-        hasDraft: false,
         isBusy: false,
         requestComposerFocus: vi.fn(),
         onBeforeFileOpen: vi.fn(),
@@ -214,7 +251,6 @@ describe("Desktop composition boundaries", () => {
           activeThreadId: threadId,
         },
         forceFull: false,
-        hasDraft: false,
         isBusy: false,
         requestComposerFocus: vi.fn(),
         onBeforeFileOpen: vi.fn(),
@@ -261,7 +297,7 @@ describe("Desktop composition boundaries", () => {
         runtimeState: { ...createInitialRuntimeState(), activeThreadId: "thread" },
         registry: { workspaceLabelProjectId: "project", backendProjectIdFor: () => "project",
           projectLabelById: new Map([["project", "Fixture"]]), foldersForProjectId: () => [] },
-        forceFull: false, hasDraft: true, isBusy: false, requestComposerFocus: vi.fn(),
+        forceFull: false, isBusy: false, requestComposerFocus: vi.fn(),
         onBeforeFileOpen: vi.fn(), onBeforeFileExpand: vi.fn(),
       });
       const task = tasks.find(task => task.taskId === panels.openSubagentTaskId);
@@ -311,7 +347,7 @@ describe("Desktop composition boundaries", () => {
         runtimeState: { ...createInitialRuntimeState(), activeThreadId: "thread" },
         registry: { workspaceLabelProjectId: surface === "no-project" ? undefined : "project",
           backendProjectIdFor: () => "project", projectLabelById: new Map(), foldersForProjectId: () => [] },
-        forceFull: false, hasDraft: true, isBusy: false, requestComposerFocus: vi.fn(),
+        forceFull: false, isBusy: false, requestComposerFocus: vi.fn(),
         onBeforeFileOpen: vi.fn(), onBeforeFileExpand: vi.fn(),
       });
       return <><DesktopWorkbenchChrome fileWorkspace={files} platform="macos" currentConversationLabel="主任务" handleNewTask={vi.fn()}

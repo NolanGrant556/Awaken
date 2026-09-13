@@ -7,6 +7,7 @@ import {
   normalizeBrowserAddressInput,
   originOf,
   parseNavigable,
+  type EmbeddedBrowserInteraction,
   type EmbeddedBrowserActionKind,
   type EmbeddedBrowserState,
   type EmbeddedBrowserTabRef,
@@ -26,6 +27,7 @@ export type EmbeddedBrowserViewManagerOptions = {
   getWindow: () => BrowserWindow | null;
   onState: (viewId: string, threadId: string, state: EmbeddedBrowserState) => void;
   onRequestShow: (threadId: string, viewId: string) => void;
+  onInteraction?: (interaction: EmbeddedBrowserInteraction) => void;
   createView?: (
     window: BrowserWindow,
     onState: (state: EmbeddedBrowserState) => void,
@@ -140,6 +142,12 @@ export class EmbeddedBrowserViewManager {
           allowFile: options.allowFile,
           partition: options.partition,
           guest: options.guest,
+          onPrimaryClick: () => {
+            const record = this.shownRecordForThread(ref.threadId);
+            if (record?.controller.ownsGuest(guest)) {
+              this.options.onInteraction?.({ ...ref, type: "primary-click" });
+            }
+          },
           onHandoffHttp: options.allowFile
             ? (httpUrl) => {
                 void this.navigate(ref, httpUrl);

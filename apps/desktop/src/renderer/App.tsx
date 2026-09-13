@@ -35,10 +35,7 @@ import { DesktopSidebar } from "./DesktopSidebar";
 import { DesktopStartupStatus } from "./DesktopStartupStatus";
 import { DesktopUpdateDialog } from "./DesktopUpdateDialog";
 import { DesktopWorkbenchChrome } from "./DesktopWorkbenchChrome";
-import {
-  ExpandedFileComposer,
-  hasExpandedFileComposerDraft,
-} from "./ExpandedFileComposer";
+import { ExpandedFileComposer } from "./ExpandedFileComposer";
 import { ExtensionsView, type ExtensionSection } from "./ExtensionsView";
 import { ExternalActionGate } from "./ExternalActionGate";
 import { ProfileBalancePopover } from "./ProfileBalancePopover";
@@ -697,7 +694,6 @@ export function App() {
     composerPluginCatalog,
     composerPluginBrandByName,
     composerCatalogRevision,
-    trimmedEffectiveComposerValue,
     handleCreateFileLineComment,
     handleAddFileTextSelection,
     handleRemoveFileLineComment,
@@ -1009,12 +1005,6 @@ export function App() {
     forceFull: Boolean(
       desktopNeedsRestart || activeUserQuestion || activeExternalInteraction,
     ),
-    hasDraft: hasExpandedFileComposerDraft({
-      effectiveText: trimmedEffectiveComposerValue,
-      attachmentCount: composerAttachments.length,
-      tokenCount: composerTokens.length,
-      commentCount: composerComments.length,
-    }),
     isBusy,
     requestComposerFocus,
     onBeforeFileOpen: () => {

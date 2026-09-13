@@ -39,7 +39,6 @@ type Options = {
     | "foldersForProjectId"
   >;
   forceFull: boolean;
-  hasDraft: boolean;
   isBusy: boolean;
   requestComposerFocus: () => void;
   onBeforeFileOpen: () => void;
@@ -120,8 +119,6 @@ export function useFileWorkspaceSession(options: Options) {
       : undefined;
 
   const expandedFileComposerForceFull = options.forceFull;
-
-  const expandedFileComposerHasDraft = options.hasDraft;
 
   const workbenchLayout = useWorkbenchLayout(
     fileWorkspaceOpen && !subagentPanelActive && !inspectorChooserActive,
@@ -270,7 +267,6 @@ export function useFileWorkspaceSession(options: Options) {
       !shouldCollapseExpandedFileComposer({
         active: fileWorkspaceSurfaceActive,
         forceFull: expandedFileComposerForceFull,
-        hasDraft: expandedFileComposerHasDraft,
       })
     ) {
       return;
@@ -401,7 +397,6 @@ export function useFileWorkspaceSession(options: Options) {
     expandedFileComposerCompleted,
     expandedFileComposerElapsedMs,
     expandedFileComposerForceFull,
-    expandedFileComposerHasDraft,
     workbenchLayout,
     sidebarCollapsed,
     setSidebarCollapsed,

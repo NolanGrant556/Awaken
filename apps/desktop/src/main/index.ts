@@ -2427,6 +2427,10 @@ app.whenReady().then(async () => {
   projectFilePreviewManager.initialize();
   embeddedBrowserManager = new EmbeddedBrowserViewManager({
     getWindow: () => mainWindowRef,
+    onInteraction: (interaction) => {
+      if (!mainWindowRef || mainWindowRef.isDestroyed()) return;
+      mainWindowRef.webContents.send(EMBEDDED_BROWSER_CHANNELS.interaction, interaction);
+    },
     onState: (viewId, threadId, state) => {
       if (!mainWindowRef || mainWindowRef.isDestroyed()) return;
       mainWindowRef.webContents.send(EMBEDDED_BROWSER_CHANNELS.stateChanged, {

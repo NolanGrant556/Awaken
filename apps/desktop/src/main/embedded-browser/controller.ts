@@ -10,6 +10,10 @@ import {
   safeExternalUrl,
   viewportBounds,
 } from "../../shared/embedded-browser.js";
+import {
+  updatePreviewPrimaryPointerGesture,
+  type PreviewPrimaryPointerGesture,
+} from "../preview-primary-pointer.js";
 
 const backstopInstalledFor = new WeakSet<Session>();
 const VIEWPORT_RESTORE_POLL_MS = 16;
@@ -18,10 +22,13 @@ export type EmbeddedBrowserViewControllerOptions = {
   allowFile?: boolean;
   partition?: string;
   guest: WebContents;
+  onPrimaryClick?: () => void;
   onHandoffHttp?: (url: string) => void;
 };
 
 export class EmbeddedBrowserViewController {
+  private primaryPointerGesture: PreviewPrimaryPointerGesture | undefined;
+  private readonly onPrimaryClick?: () => void;
   private destroyed = false;
   private shownWithBounds = false;
   private admittedOrigin = "";
@@ -38,6 +45,7 @@ export class EmbeddedBrowserViewController {
     options: EmbeddedBrowserViewControllerOptions,
   ) {
     this.onState = onState;
+    this.onPrimaryClick = options.onPrimaryClick;
     this.allowFile = Boolean(options.allowFile);
     this.onHandoffHttp = options.onHandoffHttp;
     if (!options.guest || options.guest.isDestroyed()) {
@@ -87,6 +95,15 @@ export class EmbeddedBrowserViewController {
       wc.on(name as "did-navigate", listener);
       this.eventDisposers.push(() => wc.removeListener(name as "did-navigate", listener));
     };
+    listen("before-mouse-event", (_event, mouse) => {
+      if (!this.shown) {
+        this.primaryPointerGesture = undefined;
+        return;
+      }
+      const next = updatePreviewPrimaryPointerGesture(this.primaryPointerGesture, mouse);
+      this.primaryPointerGesture = next.gesture;
+      if (next.primaryClick) this.onPrimaryClick?.();
+    });
     listen("did-start-loading", () => this.emitState());
     listen("did-stop-loading", () => this.emitState());
     listen("did-navigate", () => this.recordNavigation());
@@ -222,6 +239,7 @@ export class EmbeddedBrowserViewController {
 
   setBounds(rect: EmbeddedBrowserViewRect | null): void {
     this.shownWithBounds = Boolean(viewportBounds(rect));
+    if (!this.shownWithBounds) this.primaryPointerGesture = undefined;
   }
 
   hide(): void {

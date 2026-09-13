@@ -5,7 +5,6 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import type {
   DownloadItem,
-  MouseInputEvent,
   Session,
   WebContents,
   WebPreferences,
@@ -48,10 +47,14 @@ import {
   safePreviewPathname,
 } from "./project-file-preview-policy.js";
 
+import {
+  updatePreviewPrimaryPointerGesture,
+  type PreviewPrimaryPointerGesture,
+} from "./preview-primary-pointer.js";
+
 const PREVIEW_SCHEME = "awaken-preview";
 const PREVIEW_TTL_MS = 30 * 60 * 1000;
 const MAX_IMAGE_HEADER_BYTES = 1024 * 1024;
-const PREVIEW_PRIMARY_CLICK_DISTANCE_PX = 6;
 const PDF_CORS_HEADERS = {
   "Access-Control-Allow-Headers": "Range",
   "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
@@ -95,56 +98,6 @@ export type ProjectFilePreviewManagerOptions = {
   onPreviewInteraction: (interaction: ProjectFilePreviewInteraction) => void;
   onGuestHttpNavigate?: (payload: { previewId: string; url: string }) => void;
 };
-
-type PreviewPrimaryPointerGesture = {
-  startX: number;
-  startY: number;
-  moved: boolean;
-};
-
-function updatePreviewPrimaryPointerGesture(
-  gesture: PreviewPrimaryPointerGesture | undefined,
-  mouse: MouseInputEvent,
-): {
-  gesture: PreviewPrimaryPointerGesture | undefined;
-  primaryClick: boolean;
-} {
-  if (mouse.type === "mouseDown" && mouse.button === "left") {
-    return {
-      gesture: { startX: mouse.x, startY: mouse.y, moved: false },
-      primaryClick: false,
-    };
-  }
-  if (!gesture) return { gesture: undefined, primaryClick: false };
-  if (mouse.type === "mouseMove") {
-    const distanceX = mouse.x - gesture.startX;
-    const distanceY = mouse.y - gesture.startY;
-    return {
-      gesture: {
-        ...gesture,
-        moved:
-          gesture.moved ||
-          distanceX * distanceX + distanceY * distanceY >
-            PREVIEW_PRIMARY_CLICK_DISTANCE_PX *
-              PREVIEW_PRIMARY_CLICK_DISTANCE_PX,
-      },
-      primaryClick: false,
-    };
-  }
-  if (mouse.type === "mouseUp") {
-    return {
-      gesture: undefined,
-      primaryClick:
-        mouse.button !== "right" &&
-        mouse.button !== "middle" &&
-        !gesture.moved,
-    };
-  }
-  if (mouse.type === "mouseLeave" || mouse.type === "contextMenu") {
-    return { gesture: undefined, primaryClick: false };
-  }
-  return { gesture, primaryClick: false };
-}
 
 function encodedPreviewPath(relativePath: string): string {
   return relativePath.split("/").map(encodeURIComponent).join("/");

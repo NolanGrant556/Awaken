@@ -841,6 +841,7 @@ function stubElectronBridge(): void {
         setActive: vi.fn(async () => undefined),
         attachGuest: vi.fn(async () => undefined),
         detachGuest: vi.fn(async () => undefined),
+        onInteraction: vi.fn(() => () => {}),
         onStateChanged: vi.fn(() => () => {}),
         onGuestHttpNavigate: vi.fn(() => () => {}),
         onRequestShow: vi.fn(() => () => {}),

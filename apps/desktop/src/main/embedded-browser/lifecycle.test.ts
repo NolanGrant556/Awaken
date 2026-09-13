@@ -39,6 +39,34 @@ function attach(manager: EmbeddedBrowserViewManager, guest: Guest, allowFile = f
 }
 
 describe("browser guest lifecycle and Agent admission", () => {
+  it.each([false, true])("reports clicks only from the active guest (local=%s)", (allowFile) => {
+    const onInteraction = vi.fn();
+    const manager = new EmbeddedBrowserViewManager({ getWindow: () => window, onState: vi.fn(), onRequestShow: vi.fn(), onInteraction });
+    const guest = new Guest();
+    attach(manager, guest, allowFile);
+    const mouse = (type: string, x = 10, button = "left") => guest.emit("before-mouse-event", {}, { type, x, y: 10, button });
+    const click = () => { mouse("mouseDown"); mouse("mouseUp"); };
+    mouse("mouseDown");
+    expect(onInteraction).not.toHaveBeenCalled();
+    mouse("mouseUp");
+    expect(onInteraction).toHaveBeenLastCalledWith({ ...ref, type: "primary-click" });
+    onInteraction.mockClear();
+    mouse("mouseDown"); mouse("mouseMove", 40); mouse("mouseUp", 40);
+    mouse("mouseDown", 10, "right"); mouse("mouseUp", 10, "right");
+    expect(onInteraction).not.toHaveBeenCalled();
+    mouse("mouseDown"); manager.setActive(null); manager.setActive(ref); manager.setViewport(ref, rect); mouse("mouseUp");
+    expect(onInteraction).not.toHaveBeenCalled();
+    mouse("mouseDown"); manager.setViewport(ref, null); manager.setViewport(ref, rect); mouse("mouseUp");
+    expect(onInteraction).not.toHaveBeenCalled();
+    manager.setActive(null); click();
+    expect(onInteraction).not.toHaveBeenCalled();
+    manager.setActive(ref); manager.setViewport(ref, rect); click();
+    expect(onInteraction).toHaveBeenCalledTimes(1);
+    manager.detachGuest(ref); click();
+    expect(onInteraction).toHaveBeenCalledTimes(1);
+    expect(guest.listenerCount("before-mouse-event")).toBe(0);
+  });
+
   it("routes popup links into the current public guest without admitting a new origin", async () => {
     const manager = managerWithState();
     const guest = new Guest();

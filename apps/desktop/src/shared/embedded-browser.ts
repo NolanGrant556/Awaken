@@ -31,6 +31,7 @@ export const EMBEDDED_BROWSER_CHANNELS = {
   setActive: "awaken:embedded-browser:set-active",
   attachGuest: "awaken:embedded-browser:attach-guest",
   detachGuest: "awaken:embedded-browser:detach-guest",
+  interaction: "awaken:embedded-browser:interaction",
   stateChanged: "awaken:embedded-browser:state-changed",
   guestHttpNavigate: "awaken:embedded-browser:guest-http-navigate",
   requestShow: "awaken:embedded-browser:request-show",
@@ -56,6 +57,10 @@ export type EmbeddedBrowserViewRect = {
 export type EmbeddedBrowserTabRef = {
   viewId: string;
   threadId: string;
+};
+
+export type EmbeddedBrowserInteraction = EmbeddedBrowserTabRef & {
+  type: "primary-click";
 };
 
 export type EmbeddedBrowserStatePayload = EmbeddedBrowserTabRef & {
@@ -270,6 +275,7 @@ export function createIdleEmbeddedBrowserClient(): EmbeddedBrowserBridge {
     setActive: async () => undefined,
     attachGuest: async () => undefined,
     detachGuest: async () => undefined,
+    onInteraction: () => () => undefined,
     onStateChanged: () => () => undefined,
     onGuestHttpNavigate: () => () => undefined,
     onRequestShow: () => () => undefined,
@@ -299,6 +305,9 @@ export type EmbeddedBrowserBridge = {
     allowFile: boolean,
   ) => Promise<void>;
   detachGuest: (ref: EmbeddedBrowserTabRef) => Promise<void>;
+  onInteraction: (
+    handler: (payload: EmbeddedBrowserInteraction) => void,
+  ) => () => void;
   onStateChanged: (
     handler: (payload: EmbeddedBrowserStatePayload) => void,
   ) => () => void;

@@ -76,6 +76,7 @@ export type FilePreviewHostProps = {
     | "setActive"
     | "attachGuest"
     | "detachGuest"
+    | "onInteraction"
     | "onStateChanged"
     | "onGuestHttpNavigate"
   >;
@@ -328,6 +329,7 @@ export default function FilePreviewHost({
       viewRef={browserRef}
       enabled={mode === "browser"}
       active={browserActive}
+      onPreviewPrimaryClick={onPreviewPrimaryClick}
       onLeaveHtmlPreview={onLeaveHtmlPreview}
     >
       {children}

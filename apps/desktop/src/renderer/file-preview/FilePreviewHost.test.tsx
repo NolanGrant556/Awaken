@@ -35,6 +35,36 @@ describe("FilePreviewHost", () => {
     vi.restoreAllMocks();
   });
 
+  it("routes active browser clicks by thread and view and unsubscribes when hidden", async () => {
+    type Interaction = Parameters<Parameters<ReturnType<typeof createIdleEmbeddedBrowserClient>["onInteraction"]>[0]>[0];
+    const listeners = new Set<(interaction: Interaction) => void>();
+    const embeddedBrowser = {
+      ...createIdleEmbeddedBrowserClient(),
+      getState: vi.fn(async () => ({ ...EMPTY_EMBEDDED_BROWSER_STATE, url: "https://example.com/", hasPage: true })),
+      onInteraction: (listener: (interaction: Interaction) => void) => {
+        listeners.add(listener);
+        return () => { listeners.delete(listener); };
+      },
+    };
+    const onClick = vi.fn();
+    const render = (active: boolean) => <FilePreviewHost runtimeClient={{
+      startProjectFilePreview: vi.fn(), closeProjectFilePreview: vi.fn(),
+      openProjectFileExternally: vi.fn(), revealProjectFile: vi.fn(), saveProjectMarkdownFile: vi.fn(),
+    }} mode="browser" onModeChange={vi.fn()} threadId="thread-a" viewId="slot-1"
+      browserActive={active} embeddedBrowser={embeddedBrowser} onPreviewPrimaryClick={onClick} />;
+    await act(async () => root.render(render(true)));
+    expect(listeners.size).toBe(1);
+    const emit = (threadId: string, viewId: string) => listeners.forEach(listener => listener({ threadId, viewId, type: "primary-click" }));
+    emit("other", "slot-1"); emit("thread-a", "other");
+    expect(onClick).not.toHaveBeenCalled();
+    emit("thread-a", "slot-1");
+    expect(onClick).toHaveBeenCalledTimes(1);
+    await act(async () => root.render(render(false)));
+    expect(listeners.size).toBe(0);
+    emit("thread-a", "slot-1");
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
   it("isolates browser guests across tabs and threads, including empty tabs", async () => {
     const states = new Map([
       ["thread-1/a", { ...EMPTY_EMBEDDED_BROWSER_STATE, url: "https://one.example/", hasPage: true }],
@@ -382,6 +412,7 @@ describe("FilePreviewHost", () => {
       setActive: vi.fn(async () => undefined),
       attachGuest: vi.fn(async () => undefined),
       detachGuest: vi.fn(async () => undefined),
+      onInteraction: vi.fn(() => () => {}),
       onStateChanged: vi.fn(() => () => {}),
       onGuestHttpNavigate: vi.fn(() => () => {}),
     };
@@ -468,6 +499,7 @@ describe("FilePreviewHost", () => {
       setActive: vi.fn(async () => undefined),
       attachGuest: vi.fn(async () => undefined),
       detachGuest: vi.fn(async () => undefined),
+      onInteraction: vi.fn(() => () => {}),
       onStateChanged: vi.fn(() => () => {}),
       onGuestHttpNavigate: vi.fn(() => () => {}),
     };
@@ -580,6 +612,7 @@ describe("FilePreviewHost", () => {
       setActive: vi.fn(async () => undefined),
       attachGuest: vi.fn(async () => undefined),
       detachGuest: vi.fn(async () => undefined),
+      onInteraction: vi.fn(() => () => {}),
       onStateChanged: vi.fn(() => () => {}),
       onGuestHttpNavigate: vi.fn(() => () => {}),
     };
@@ -711,6 +744,7 @@ describe("FilePreviewHost", () => {
       setActive,
       attachGuest: vi.fn(async () => undefined),
       detachGuest: vi.fn(async () => undefined),
+      onInteraction: vi.fn(() => () => {}),
       onStateChanged: vi.fn((handler) => {
         emitState = handler;
         return () => {

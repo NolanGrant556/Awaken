@@ -10,6 +10,7 @@ import {
   EMBEDDED_BROWSER_CHANNELS,
   type EmbeddedBrowserGuestHttpNavigate,
   type EmbeddedBrowserShowRequest,
+  type EmbeddedBrowserInteraction,
   type EmbeddedBrowserStatePayload,
 } from "../shared/embedded-browser.js";
 import {
@@ -391,6 +392,11 @@ const bridge: AwakenBridge = {
       ),
     detachGuest: (ref) =>
       ipcRenderer.invoke(EMBEDDED_BROWSER_CHANNELS.detachGuest, ref),
+    onInteraction: (callback) => {
+      const handler = (_event: IpcRendererEvent, payload: EmbeddedBrowserInteraction) => callback(payload);
+      ipcRenderer.on(EMBEDDED_BROWSER_CHANNELS.interaction, handler);
+      return () => ipcRenderer.removeListener(EMBEDDED_BROWSER_CHANNELS.interaction, handler);
+    },
     onStateChanged: (callback) => {
       const handler = (_event: IpcRendererEvent, payload: EmbeddedBrowserStatePayload) =>
         callback(payload);

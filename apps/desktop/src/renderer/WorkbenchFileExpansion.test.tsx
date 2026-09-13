@@ -10,7 +10,6 @@ import {
   expandedFileComposerCompletionKey,
   expandedFileComposerPresentation,
   formatExpandedFileComposerDuration,
-  hasExpandedFileComposerDraft,
   shouldCollapseExpandedFileComposer,
 } from "./ExpandedFileComposer";
 import {
@@ -207,49 +206,10 @@ describe("expanded file workspace shell", () => {
     );
   });
 
-  it("only collapses an idle empty composer on the active file surface", () => {
-    expect(
-      hasExpandedFileComposerDraft({
-        effectiveText: "   ",
-        attachmentCount: 0,
-        tokenCount: 0,
-      }),
-    ).toBe(false);
-    expect(
-      hasExpandedFileComposerDraft({
-        effectiveText: "正文",
-        attachmentCount: 0,
-        tokenCount: 0,
-      }),
-    ).toBe(true);
-    expect(
-      hasExpandedFileComposerDraft({
-        effectiveText: "",
-        attachmentCount: 1,
-        tokenCount: 0,
-      }),
-    ).toBe(true);
-    expect(
-      hasExpandedFileComposerDraft({
-        effectiveText: "",
-        attachmentCount: 0,
-        tokenCount: 1,
-      }),
-    ).toBe(true);
-    expect(
-      shouldCollapseExpandedFileComposer({
-        active: true,
-        forceFull: false,
-        hasDraft: false,
-      }),
-    ).toBe(true);
-    for (const protectedState of [
-      { active: false, forceFull: false, hasDraft: false },
-      { active: true, forceFull: true, hasDraft: false },
-      { active: true, forceFull: false, hasDraft: true },
-    ]) {
-      expect(shouldCollapseExpandedFileComposer(protectedState)).toBe(false);
-    }
+  it("collapses the active surface independently of draft contents and protects required panels", () => {
+    expect(shouldCollapseExpandedFileComposer({ active: true, forceFull: false })).toBe(true);
+    expect(shouldCollapseExpandedFileComposer({ active: false, forceFull: false })).toBe(false);
+    expect(shouldCollapseExpandedFileComposer({ active: true, forceFull: true })).toBe(false);
   });
 
   it("shows completion only for the run submitted from the expanded file composer", () => {

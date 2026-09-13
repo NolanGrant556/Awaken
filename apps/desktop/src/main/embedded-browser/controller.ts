@@ -28,7 +28,7 @@ export class EmbeddedBrowserViewController {
     this.onState = onState;
     this.view = new WebContentsView({ webPreferences: browserViewWebPreferences() });
     this.window.contentView.addChildView(this.view);
-    this.view.setVisible(false);
+    this.hide();
     this.applySecurityBackstop();
     this.wireEvents();
   }
@@ -133,6 +133,7 @@ export class EmbeddedBrowserViewController {
     if (!navigable) return this.state();
     this.admitOrigin(navigable);
     await this.loadInternal(navigable);
+    if (!this.shownWithBounds) this.hide();
     return this.state();
   }
 

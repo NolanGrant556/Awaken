@@ -26,7 +26,10 @@ import type { RuntimeClient } from "./runtime/client";
 import ArtifactPreviewHost, {
   type ArtifactPreviewSelection,
 } from "./file-preview/ArtifactPreviewHost";
-import FilePreviewHost, { type ProjectFileWorkspaceMode } from "./file-preview/FilePreviewHost";
+import FilePreviewHost, {
+  type FilePreviewHostProps,
+  type ProjectFileWorkspaceMode,
+} from "./file-preview/FilePreviewHost";
 import { projectFileTabId, type ProjectFileWorkspaceTab } from "./projectFileTabs";
 import { projectFileIconKind, projectFileTreeRows, type ProjectFileTreeRow } from "./projectFiles";
 import ProjectFileIcon, { type ProjectFileVisualIconKind } from "./ProjectFileIcon";
@@ -84,6 +87,11 @@ export type ProjectFilesWorkspaceProps = {
   onAddFileTextSelection?: (selection: FileLineComment) => void;
   onDeleteFileComment?: (commentId: string) => void;
   addTaskDisabled?: boolean;
+  threadId?: string;
+  inspectorViewId?: string;
+  embeddedBrowser?: FilePreviewHostProps["embeddedBrowser"];
+  browserActive?: boolean;
+  onLeaveHtmlPreview?: () => void;
   onAddTaskContext?: (
     request: ProjectEntryActionRequest,
   ) => Promise<{ ok: true } | { ok: false; message: string }>;
@@ -253,6 +261,11 @@ export function ProjectFilesWorkspace({
   onAddFileTextSelection,
   onDeleteFileComment,
   addTaskDisabled = false,
+  threadId,
+  inspectorViewId,
+  embeddedBrowser,
+  browserActive = true,
+  onLeaveHtmlPreview,
   onAddTaskContext,
 }: ProjectFilesWorkspaceProps) {
   const workspaceBodyRef = useRef<HTMLDivElement>(null);
@@ -923,46 +936,12 @@ export function ProjectFilesWorkspace({
 
   return (
     <section className="project-files-workspace" aria-label="项目文件">
-      <header className="project-files-pathbar">
-        <div className="project-files-mode-switch" role="tablist" aria-label="文件工作区">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={workspaceMode === "files"}
-            onClick={() => changeWorkspaceMode("files")}
-          >
-            <AwakenIcon concept="file-text" size={16} />
-            文件
-          </button>
-        </div>
-        <div className="project-files-pathbar__actions">
-          <button
-            type="button"
-            className={`project-files-pathbar__icon${fileListExpanded ? " is-expanded" : ""}`}
-            aria-label={fileListExpanded ? "收起文件列表" : "展开文件列表"}
-            aria-expanded={fileListExpanded}
-            aria-controls="awaken-project-files-navigator"
-            onClick={() => {
-              setFolderMenuOpen(false);
-              setFileListExpanded((current) => !current);
-            }}
-          >
-            <span className="project-files-pathbar__folder-icon" aria-hidden="true">
-              <span className="project-files-pathbar__folder-icon-state project-files-pathbar__folder-icon-state--collapsed">
-                <AwakenIcon concept="project" size={20} />
-              </span>
-              <span className="project-files-pathbar__folder-icon-state project-files-pathbar__folder-icon-state--expanded">
-                <AwakenIcon concept="folder-expanded" size={20} />
-              </span>
-            </span>
-          </button>
-        </div>
-      </header>
-
       <div
         ref={workspaceBodyRef}
         className={`project-files-workspace__body${
-          fileListExpanded ? "" : " is-file-list-collapsed"
+          fileListExpanded && workspaceMode !== "browser"
+            ? ""
+            : " is-file-list-collapsed"
         }`}
         style={
           fileListWidth === undefined
@@ -1005,6 +984,11 @@ export function ProjectFilesWorkspace({
               onAddFileTextSelection={onAddFileTextSelection}
               onDeleteFileComment={onDeleteFileComment}
               fileCommentDisabled={addTaskDisabled}
+              threadId={threadId}
+              viewId={inspectorViewId}
+              embeddedBrowser={embeddedBrowser}
+              browserActive={browserActive}
+              onLeaveHtmlPreview={onLeaveHtmlPreview}
             />
           ) : (
             <div className="project-files-preview-empty is-centered">
@@ -1034,8 +1018,8 @@ export function ProjectFilesWorkspace({
           aria-valuemin={MIN_FILE_LIST_WIDTH}
           aria-valuemax={Math.round(fileListWidthBounds().maximum)}
           aria-valuenow={Math.round(fileListWidth ?? DEFAULT_FILE_LIST_WIDTH)}
-          aria-hidden={!fileListExpanded}
-          tabIndex={fileListExpanded ? 0 : -1}
+          aria-hidden={!fileListExpanded || workspaceMode === "browser"}
+          tabIndex={fileListExpanded && workspaceMode !== "browser" ? 0 : -1}
           onPointerDown={handleFileListResizeStart}
           onKeyDown={handleFileListResizeKeyDown}
         />
@@ -1045,7 +1029,7 @@ export function ProjectFilesWorkspace({
           id="awaken-project-files-navigator"
           className="project-files-navigator"
           aria-label="项目文件目录"
-          aria-hidden={!fileListExpanded}
+          aria-hidden={!fileListExpanded || workspaceMode === "browser"}
         >
           <div className="project-files-folder-picker">
             <Popover
@@ -1162,7 +1146,6 @@ export function ProjectFilesWorkspace({
                         if (directory) {
                           toggleDirectory(row.relativePath);
                         } else {
-                          const mode = /\.html?$/i.test(row.name) ? "browser" : "files";
                           if (projectId && selectedFolder?.path) {
                             onOpenTab?.({
                               id: projectFileTabId(
@@ -1174,10 +1157,10 @@ export function ProjectFilesWorkspace({
                               folderPath: selectedFolder.path,
                               name: row.name,
                               relativePath: row.relativePath,
-                              mode,
+                              mode: "files",
                             });
                           }
-                          changeWorkspaceMode(mode);
+                          changeWorkspaceMode("files");
                         }
                       }}
                     >

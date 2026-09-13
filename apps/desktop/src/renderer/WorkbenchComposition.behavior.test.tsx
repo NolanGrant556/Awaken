@@ -2,7 +2,6 @@
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { beforeEach, afterEach, describe, it, expect, vi } from "vitest";
-import { DesktopInspectorRail } from "./DesktopInspectorRail";
 import { DesktopWorkbenchChrome } from "./DesktopWorkbenchChrome";
 import { DesktopExecutionFeed } from "./DesktopExecutionFeed";
 import { useFileWorkspaceSession } from "./useFileWorkspaceSession";
@@ -300,7 +299,7 @@ describe("Desktop composition boundaries", () => {
     expect(draft.value).toBe("保留主草稿");
   });
 
-  it.each(["subagent", "files", "browser", "no-project"])("opens a fresh chooser from %s and preserves existing tabs", async (surface) => {
+  it.each(["subagent", "files", "browser", "no-project"])("opens an add-tab menu from %s without replacing the inspector", async (surface) => {
     let panels!: ReturnType<typeof useWorkbenchPanels>;
     let files!: ReturnType<typeof useFileWorkspaceSession>;
     const task: SubagentTaskView = { taskId: "child", agentId: "agent", description: "样本",
@@ -317,8 +316,7 @@ describe("Desktop composition boundaries", () => {
       });
       return <><DesktopWorkbenchChrome fileWorkspace={files} platform="macos" currentConversationLabel="主任务" handleNewTask={vi.fn()}
         subagentTabs={panels.subagentTabs.taskIds.length ? [task] : []}
-        onOpenSubagent={panels.openSubagentTab} />
-        {files.inspectorChooserActive ? <DesktopInspectorRail handleOpenFileWorkspace={files.handleChooseInspectorEntry} /> : null}</>;
+        onOpenSubagent={panels.openSubagentTab} /></>;
     });
     await act(async () => {
       if (surface === "files" || surface === "browser") {
@@ -328,13 +326,16 @@ describe("Desktop composition boundaries", () => {
       } else panels.openSubagentTab("child");
     });
     const before = files.visibleFileWorkspaceTabSlots;
+    const selectedBefore = host.querySelectorAll('[role="tab"][aria-selected="true"]').length;
     await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="新建标签"]')!.click());
-    expect(files.inspectorChooserActive).toBe(true);
+    expect(files.inspectorChooserActive).toBe(false);
     expect(files.visibleFileWorkspaceTabSlots).toEqual(before);
-    expect(panels.openSubagentTaskId).toBeUndefined();
-    expect(host.querySelectorAll('[role="tab"][aria-selected="true"]')).toHaveLength(0);
-    const choices = host.querySelectorAll<HTMLButtonElement>('.light-inspector-nav button');
-    expect(Array.from(choices, button => button.textContent)).toEqual(["文件", "浏览器"]);
+    expect(host.querySelector(".light-inspector-nav")).toBeNull();
+    expect(host.querySelectorAll('[role="tab"][aria-selected="true"]')).toHaveLength(selectedBefore);
+    const choices = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('[role="menu"][aria-label="新建标签选项"] [role="menuitem"]'),
+    );
+    expect(choices.map((button) => button.textContent?.replace(/\s+/g, "").trim())).toEqual(["文件", "浏览器"]);
     await act(async () => choices[surface === "browser" ? 1 : 0].click());
     expect(files.inspectorChooserActive).toBe(false);
     expect(files.fileWorkspaceOpen).toBe(true);
@@ -345,7 +346,7 @@ describe("Desktop composition boundaries", () => {
       expect(files.visibleFileWorkspaceTabSlots.slice(0, before.length)).toEqual(before);
       const count = files.visibleFileWorkspaceTabSlots.length;
       await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="新建标签"]')!.click());
-      expect(files.inspectorChooserActive).toBe(true);
+      expect(files.inspectorChooserActive).toBe(false);
       expect(files.visibleFileWorkspaceTabSlots).toHaveLength(count);
       if (before[0]) {
         await act(async () => files.handleActivateProjectFileTab(before[0]));

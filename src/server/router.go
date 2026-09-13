@@ -399,6 +399,7 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 		controlMux.HandleFunc("GET /v1/control/network-route", ctrl.handleGetNetworkRoute)
 		controlMux.HandleFunc("PUT /v1/control/network-route", ctrl.handleUpdateNetworkRoute)
 		controlMux.HandleFunc("POST /v1/control/agent-plan/media-tools/reload", ctrl.handleReloadAgentPlanMediaTool)
+		controlMux.HandleFunc("POST /v1/control/browser-host", handleRegisterBrowserHost)
 		acpSessionCtrl := acpSessionControlHandlers{
 			runService:        cfg.runService,
 			acpSessionManager: cfg.control.ACPSessionManager,

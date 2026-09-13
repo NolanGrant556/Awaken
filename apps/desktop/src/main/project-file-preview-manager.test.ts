@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Session, WebContents, WebPreferences } from "electron";
 import type { RuntimeProject, RuntimeThreadTranscript } from "../shared/runtime.js";
 import { ProjectFilePreviewManager } from "./project-file-preview-manager.js";
+import { OfficeCliRenderer } from "./officecli.js";
 import { MAX_TEXT_PREVIEW_BYTES } from "./project-file-preview-policy.js";
 
 const temporaryRoots: string[] = [];
@@ -70,6 +71,7 @@ function createManager(root: string, transcript?: RuntimeThreadTranscript) {
   const previewSessions = new Map<string, FakeSession>();
   const openExternal = vi.fn(async () => undefined);
   const onPreviewInteraction = vi.fn();
+  const onGuestHttpNavigate = vi.fn();
   const manager = new ProjectFilePreviewManager({
     getProjects: async () => [project(root)],
     getTranscript: async () => {
@@ -93,6 +95,7 @@ function createManager(root: string, transcript?: RuntimeThreadTranscript) {
     showItemInFolder: vi.fn(),
     savePdfAs: vi.fn(async () => undefined),
     onPreviewInteraction,
+    onGuestHttpNavigate,
   });
   manager.initialize();
   return {
@@ -101,6 +104,7 @@ function createManager(root: string, transcript?: RuntimeThreadTranscript) {
     previewSessions,
     openExternal,
     onPreviewInteraction,
+    onGuestHttpNavigate,
   };
 }
 
@@ -302,48 +306,73 @@ describe("ProjectFilePreviewManager", () => {
     manager.dispose();
   });
 
-  it("serves HTML relative resources while project membership is still valid", async () => {
+  it("returns project HTML as bounded read-only text instead of a guest page", async () => {
     const root = await temporaryRoot();
     await fs.mkdir(path.join(root, "site"));
     await fs.writeFile(path.join(root, "site", "index.html"), '<link href="style.css">');
     await fs.writeFile(path.join(root, "site", "style.css"), "body { color: red; }");
-    const { manager, previewSessions } = createManager(root);
-    const result = await manager.start({
-      requestId: "request-html",
-      projectId: "project-1",
-      folderPath: root,
-      relativePath: "site/index.html",
+    const { manager } = createManager(root);
+    await expect(
+      manager.start({
+        requestId: "request-html",
+        projectId: "project-1",
+        folderPath: root,
+        relativePath: "site/index.html",
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      preview: {
+        kind: "code",
+        transport: "text",
+        language: "html",
+        content: '<link href="style.css">',
+      },
     });
-    expect(result.ok).toBe(true);
-    if (!result.ok || result.preview.transport !== "url" || !result.preview.partition) return;
-    const handler = previewSessions.get(result.preview.partition)?.protocolHandler;
-    const response = await handler!(
-      new Request(result.preview.src.replace("index.html", "style.css")),
-    );
-    expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toContain("text/css");
-    expect(await response.text()).toContain("color: red");
+    await expect(
+      manager.start({
+        requestId: "request-css",
+        projectId: "project-1",
+        folderPath: root,
+        relativePath: "site/style.css",
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      preview: {
+        kind: "code",
+        transport: "text",
+        language: "css",
+        content: "body { color: red; }",
+      },
+    });
     manager.dispose();
   });
 
   it("authorizes only the signed preview partition and hardens its webview", async () => {
     const root = await temporaryRoot();
-    await fs.mkdir(path.join(root, "site"));
-    await fs.writeFile(path.join(root, "site", "index.html"), "<h1>Local</h1>");
+    await fs.writeFile(path.join(root, "report.docx"), "fake-office");
+    const outputPath = path.join(root, "converted.html");
+    await fs.writeFile(outputPath, "<h1>Office</h1>");
+    const render = vi
+      .spyOn(OfficeCliRenderer.prototype, "render")
+      .mockResolvedValue(outputPath);
+    try {
     const {
       manager,
       previewSessions,
       openExternal,
       onPreviewInteraction,
+      onGuestHttpNavigate,
     } = createManager(root);
     const result = await manager.start({
-      requestId: "request-secure-html",
+      requestId: "request-secure-office",
       projectId: "project-1",
       folderPath: root,
-      relativePath: "site/index.html",
+      relativePath: "report.docx",
     });
     expect(result.ok).toBe(true);
-    if (!result.ok || result.preview.transport !== "url" || !result.preview.partition) return;
+    if (!result.ok || result.preview.transport !== "url" || !result.preview.partition) {
+      throw new Error("expected an isolated Office webview preview");
+    }
 
     const preferences = { preload: "/untrusted/preload.js" } as WebPreferences;
     expect(
@@ -396,6 +425,7 @@ describe("ProjectFilePreviewManager", () => {
     const preventDefault = vi.fn();
     willNavigate?.({ preventDefault }, "https://example.com/");
     expect(preventDefault).toHaveBeenCalledOnce();
+    expect(onGuestHttpNavigate).not.toHaveBeenCalled();
     expect(openExternal).toHaveBeenCalledWith("https://example.com/");
 
     const beforeMouseEvent = on.mock.calls.find(
@@ -423,6 +453,9 @@ describe("ProjectFilePreviewManager", () => {
       type: "primary-click",
     });
     manager.dispose();
+    } finally {
+      render.mockRestore();
+    }
   });
 
   it("saves editable text previews in place and rejects non-text preview kinds", async () => {
@@ -460,12 +493,15 @@ describe("ProjectFilePreviewManager", () => {
       manager.saveMarkdown({
         ...request,
         relativePath: "index.html",
-        content: "<p>no</p>\n",
+        content: "<p>saved</p>\n",
       }),
     ).resolves.toMatchObject({
-      ok: false,
-      code: "UNSUPPORTED_FILE_TYPE",
+      ok: true,
+      byteLength: Buffer.byteLength("<p>saved</p>\n"),
     });
+    await expect(fs.readFile(path.join(root, "index.html"), "utf8")).resolves.toBe(
+      "<p>saved</p>\n",
+    );
     await expect(
       manager.saveMarkdown({
         ...request,

@@ -8,6 +8,7 @@ declare module "react" {
         src: string;
         partition?: string;
         plugins?: true;
+        allowpopups?: string | boolean;
         webpreferences?: string;
       };
     }

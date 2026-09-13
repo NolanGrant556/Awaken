@@ -29,7 +29,6 @@ const imageExtensions = new Set([
   "svg",
   "webp",
 ]);
-const htmlExtensions = new Set(["html", "htm"]);
 const codeExtensions = new Set([
   "astro",
   "bash",
@@ -48,6 +47,8 @@ const codeExtensions = new Set([
   "graphql",
   "h",
   "hpp",
+  "htm",
+  "html",
   "ini",
   "java",
   "js",
@@ -125,7 +126,6 @@ export function classifyPreviewFile(
   }
   if (pdfExtensions.has(extension)) return { kind: "pdf", extension };
   if (imageExtensions.has(extension)) return { kind: "image", extension };
-  if (htmlExtensions.has(extension)) return { kind: "html", extension };
   if (codeExtensions.has(extension) || extensionlessCodeFiles.has(normalizedName) || safeText) {
     return {
       kind: "code",
@@ -147,8 +147,6 @@ export function previewByteLimit(kind: ProjectFilePreviewKind): number {
       return MAX_PDF_BYTES;
     case "image":
       return MAX_IMAGE_BYTES;
-    case "html":
-      return MAX_HTML_TEXT_RESOURCE_BYTES;
   }
 }
 
@@ -173,6 +171,9 @@ export function languageNameForFile(fileName: string): string {
     case "zsh":
     case "fish":
       return "shell";
+    case "htm":
+    case "html":
+      return "html";
     case "txt":
     case "text":
     case "log":

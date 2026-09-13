@@ -5,6 +5,7 @@ import (
 	_ "awaken/src/tools/artifact_publish"
 	_ "awaken/src/tools/ask_user"
 	_ "awaken/src/tools/bash"
+	_ "awaken/src/tools/browser"
 	_ "awaken/src/tools/calculator"
 	_ "awaken/src/tools/computer"
 	_ "awaken/src/tools/configure_acp_runner"

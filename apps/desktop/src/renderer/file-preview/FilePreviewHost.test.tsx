@@ -4,6 +4,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import FilePreviewHost from "./FilePreviewHost";
+import { createIdleEmbeddedBrowserClient, EMPTY_EMBEDDED_BROWSER_STATE, EMBEDDED_BROWSER_EMPTY_HINT } from "../../shared/embedded-browser";
+import { overlayCoversEmbeddedBrowser } from "./EmbeddedBrowserChrome";
 
 async function settleUntil(isReady: () => boolean): Promise<void> {
   await act(async () => {
@@ -33,7 +35,52 @@ describe("FilePreviewHost", () => {
     vi.restoreAllMocks();
   });
 
-  it("centers the browser empty state with the HTML preview description", async () => {
+  it("isolates browser guests across tabs and threads, including empty tabs", async () => {
+    const states = new Map([
+      ["thread-1/a", { ...EMPTY_EMBEDDED_BROWSER_STATE, url: "https://one.example/", hasPage: true }],
+      ["thread-1/b", { ...EMPTY_EMBEDDED_BROWSER_STATE, url: "https://two.example/", hasPage: true }],
+    ]);
+    const embeddedBrowser = {
+      ...createIdleEmbeddedBrowserClient(),
+      attachGuest: vi.fn(async () => undefined),
+      getState: vi.fn(async (ref: { threadId: string; viewId: string }) =>
+        states.get(`${ref.threadId}/${ref.viewId}`) ?? EMPTY_EMBEDDED_BROWSER_STATE),
+    };
+    const render = (threadId: string, viewId: string) => (
+      <FilePreviewHost
+        runtimeClient={{
+          startProjectFilePreview: vi.fn(),
+          closeProjectFilePreview: vi.fn(async () => undefined),
+          openProjectFileExternally: vi.fn(async () => ({ ok: true as const })),
+          revealProjectFile: vi.fn(async () => ({ ok: true as const })),
+          saveProjectMarkdownFile: vi.fn(async () => ({ ok: true as const, byteLength: 0 })),
+        }}
+        mode="browser" onModeChange={vi.fn()} threadId={threadId} viewId={viewId}
+        embeddedBrowser={embeddedBrowser}
+      />
+    );
+    await act(async () => root.render(render("thread-1", "a")));
+    const firstGuest = container.querySelector("webview");
+    expect(firstGuest?.getAttribute("src")).toBe("https://one.example/");
+    // Electron exposes getWebContentsId only after dom-ready, not at did-attach.
+    Object.defineProperty(firstGuest, "getWebContentsId", { value: () => 17 });
+    await act(async () => firstGuest?.dispatchEvent(new Event("dom-ready")));
+    expect(embeddedBrowser.attachGuest).toHaveBeenCalledWith(
+      { threadId: "thread-1", viewId: "a" }, 17, false,
+    );
+    await act(async () => root.render(render("thread-1", "b")));
+    expect(container.querySelector("webview")).not.toBe(firstGuest);
+    expect(container.querySelector("webview")?.getAttribute("src")).toBe("https://two.example/");
+    await act(async () => root.render(render("thread-1", "empty")));
+    expect(container.querySelector("webview")).toBeNull();
+    await act(async () => root.render(render("thread-1", "a")));
+    expect(container.querySelector("webview")?.getAttribute("src")).toBe("https://one.example/");
+    await act(async () => root.render(render("thread-2", "a")));
+    expect(container.querySelector("webview")).toBeNull();
+    expect((container.querySelector('input[aria-label="当前地址"]') as HTMLInputElement).value).toBe("");
+  });
+
+  it("centers the browser empty state with an address-only prompt", async () => {
     await act(async () => {
       root.render(
         <FilePreviewHost
@@ -61,8 +108,11 @@ describe("FilePreviewHost", () => {
     expect(emptyState).not.toBeNull();
     expect(emptyState?.querySelector("strong")?.textContent).toBe("浏览器");
     expect(emptyState?.querySelector("span")?.textContent).toBe(
-      "预览 Html 文件",
+      EMBEDDED_BROWSER_EMPTY_HINT,
     );
+    expect(
+      container.querySelector('input[aria-label="当前地址"]'),
+    ).not.toBeNull();
   });
 
   it("loads a sanitized independent Markdown preview and updates the file label", async () => {
@@ -184,6 +234,7 @@ describe("FilePreviewHost", () => {
         .find((button) => button.textContent === "查看源代码")
         ?.click();
     });
+    await settleUntil(() => container.querySelector(".cm-editor") !== null);
     expect(container.querySelector(".cm-editor")).not.toBeNull();
 
     await act(async () => root.render(render(() => undefined)));
@@ -247,81 +298,486 @@ describe("FilePreviewHost", () => {
     expect(container.textContent).not.toContain("搜索");
   });
 
-  it("routes HTML handles to the isolated browser surface", async () => {
+  it("shows project HTML as editable source in the file tab", async () => {
     const onModeChange = vi.fn();
-    const runtimeClient = {
-      startProjectFilePreview: vi.fn(async (request) => ({
-        ok: true as const,
-        preview: {
-          previewId: "preview-html",
-          requestId: request.requestId,
-          kind: "html" as const,
-          transport: "url" as const,
-          displayName: "index.html",
-          relativePath: "site/index.html",
-          byteLength: 128,
-          src: "awaken-preview://preview-html/site/index.html",
-          partition: "awaken-preview-preview-html",
-        },
-      })),
-      closeProjectFilePreview: vi.fn(async () => undefined),
-      openProjectFileExternally: vi.fn(async () => ({ ok: true as const })),
-      revealProjectFile: vi.fn(async () => ({ ok: true as const })),
-      saveProjectMarkdownFile: vi.fn(async () => ({
-        ok: true as const,
-        byteLength: 0,
-      })),
-    };
-    const selection = { name: "index.html", relativePath: "site/index.html" };
     await act(async () => {
       root.render(
         <FilePreviewHost
-          runtimeClient={runtimeClient}
+          runtimeClient={{
+            startProjectFilePreview: vi.fn(async (request) => ({
+              ok: true as const,
+              preview: {
+                previewId: "preview-html",
+                requestId: request.requestId,
+                kind: "code" as const,
+                transport: "text" as const,
+                displayName: "index.html",
+                relativePath: "site/index.html",
+                byteLength: 15,
+                content: "<h1>Local</h1>\n",
+                language: "html",
+              },
+            })),
+            closeProjectFilePreview: vi.fn(async () => undefined),
+            openProjectFileExternally: vi.fn(async () => ({
+              ok: true as const,
+            })),
+            revealProjectFile: vi.fn(async () => ({ ok: true as const })),
+            saveProjectMarkdownFile: vi.fn(async () => ({
+              ok: true as const,
+              byteLength: 0,
+            })),
+          }}
           projectId="project-1"
           folderPath="/workspace"
-          selection={selection}
+          selection={{ name: "index.html", relativePath: "site/index.html" }}
           mode="files"
           onModeChange={onModeChange}
         />,
       );
     });
-    await settleUntil(() => onModeChange.mock.calls.length > 0);
+    await settleUntil(
+      () =>
+        container.querySelector('[aria-label="index.html 文本编辑器"]') !== null,
+    );
 
-    expect(onModeChange).toHaveBeenCalledWith("browser");
-    const webview = container.querySelector("webview");
-    expect(webview).not.toBeNull();
-    expect(
-      webview?.closest(".project-file-preview-mode-stack__preview")?.classList,
-    ).toContain("is-hidden");
+    expect(onModeChange).toHaveBeenCalledWith("files");
+    expect(container.querySelector("webview")).toBeNull();
+    expect(container.querySelector(".embedded-browser__toolbar")).toBeNull();
+    expect(container.textContent).not.toContain("查看源代码");
+    expect(container.querySelector(".project-file-preview-heading")?.textContent).toContain(
+      "index.html",
+    );
+    expect(container.querySelector(".project-file-preview-heading")?.textContent).toContain(
+      "html",
+    );
+    expect(container.querySelector('[aria-label="自动换行"]')).not.toBeNull();
+  });
+
+  it("navigates the address bar to https without stacking a second toolbar", async () => {
+    const idleState = {
+      url: "",
+      title: "",
+      canGoBack: false,
+      canGoForward: false,
+      loading: false,
+      secure: false,
+      hasPage: false,
+    };
+    const navigate = vi.fn(async (_ref: unknown, url: string) => ({
+      ...idleState,
+      url,
+      hasPage: true,
+      secure: url.startsWith("https:"),
+    }));
+    const embeddedBrowser = {
+      navigate,
+      back: vi.fn(async () => idleState),
+      forward: vi.fn(async () => idleState),
+      reload: vi.fn(async () => idleState),
+      stop: vi.fn(async () => idleState),
+      close: vi.fn(async () => undefined),
+      getState: vi.fn(async () => idleState),
+      setViewport: vi.fn(async () => undefined),
+      setActive: vi.fn(async () => undefined),
+      attachGuest: vi.fn(async () => undefined),
+      detachGuest: vi.fn(async () => undefined),
+      onStateChanged: vi.fn(() => () => {}),
+      onGuestHttpNavigate: vi.fn(() => () => {}),
+    };
 
     await act(async () => {
       root.render(
         <FilePreviewHost
-          runtimeClient={runtimeClient}
-          projectId="project-1"
-          folderPath="/workspace"
-          selection={selection}
+          runtimeClient={{
+            startProjectFilePreview: vi.fn(),
+            closeProjectFilePreview: vi.fn(async () => undefined),
+            openProjectFileExternally: vi.fn(async () => ({
+              ok: true as const,
+            })),
+            revealProjectFile: vi.fn(async () => ({ ok: true as const })),
+            saveProjectMarkdownFile: vi.fn(async () => ({
+              ok: true as const,
+              byteLength: 0,
+            })),
+          }}
           mode="browser"
-          onModeChange={onModeChange}
+          onModeChange={vi.fn()}
+          threadId="thread-1"
+          viewId="project-file-slot:1"
+          embeddedBrowser={embeddedBrowser}
         />,
       );
     });
-    await settleUntil(() => container.querySelector("webview") !== null);
 
-    expect(runtimeClient.startProjectFilePreview).toHaveBeenCalledTimes(1);
-    expect(container.querySelector("webview")).toBe(webview);
-    expect(webview?.getAttribute("partition")).toBe(
-      "awaken-preview-preview-html",
+    const input = container.querySelector(
+      'input[aria-label="当前地址"]',
+    ) as HTMLInputElement;
+    expect(input).not.toBeNull();
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        "value",
+      )?.set;
+      setter?.call(input, "example.com");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      container
+        .querySelector("form.embedded-browser__toolbar")
+        ?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+
+    expect(navigate).toHaveBeenCalledWith(
+      { threadId: "thread-1", viewId: "project-file-slot:1" },
+      "https://example.com/",
+    );
+    expect(container.querySelectorAll(".embedded-browser__toolbar")).toHaveLength(
+      1,
+    );
+    expect(container.querySelector(".project-file-preview-heading")).toBeNull();
+    const webview = container.querySelector("webview");
+    expect(webview?.getAttribute("src")).toBe("https://example.com/");
+    expect(webview?.getAttribute("partition")).toBe("persist:awaken-browser");
+  });
+
+  it("keeps a still of the page when a dialog opens instead of blanking it", async () => {
+    const idleState = {
+      url: "",
+      title: "",
+      canGoBack: false,
+      canGoForward: false,
+      loading: false,
+      secure: false,
+      hasPage: false,
+    };
+    const embeddedBrowser = {
+      navigate: vi.fn(async (_ref: unknown, url: string) => ({
+        ...idleState,
+        url,
+        hasPage: true,
+        secure: url.startsWith("https:"),
+      })),
+      back: vi.fn(async () => idleState),
+      forward: vi.fn(async () => idleState),
+      reload: vi.fn(async () => idleState),
+      stop: vi.fn(async () => idleState),
+      close: vi.fn(async () => undefined),
+      getState: vi.fn(async () => idleState),
+      setViewport: vi.fn(async () => undefined),
+      setActive: vi.fn(async () => undefined),
+      attachGuest: vi.fn(async () => undefined),
+      detachGuest: vi.fn(async () => undefined),
+      onStateChanged: vi.fn(() => () => {}),
+      onGuestHttpNavigate: vi.fn(() => () => {}),
+    };
+
+    await act(async () => {
+      root.render(
+        <FilePreviewHost
+          runtimeClient={{
+            startProjectFilePreview: vi.fn(),
+            closeProjectFilePreview: vi.fn(async () => undefined),
+            openProjectFileExternally: vi.fn(async () => ({
+              ok: true as const,
+            })),
+            revealProjectFile: vi.fn(async () => ({ ok: true as const })),
+            saveProjectMarkdownFile: vi.fn(async () => ({
+              ok: true as const,
+              byteLength: 0,
+            })),
+          }}
+          mode="browser"
+          onModeChange={vi.fn()}
+          threadId="thread-1"
+          viewId="project-file-slot:1"
+          embeddedBrowser={embeddedBrowser}
+        />,
+      );
+    });
+
+    const input = container.querySelector(
+      'input[aria-label="当前地址"]',
+    ) as HTMLInputElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        "value",
+      )?.set;
+      setter?.call(input, "example.com");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      container
+        .querySelector("form.embedded-browser__toolbar")
+        ?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+
+    const webview = container.querySelector("webview") as HTMLElement & {
+      capturePage?: () => Promise<{ toDataURL: () => string }>;
+    };
+    webview.capturePage = vi.fn(async () => ({
+      toDataURL: () => "data:image/png;base64,page",
+    }));
+
+    const dialog = document.createElement("div");
+    dialog.setAttribute("role", "dialog");
+    Object.defineProperty(dialog, "getBoundingClientRect", {
+      value: () => ({
+        width: 240,
+        height: 120,
+        x: 10,
+        y: 10,
+        top: 10,
+        left: 10,
+        right: 250,
+        bottom: 130,
+        toJSON() {},
+      }),
+    });
+    document.body.append(dialog);
+
+    await settleUntil(
+      () => container.querySelector(".embedded-browser__guest-snapshot") !== null,
     );
     expect(
-      container.querySelector('[aria-label="当前地址"]')?.textContent,
-    ).toBe("/site/index.html");
-    expect(
+      container.querySelector(".embedded-browser__guest-snapshot")?.getAttribute("src"),
+    ).toBe("data:image/png;base64,page");
+    expect(webview.classList.contains("is-covered")).toBe(true);
+
+    dialog.remove();
+    await settleUntil(
+      () => container.querySelector(".embedded-browser__guest-snapshot") === null,
+    );
+    expect(webview.classList.contains("is-covered")).toBe(false);
+  });
+
+  it("opens a local HTML path in a page-slot webview under the address bar", async () => {
+    const idleState = {
+      url: "",
+      title: "",
+      canGoBack: false,
+      canGoForward: false,
+      loading: false,
+      secure: false,
+      hasPage: false,
+    };
+    const navigate = vi.fn(async (_ref: unknown, url: string) => ({
+      ...idleState,
+      url,
+      hasPage: true,
+      secure: url.startsWith("https:"),
+    }));
+    const embeddedBrowser = {
+      navigate,
+      back: vi.fn(async () => idleState),
+      forward: vi.fn(async () => idleState),
+      reload: vi.fn(async () => idleState),
+      stop: vi.fn(async () => idleState),
+      close: vi.fn(async () => undefined),
+      getState: vi.fn(async () => idleState),
+      setViewport: vi.fn(async () => undefined),
+      setActive: vi.fn(async () => undefined),
+      attachGuest: vi.fn(async () => undefined),
+      detachGuest: vi.fn(async () => undefined),
+      onStateChanged: vi.fn(() => () => {}),
+      onGuestHttpNavigate: vi.fn(() => () => {}),
+    };
+
+    await act(async () => {
+      root.render(
+        <FilePreviewHost
+          runtimeClient={{
+            startProjectFilePreview: vi.fn(),
+            closeProjectFilePreview: vi.fn(async () => undefined),
+            openProjectFileExternally: vi.fn(async () => ({
+              ok: true as const,
+            })),
+            revealProjectFile: vi.fn(async () => ({ ok: true as const })),
+            saveProjectMarkdownFile: vi.fn(async () => ({
+              ok: true as const,
+              byteLength: 0,
+            })),
+          }}
+          mode="browser"
+          onModeChange={vi.fn()}
+          threadId="thread-1"
+          viewId="project-file-slot:1"
+          embeddedBrowser={embeddedBrowser}
+        />,
+      );
+    });
+
+    const input = container.querySelector(
+      'input[aria-label="当前地址"]',
+    ) as HTMLInputElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        "value",
+      )?.set;
+      setter?.call(input, "javascript:alert(1)");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
       container
-        .querySelector('[aria-label="当前地址"]')
-        ?.closest(".project-file-preview-heading"),
+        .querySelector("form.embedded-browser__toolbar")
+        ?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+      "只支持 http、https 或本地 HTML",
+    );
+    expect(navigate).not.toHaveBeenCalled();
+
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        "value",
+      )?.set;
+      setter?.call(input, "/tmp/index.html");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      container
+        .querySelector("form.embedded-browser__toolbar")
+        ?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+
+    expect(navigate).toHaveBeenCalledWith(
+      { threadId: "thread-1", viewId: "project-file-slot:1" },
+      "file:///tmp/index.html",
+    );
+    const localGuest = container.querySelector("webview");
+    expect(localGuest?.getAttribute("src")).toBe("file:///tmp/index.html");
+    expect(localGuest?.getAttribute("partition")).toBe(
+      "awaken-local-html-project-file-slot-1",
+    );
+    expect(input.value).toBe("file:///tmp/index.html");
+
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        "value",
+      )?.set;
+      setter?.call(input, "example.com");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      container
+        .querySelector("form.embedded-browser__toolbar")
+        ?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+    expect(navigate).toHaveBeenCalledWith(
+      { threadId: "thread-1", viewId: "project-file-slot:1" },
+      "https://example.com/",
+    );
+    const httpGuest = container.querySelector("webview");
+    expect(httpGuest?.getAttribute("src")).toBe("https://example.com/");
+    expect(httpGuest?.getAttribute("partition")).toBe("persist:awaken-browser");
+  });
+
+  it("activates a local view so the empty workbench can still show a page", async () => {
+    const idleState = {
+      url: "",
+      title: "",
+      canGoBack: false,
+      canGoForward: false,
+      loading: false,
+      secure: false,
+      hasPage: false,
+    };
+    let emitState:
+      | ((payload: {
+          viewId: string;
+          threadId: string;
+          state: typeof idleState & { url: string; hasPage: boolean };
+        }) => void)
+      | undefined;
+    const setActive = vi.fn(async () => undefined);
+    const navigate = vi.fn(async (ref: { threadId: string; viewId: string }, url: string) => {
+      const next = { ...idleState, url, hasPage: true };
+      emitState?.({ ...ref, state: next });
+      return next;
+    });
+    const embeddedBrowser = {
+      navigate,
+      back: vi.fn(async () => idleState),
+      forward: vi.fn(async () => idleState),
+      reload: vi.fn(async () => idleState),
+      stop: vi.fn(async () => idleState),
+      close: vi.fn(async () => undefined),
+      getState: vi.fn(async () => idleState),
+      setViewport: vi.fn(async () => undefined),
+      setActive,
+      attachGuest: vi.fn(async () => undefined),
+      detachGuest: vi.fn(async () => undefined),
+      onStateChanged: vi.fn((handler) => {
+        emitState = handler;
+        return () => {
+          emitState = undefined;
+        };
+      }),
+      onGuestHttpNavigate: vi.fn(() => () => {}),
+    };
+
+    await act(async () => {
+      root.render(
+        <FilePreviewHost
+          runtimeClient={{
+            startProjectFilePreview: vi.fn(),
+            closeProjectFilePreview: vi.fn(async () => undefined),
+            openProjectFileExternally: vi.fn(async () => ({
+              ok: true as const,
+            })),
+            revealProjectFile: vi.fn(async () => ({ ok: true as const })),
+            saveProjectMarkdownFile: vi.fn(async () => ({
+              ok: true as const,
+              byteLength: 0,
+            })),
+          }}
+          mode="browser"
+          onModeChange={vi.fn()}
+          viewId="project-file-slot:9"
+          embeddedBrowser={embeddedBrowser}
+        />,
+      );
+    });
+
+    expect(setActive).toHaveBeenCalledWith({
+      threadId: "local",
+      viewId: "project-file-slot:9",
+    });
+
+    const input = container.querySelector(
+      'input[aria-label="当前地址"]',
+    ) as HTMLInputElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        "value",
+      )?.set;
+      setter?.call(input, "http://127.0.0.1:8765/");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      container
+        .querySelector("form.embedded-browser__toolbar")
+        ?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+
+    expect(navigate).toHaveBeenCalledWith(
+      { threadId: "local", viewId: "project-file-slot:9" },
+      "http://127.0.0.1:8765/",
+    );
+    const page = container.querySelector(".embedded-browser__page");
+    expect(page).not.toBeNull();
+    expect(page?.querySelector(".project-files-preview-empty")).toBeNull();
+    expect(
+      container.querySelector(".project-files-preview-empty")?.closest("[hidden]"),
     ).not.toBeNull();
-    expect(container.querySelector(".project-file-browser-toolbar")).toBeNull();
+    expect(page?.querySelector("webview")?.getAttribute("src")).toBe(
+      "http://127.0.0.1:8765/",
+    );
   });
 
   it("keeps an Office webview mounted while switching between browser and files", async () => {
@@ -397,7 +853,7 @@ describe("FilePreviewHost", () => {
     ).toContain("is-hidden");
     expect(
       container.querySelector(".project-files-preview-empty")?.textContent,
-    ).toContain("浏览器预览 Html 文件");
+    ).toContain(EMBEDDED_BROWSER_EMPTY_HINT);
 
     await act(async () => root.render(render("files")));
     expect(container.querySelector("webview")).toBe(webview);
@@ -405,5 +861,29 @@ describe("FilePreviewHost", () => {
       webview?.closest(".project-file-preview-mode-stack__preview")?.classList,
     ).not.toContain("is-hidden");
     expect(runtimeClient.startProjectFilePreview).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("overlayCoversEmbeddedBrowser", () => {
+  it("treats a visible dialog as covering the in-page guest", () => {
+    const dialog = document.createElement("div");
+    dialog.setAttribute("role", "dialog");
+    Object.defineProperty(dialog, "getBoundingClientRect", {
+      value: () => ({
+        width: 320,
+        height: 180,
+        x: 0,
+        y: 0,
+        top: 0,
+        left: 0,
+        right: 320,
+        bottom: 180,
+        toJSON() {},
+      }),
+    });
+    document.body.append(dialog);
+    expect(overlayCoversEmbeddedBrowser()).toBe(true);
+    dialog.remove();
+    expect(overlayCoversEmbeddedBrowser()).toBe(false);
   });
 });

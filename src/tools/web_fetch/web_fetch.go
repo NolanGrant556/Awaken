@@ -76,6 +76,7 @@ func (t *Tool) Definition() tool.ToolDefinition {
 		WhenNotToUse: []string{
 			"Use Grep or Read for local workspace files",
 			"Use WebSearch to discover URLs before fetching an unknown third-party page",
+			"Use browser_navigate when the user needs a visible Awaken browser tab",
 			"Do not fetch private, authenticated, or non-HTTPS targets",
 		},
 		SideEffects: []tool.ToolSideEffect{{

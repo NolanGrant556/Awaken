@@ -9,6 +9,7 @@ import type {
   PetSummary,
 } from "../../shared/pets";
 import type { ProjectFilePreviewInteraction } from "../../shared/project-file-preview-interaction";
+import type { EmbeddedBrowserBridge } from "../../shared/embedded-browser";
 import {
   type ACPRunnerCreateRequest,
   type ACPRunnerProbeResult,
@@ -420,6 +421,7 @@ export type RuntimeClient = {
   onProjectFilePreviewInteraction: (
     handler: (interaction: ProjectFilePreviewInteraction) => void,
   ) => () => void;
+  embeddedBrowser: EmbeddedBrowserBridge;
   openProjectFileExternally: (
     request: ProjectFilePreviewActionRequest,
   ) => Promise<ProjectFilePreviewActionResult>;
@@ -705,6 +707,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     startArtifactPreview: (request) => bridge.startArtifactPreview(request),
     closeProjectFilePreview: (request) => bridge.closeProjectFilePreview(request),
     onProjectFilePreviewInteraction: (handler) => bridge.onProjectFilePreviewInteraction(handler),
+    embeddedBrowser: bridge.embeddedBrowser,
     openProjectFileExternally: (request) => bridge.openProjectFileExternally(request),
     revealProjectFile: (request) => bridge.revealProjectFile(request),
     saveProjectMarkdownFile: (request) => bridge.saveProjectMarkdownFile(request),

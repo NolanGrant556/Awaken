@@ -3,6 +3,7 @@ import { renderToString } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { PetsSettingsPanel } from "./PetsSettingsPanel";
 import type { RuntimeClient } from "../runtime/client";
+import { createIdleEmbeddedBrowserClient } from "../../shared/embedded-browser";
 
 function createMockRuntimeClient(): RuntimeClient {
   return {
@@ -262,6 +263,7 @@ function createMockRuntimeClient(): RuntimeClient {
     })),
     closeProjectFilePreview: vi.fn(async () => undefined),
     onProjectFilePreviewInteraction: vi.fn(() => () => {}),
+    embeddedBrowser: createIdleEmbeddedBrowserClient(),
     openProjectFileExternally: vi.fn(async () => ({ ok: true as const })),
     revealProjectFile: vi.fn(async () => ({ ok: true as const })),
     saveProjectMarkdownFile: vi.fn(async () => ({

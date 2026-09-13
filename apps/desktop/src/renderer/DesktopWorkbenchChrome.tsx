@@ -1,5 +1,6 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
+  AwakenDropdown as Dropdown,
   AwakenIcon,
   AwakenTooltip as Tooltip,
   AwakenWorkbenchChrome as WorkbenchChrome,
@@ -7,6 +8,7 @@ import {
 } from "@awaken/design-system";
 import ProjectFileIcon from "./ProjectFileIcon";
 import { artifactPreviewTabMediaIconConcept } from "./artifactMediaPresentation";
+import { INSPECTOR_FILE_ITEMS } from "./desktopLayoutConstants";
 import { projectFileIconKind } from "./projectFiles";
 import type { useFileWorkspaceSession } from "./useFileWorkspaceSession";
 import type { SubagentTaskView } from "./runtime/reducer";
@@ -20,7 +22,7 @@ type Props = {
     | "fileWorkspacePanelAction"
     | "fileWorkspaceTabsAreActive"
     | "handleActivateInspectorTab"
-    | "handleAddProjectFileTab"
+    | "handleCreateProjectFileTab"
     | "handleCloseFileWorkspace"
     | "handleContractFileWorkspace"
     | "handleExpandFileWorkspace"
@@ -50,6 +52,7 @@ export function DesktopWorkbenchChrome({
   onOpenSubagent,
 }: Props) {
   const tabsRef = useRef<HTMLDivElement>(null);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
   const { state, dispatch } = files.inspectorTabs;
   useEffect(() => {
     tabsRef.current
@@ -267,16 +270,44 @@ export function DesktopWorkbenchChrome({
                   </div>
                 ) : null}
               </div>
-              <Tooltip label="新建标签" placement="bottom">
-                <button
-                  type="button"
-                  className="workbench-chrome-icon project-files-tab-add"
-                  aria-label="新建标签"
-                  onClick={files.handleAddProjectFileTab}
-                >
-                  <AwakenIcon concept="add" size={14} />
-                </button>
-              </Tooltip>
+              <Dropdown
+                open={addMenuOpen}
+                onOpenChange={setAddMenuOpen}
+                placement="bottom-start"
+                offset={6}
+                trigger={
+                  <Tooltip label="新建标签" placement="bottom">
+                    <button
+                      type="button"
+                      className="workbench-chrome-icon project-files-tab-add"
+                      aria-label="新建标签"
+                      aria-haspopup="menu"
+                      aria-expanded={addMenuOpen}
+                    >
+                      <AwakenIcon concept="add" size={14} />
+                    </button>
+                  </Tooltip>
+                }
+              >
+                <div className="project-files-tab-add-menu" role="menu" aria-label="新建标签选项">
+                  {INSPECTOR_FILE_ITEMS.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setAddMenuOpen(false);
+                        files.handleCreateProjectFileTab(
+                          item.id === "browser" ? "browser" : "files",
+                        );
+                      }}
+                    >
+                      {item.icon}
+                      <span>{item.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </Dropdown>
             </div>
             <div className="project-files-chrome-actions">
               {files.fileWorkspacePanelAction ? (

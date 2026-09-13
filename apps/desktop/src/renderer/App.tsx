@@ -23,6 +23,7 @@ import type {
   RuntimePluginComponent,
   RuntimeThread,
 } from "../shared/runtime";
+import { resolveEmbeddedBrowserTabRef } from "../shared/embedded-browser";
 import { MACOS_WINDOW_CHROME_GEOMETRY } from "../shared/window-chrome";
 import { ComposerSurface } from "./ComposerSurface";
 import { ComputerHandoffIndicator } from "./ComputerHandoffIndicator";
@@ -1022,6 +1023,19 @@ export function App() {
       setContextUsagePanelOpen(false);
       runPlanEntry.closePanel(false);
     },
+    onInspectorFileTabClosed: (viewId) => {
+      const ref = resolveEmbeddedBrowserTabRef({
+        threadId: runtimeState.activeThreadId ?? runtimeState.threadId,
+        viewId,
+      });
+      void runtimeClient.embeddedBrowser.close(ref);
+    },
+    onFileWorkspaceClosed: () => {
+      const ref = resolveEmbeddedBrowserTabRef({
+        threadId: runtimeState.activeThreadId ?? runtimeState.threadId,
+      });
+      void runtimeClient.embeddedBrowser.closeThread(ref.threadId);
+    },
   });
   const {
     fileWorkspaceOpen,
@@ -1056,10 +1070,12 @@ export function App() {
     handleCloseFileWorkspace,
     handleOpenProjectFileTab,
     handleOpenDeliverablePreview,
+    handleShowBrowserTab,
     fileWorkspaceProjectId,
     fileWorkspaceProjectLabel,
     fileWorkspaceFolders,
     activeFileWorkspaceTab,
+    activeFileWorkspaceTabSlot,
   } = fileWorkspace;
 
   const dockComposerMetaItems = composerMetaItemsForFileWorkspaceSurface(
@@ -1082,6 +1098,18 @@ export function App() {
     fileWorkspaceExpanded,
     expandedWorkspaceSurface,
   });
+  useEffect(() => {
+    return runtimeClient.embeddedBrowser.onRequestShow((payload) => {
+      const currentThread = runtimeState.activeThreadId ?? runtimeState.threadId;
+      if (!currentThread || payload.threadId !== currentThread) return;
+      handleShowBrowserTab(payload.viewId || undefined);
+    });
+  }, [
+    handleShowBrowserTab,
+    runtimeClient,
+    runtimeState.activeThreadId,
+    runtimeState.threadId,
+  ]);
   const scrollController = useRunStageScrollController({
     showCenterComposer,
     narrativeItems: visibleNarrativeItems,
@@ -2039,6 +2067,17 @@ export function App() {
                         folders={fileWorkspaceFolders}
                         initialMode={fileWorkspaceMode}
                         activeTab={activeFileWorkspaceTab}
+                        threadId={runtimeState.activeThreadId ?? runtimeState.threadId}
+                        inspectorViewId={activeFileWorkspaceTabSlot?.id}
+                        embeddedBrowser={runtimeClient.embeddedBrowser}
+                        browserActive={
+                          !openSubagent &&
+                          !fileWorkspace.inspectorChooserActive &&
+                          !inspectorPresentation.effectiveCollapsed
+                        }
+                        onLeaveHtmlPreview={() => {
+                          workbenchPanels.inspectorTabs.dispatch({ type: "clear-file" });
+                        }}
                         artifactPreview={deliverablePreview}
                         artifactMediaSource={
                           typeof deliverablePreviewMediaSourceState === "string"

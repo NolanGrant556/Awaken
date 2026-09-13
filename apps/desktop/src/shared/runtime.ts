@@ -3,6 +3,7 @@ import type { AguiEvent, InstructionSnapshotSummary } from "./agui.js";
 import type { DesktopUpdateSnapshot } from "./desktop-update.js";
 import type { PetBridge } from "./pets.js";
 import type { ProjectFilePreviewInteraction } from "./project-file-preview-interaction.js";
+import type { EmbeddedBrowserBridge } from "./embedded-browser.js";
 
 export type DesktopPlatform = "macos" | "windows" | "linux";
 
@@ -531,7 +532,7 @@ export type ProjectEntryOpenWithRequest = ProjectEntryActionRequest & {
   application: ProjectEntryOpenApplication;
 };
 
-export type ProjectFilePreviewKind = "office" | "markdown" | "code" | "pdf" | "image" | "html";
+export type ProjectFilePreviewKind = "office" | "markdown" | "code" | "pdf" | "image";
 
 export type ProjectFilePreviewStartRequest = {
   /** Renderer-generated identity used to cancel work before a preview handle exists. */
@@ -558,7 +559,7 @@ export type ProjectFilePreviewTextHandle = {
 export type ProjectFilePreviewUrlHandle = {
   previewId: string;
   requestId: string;
-  kind: "office" | "pdf" | "image" | "html";
+  kind: "office" | "pdf" | "image";
   transport: "url";
   displayName: string;
   relativePath: string;
@@ -2203,11 +2204,23 @@ export type RunStreamHandlers = {
   onClose?: () => void;
 };
 
-export type SupervisorStatus = "stopped" | "starting" | "running" | "crashed" | "stopping";
+export type SupervisorStatus =
+  | "stopped"
+  | "starting"
+  | "running"
+  | "external-attached"
+  | "crashed"
+  | "stopping";
 
 export type SupervisorStatusInfo = {
   status: SupervisorStatus;
 };
+
+export function isDesktopRuntimeAvailable(
+  status: SupervisorStatus | null | undefined,
+): boolean {
+  return status === "running" || status === "external-attached";
+}
 
 export type ComputerHostStatus = {
   available: boolean;
@@ -2617,6 +2630,7 @@ export type AwakenBridge = {
   onProjectFilePreviewInteraction: (
     handler: (interaction: ProjectFilePreviewInteraction) => void,
   ) => () => void;
+  embeddedBrowser: EmbeddedBrowserBridge;
   openProjectFileExternally: (
     request: ProjectFilePreviewActionRequest,
   ) => Promise<ProjectFilePreviewActionResult>;

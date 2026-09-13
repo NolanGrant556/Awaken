@@ -138,6 +138,11 @@ import {
 } from "../shared/desktop-update.js";
 import { DesktopShutdownCoordinator } from "./desktop-shutdown-coordinator.js";
 import { DesktopUpdateManager } from "./desktop-update-manager.js";
+import { EMBEDDED_BROWSER_CHANNELS } from "../shared/embedded-browser.js";
+import { EmbeddedBrowserHost } from "./embedded-browser/host.js";
+import { registerEmbeddedBrowserIpc, registerEmbeddedBrowserReloadHandler } from "./embedded-browser/ipc.js";
+import { EmbeddedBrowserViewManager } from "./embedded-browser/manager.js";
+import { authorizeEmbeddedBrowserWebview } from "./embedded-browser/options.js";
 
 const { autoUpdater } = electronUpdaterPkg;
 
@@ -219,6 +224,8 @@ let projectTrashWorkerTimer: NodeJS.Timeout | null = null;
 let projectTrashWorkerRunning = false;
 let memoryDreamSchedulerStore: MemoryDreamSchedulerStore | null = null;
 let projectFilePreviewManager: ProjectFilePreviewManager | null = null;
+let embeddedBrowserManager: EmbeddedBrowserViewManager | null = null;
+let embeddedBrowserHost: EmbeddedBrowserHost | null = null;
 let artifactMediaManager: ArtifactMediaManager | null = null;
 let memoryDreamSchedulerTimer: NodeJS.Timeout | null = null;
 let automaticDreamRunning = false;
@@ -305,6 +312,19 @@ async function synchronizeNetworkRoute(snapshot?: NetworkRouteSnapshot): Promise
 
 async function prepareNetworkRoute(surface: string): Promise<void> {
   await networkRouteManager?.prepareForNetworkOperation(surface);
+}
+
+async function registerEmbeddedBrowserHostWithCore(): Promise<void> {
+  const client = supervisor?.getControlClient();
+  if (!client || !embeddedBrowserHost) return;
+  try {
+    const registration = await embeddedBrowserHost.start();
+    await client.registerBrowserHost(registration);
+  } catch (error) {
+    console.warn("embedded_browser_host_register_failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 function loadDesktopIcon() {
@@ -1007,6 +1027,7 @@ function createMainWindow(): BrowserWindow {
   });
 
   mainWindow.webContents.on("will-attach-webview", (event, webPreferences, params) => {
+    if (authorizeEmbeddedBrowserWebview(webPreferences, params)) return;
     if (!projectFilePreviewManager?.authorizeWebview(webPreferences, params)) {
       event.preventDefault();
     }
@@ -1057,7 +1078,13 @@ function createMainWindow(): BrowserWindow {
 
   ipcMain.on("awaken:renderer-ready", handleRendererReady);
 
+  const hideEmbeddedBrowserViews = () => {
+    embeddedBrowserManager?.hideAll();
+  };
+  registerEmbeddedBrowserReloadHandler(mainWindow.webContents, hideEmbeddedBrowserViews);
+
   mainWindow.webContents.on("render-process-gone", (_event, details) => {
+    hideEmbeddedBrowserViews();
     cleanupWindowSubscriptions(webContentsId);
     if (
       isQuitting ||
@@ -1111,6 +1138,7 @@ function createMainWindow(): BrowserWindow {
       rendererRecoveryTimer = undefined;
     }
     cleanupWindowSubscriptions(webContentsId);
+    embeddedBrowserManager?.hideAll();
     projectFilePreviewManager?.releaseAll();
   });
 
@@ -2389,8 +2417,35 @@ app.whenReady().then(async () => {
       if (!mainWindowRef || mainWindowRef.isDestroyed()) return;
       mainWindowRef.webContents.send(PROJECT_FILE_PREVIEW_INTERACTION_CHANNEL, interaction);
     },
+    onGuestHttpNavigate: (payload) => {
+      if (!mainWindowRef || mainWindowRef.isDestroyed()) return;
+      mainWindowRef.webContents.send(EMBEDDED_BROWSER_CHANNELS.guestHttpNavigate, payload);
+    },
   });
   projectFilePreviewManager.initialize();
+  embeddedBrowserManager = new EmbeddedBrowserViewManager({
+    getWindow: () => mainWindowRef,
+    onState: (viewId, threadId, state) => {
+      if (!mainWindowRef || mainWindowRef.isDestroyed()) return;
+      mainWindowRef.webContents.send(EMBEDDED_BROWSER_CHANNELS.stateChanged, {
+        viewId,
+        threadId,
+        state,
+      });
+    },
+    onRequestShow: (threadId, viewId) => {
+      if (!mainWindowRef || mainWindowRef.isDestroyed()) return;
+      mainWindowRef.webContents.send(EMBEDDED_BROWSER_CHANNELS.requestShow, {
+        threadId,
+        viewId,
+      });
+    },
+  });
+  embeddedBrowserHost = new EmbeddedBrowserHost(embeddedBrowserManager);
+  registerEmbeddedBrowserIpc({
+    getWindow: () => mainWindowRef,
+    manager: embeddedBrowserManager,
+  });
   artifactMediaManager = new ArtifactMediaManager({
     defaultSession: session.defaultSession,
     getTranscript: async (threadId) => {
@@ -2458,6 +2513,7 @@ app.whenReady().then(async () => {
       startComposerCatalogEventStreamIfNeeded();
       void cliConnectorManager?.refreshAll();
       void synchronizeNetworkRoute();
+      void registerEmbeddedBrowserHostWithCore();
     } else if (info.status !== "running") {
       runtimeBaseUrl = null;
       stopScheduledTaskEventStream();
@@ -2537,6 +2593,7 @@ app.whenReady().then(async () => {
       startScheduledTaskEventStreamIfNeeded();
       startComposerCatalogEventStreamIfNeeded();
       void cliConnectorManager?.refreshAll();
+      void registerEmbeddedBrowserHostWithCore();
     }
   });
   memoryDreamSchedulerTimer = setInterval(() => void runAutomaticDreamIfEligible(), 60_000);
@@ -2573,6 +2630,8 @@ function stopSyncShutdownOwners(): void {
   projectDirectoryWatchManager.dispose();
   projectFilePreviewManager?.dispose();
   projectFilePreviewManager = null;
+  embeddedBrowserManager?.dispose();
+  embeddedBrowserManager = null;
   artifactMediaManager?.dispose();
   artifactMediaManager = null;
   if (networkRoutePowerListener) {
@@ -2598,6 +2657,8 @@ async function stopAsyncShutdownOwners(): Promise<void> {
   if (supervisor) {
     await supervisor.stop();
   }
+  await embeddedBrowserHost?.stop();
+  embeddedBrowserHost = null;
   await cliConnectorManager?.dispose();
   await petWindowManager?.dispose();
   await computerOverlayManager?.dispose();

@@ -237,11 +237,21 @@ describe("RunStage layout", () => {
       ".workbench-chrome-expand-toggle",
     );
 
+    const fileMode = cssRule(projectFileStyles, ".workbench-chrome-file-mode");
+    const fileChrome = cssRule(
+      projectFileStyles,
+      ".workbench-chrome-right:has(.workbench-chrome-file-mode)",
+    );
+
+    expect(fileMode).toContain("align-items: center;");
+    expect(fileMode).not.toContain("position: relative;");
+    expect(fileChrome).toContain("box-shadow: inset 0 -1px 0 var(--aw-border-light);");
     expect(rail).toContain("flex: 1 1 auto;");
+    expect(rail).toContain("align-items: center;");
     expect(rail).toContain("overflow: hidden;");
     expect(tabs).toContain("flex: 0 1 auto;");
-    expect(tabs).toContain("align-items: flex-end;");
-    expect(tabs).toContain("padding: 0 0 0 4px;");
+    expect(tabs).toContain("align-items: center;");
+    expect(tabs).toContain("padding: 6px 0 6px 4px;");
     expect(tabs).toContain("overflow-x: auto;");
     expect(addWrapper).toContain("flex: 0 0 auto;");
     expect(actions).toContain("position: absolute;");
@@ -257,7 +267,7 @@ describe("RunStage layout", () => {
       /\.project-files-chrome-actions \.workbench-chrome-panel-toggle\s*\{\s*position: relative;/,
     );
     expect(projectFileStyles).toMatch(
-      /\.desktop-root-inspector-expanded\s+\.workbench-chrome-right:has\(\s*\.project-files-chrome-actions \.workbench-chrome-expand-toggle\s*\)\s*\{\s*padding-right: 72px;/,
+      /\.workbench-chrome-right:has\(\s*\.project-files-chrome-actions \.workbench-chrome-expand-toggle\s*\)\s*\{\s*padding-right: 72px;/,
     );
   });
 

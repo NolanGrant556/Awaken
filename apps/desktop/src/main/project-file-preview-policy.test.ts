@@ -27,7 +27,14 @@ describe("project file preview policy", () => {
     expect(classifyPreviewFile(".gitignore")?.kind).toBe("code");
     expect(classifyPreviewFile("manual.pdf")?.kind).toBe("pdf");
     expect(classifyPreviewFile("photo.webp")?.kind).toBe("image");
-    expect(classifyPreviewFile("index.html")?.kind).toBe("html");
+    expect(classifyPreviewFile("index.html")).toMatchObject({
+      kind: "code",
+      language: "html",
+    });
+    expect(classifyPreviewFile("page.htm")).toMatchObject({
+      kind: "code",
+      language: "html",
+    });
     expect(classifyPreviewFile("archive.zip")).toBeUndefined();
     expect(previewByteLimit("code")).toBe(MAX_TEXT_PREVIEW_BYTES);
   });

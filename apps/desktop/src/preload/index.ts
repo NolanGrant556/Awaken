@@ -7,6 +7,12 @@ import {
   type ProjectFilePreviewInteraction,
 } from "../shared/project-file-preview-interaction.js";
 import {
+  EMBEDDED_BROWSER_CHANNELS,
+  type EmbeddedBrowserGuestHttpNavigate,
+  type EmbeddedBrowserShowRequest,
+  type EmbeddedBrowserStatePayload,
+} from "../shared/embedded-browser.js";
+import {
   type ACPRunnerCreateRequest,
   type ACPRunnerProbeResult,
   type ACPRunnersSettings,
@@ -361,6 +367,48 @@ const bridge: AwakenBridge = {
       callback(interaction);
     ipcRenderer.on(PROJECT_FILE_PREVIEW_INTERACTION_CHANNEL, handler);
     return () => ipcRenderer.removeListener(PROJECT_FILE_PREVIEW_INTERACTION_CHANNEL, handler);
+  },
+  embeddedBrowser: {
+    navigate: (ref, url) =>
+      ipcRenderer.invoke(EMBEDDED_BROWSER_CHANNELS.navigate, ref, url),
+    back: (ref) => ipcRenderer.invoke(EMBEDDED_BROWSER_CHANNELS.back, ref),
+    forward: (ref) => ipcRenderer.invoke(EMBEDDED_BROWSER_CHANNELS.forward, ref),
+    reload: (ref) => ipcRenderer.invoke(EMBEDDED_BROWSER_CHANNELS.reload, ref),
+    stop: (ref) => ipcRenderer.invoke(EMBEDDED_BROWSER_CHANNELS.stop, ref),
+    close: (ref) => ipcRenderer.invoke(EMBEDDED_BROWSER_CHANNELS.close, ref),
+    closeThread: (threadId) =>
+      ipcRenderer.invoke(EMBEDDED_BROWSER_CHANNELS.closeThread, threadId),
+    getState: (ref) => ipcRenderer.invoke(EMBEDDED_BROWSER_CHANNELS.getState, ref),
+    setViewport: (ref, rect) =>
+      ipcRenderer.invoke(EMBEDDED_BROWSER_CHANNELS.setViewport, ref, rect),
+    setActive: (ref) => ipcRenderer.invoke(EMBEDDED_BROWSER_CHANNELS.setActive, ref),
+    attachGuest: (ref, webContentsId, allowFile) =>
+      ipcRenderer.invoke(
+        EMBEDDED_BROWSER_CHANNELS.attachGuest,
+        ref,
+        webContentsId,
+        allowFile,
+      ),
+    detachGuest: (ref) =>
+      ipcRenderer.invoke(EMBEDDED_BROWSER_CHANNELS.detachGuest, ref),
+    onStateChanged: (callback) => {
+      const handler = (_event: IpcRendererEvent, payload: EmbeddedBrowserStatePayload) =>
+        callback(payload);
+      ipcRenderer.on(EMBEDDED_BROWSER_CHANNELS.stateChanged, handler);
+      return () => ipcRenderer.removeListener(EMBEDDED_BROWSER_CHANNELS.stateChanged, handler);
+    },
+    onGuestHttpNavigate: (callback) => {
+      const handler = (_event: IpcRendererEvent, payload: EmbeddedBrowserGuestHttpNavigate) =>
+        callback(payload);
+      ipcRenderer.on(EMBEDDED_BROWSER_CHANNELS.guestHttpNavigate, handler);
+      return () => ipcRenderer.removeListener(EMBEDDED_BROWSER_CHANNELS.guestHttpNavigate, handler);
+    },
+    onRequestShow: (callback) => {
+      const handler = (_event: IpcRendererEvent, payload: EmbeddedBrowserShowRequest) =>
+        callback(payload);
+      ipcRenderer.on(EMBEDDED_BROWSER_CHANNELS.requestShow, handler);
+      return () => ipcRenderer.removeListener(EMBEDDED_BROWSER_CHANNELS.requestShow, handler);
+    },
   },
   openProjectFileExternally: (request: ProjectFilePreviewActionRequest) =>
     ipcRenderer.invoke(

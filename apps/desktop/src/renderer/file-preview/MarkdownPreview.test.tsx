@@ -73,6 +73,7 @@ describe("MarkdownPreview", () => {
     expect(container.querySelector('[aria-label="重新载入文件预览"]')).toBeNull();
 
     await act(async () => toggle?.click());
+    await settleUntil(() => container.querySelector(".cm-editor") !== null);
     expect(container.querySelector(".cm-editor")).not.toBeNull();
     expect(container.textContent).toContain("查看预览");
   });

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type {
-  RuntimeInfo,
-  ModelProvider,
-  RuntimeModelProfileSummary,
+import {
+  isDesktopRuntimeAvailable,
+  type RuntimeInfo,
+  type ModelProvider,
+  type RuntimeModelProfileSummary,
 } from "../shared/runtime";
 import type { RuntimeClient } from "./runtime/client";
 import type { RuntimeViewState, RuntimeAction } from "./runtime/reducer";
@@ -26,7 +27,7 @@ export function useDesktopRuntime(
   const [modelProviders, setModelProviders] = useState<ModelProvider[]>([]);
 
   const desktopReady =
-    supervisorStatus === "running" && runtimeInfo !== null;
+    isDesktopRuntimeAvailable(supervisorStatus) && runtimeInfo !== null;
 
   const desktopNeedsRestart = supervisorStatus === "crashed";
 
@@ -37,7 +38,7 @@ export function useDesktopRuntime(
   const inFlightRef = useRef<Promise<void> | null>(null);
 
   const refreshRuntimeInfoNow = useCallback((): Promise<void> => {
-    if (supervisorStatus !== "running") return Promise.resolve();
+    if (!isDesktopRuntimeAvailable(supervisorStatus)) return Promise.resolve();
     if (inFlightRef.current) return inFlightRef.current;
     const generation = generationRef.current;
     const request = Promise.allSettled([
@@ -64,7 +65,7 @@ export function useDesktopRuntime(
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    if (supervisorStatus !== "running") {
+    if (!isDesktopRuntimeAvailable(supervisorStatus)) {
       setRuntimeInfo(null);
       setModelProfiles([]);
       setModelProviders([]);

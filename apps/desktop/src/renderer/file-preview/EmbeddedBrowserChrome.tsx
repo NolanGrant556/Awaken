@@ -104,7 +104,9 @@ export default function EmbeddedBrowserChrome({
   const [state, setState] = useState<EmbeddedBrowserState>(EMPTY_EMBEDDED_BROWSER_STATE);
   const [address, setAddress] = useState("");
   const [guestSession, setGuestSession] = useState<GuestSession | null>(null);
-  const [guestCovered, setGuestCovered] = useState(false);
+  const [guestSnapshot, setGuestSnapshot] = useState<string | null>(null);
+  const guestSnapshotRef = useRef<string | null>(null);
+  const snapshotInFlightRef = useRef(false);
   const editingRef = useRef(false);
   const [addressError, setAddressError] = useState<string | undefined>();
   htmlOccupiedRef.current = htmlOccupied;
@@ -152,19 +154,46 @@ export default function EmbeddedBrowserChrome({
   }, [active, enabled, htmlOccupied, state.url, viewRef.viewId]);
 
   const showPage = enabled && active && Boolean(guestSession) && !htmlOccupied;
+  guestSnapshotRef.current = guestSnapshot;
   useEffect(() => {
     if (!showPage) {
       void client.setViewport(viewRef, null);
-      setGuestCovered(false);
+      setGuestSnapshot(null);
+      snapshotInFlightRef.current = false;
       return;
     }
     let frame = 0;
     const report = () => {
       const covered = overlayCoversEmbeddedBrowser();
-      setGuestCovered(covered);
       if (covered) {
         void client.setViewport(viewRef, null);
+        const webview = webviewRef.current as
+          | (WebviewTag & {
+              capturePage?: () => Promise<{ toDataURL?: () => string }>;
+            })
+          | null;
+        if (
+          webview &&
+          !guestSnapshotRef.current &&
+          !snapshotInFlightRef.current &&
+          typeof webview.capturePage === "function"
+        ) {
+          snapshotInFlightRef.current = true;
+          void webview
+            .capturePage()
+            .then((image) => {
+              snapshotInFlightRef.current = false;
+              const dataUrl = image?.toDataURL?.();
+              if (dataUrl && overlayCoversEmbeddedBrowser()) {
+                setGuestSnapshot(dataUrl);
+              }
+            })
+            .catch(() => {
+              snapshotInFlightRef.current = false;
+            });
+        }
       } else {
+        if (guestSnapshotRef.current) setGuestSnapshot(null);
         const rect = stripRef.current?.getBoundingClientRect();
         void client.setViewport(
           viewRef,
@@ -336,7 +365,7 @@ export default function EmbeddedBrowserChrome({
             key={guestSession.partition}
             ref={webviewRef}
             className={
-              guestCovered
+              guestSnapshot
                 ? "embedded-browser__guest is-covered"
                 : "embedded-browser__guest"
             }
@@ -346,6 +375,13 @@ export default function EmbeddedBrowserChrome({
               guestSession.allowFile,
             )}
           />
+          {guestSnapshot ? (
+            <img
+              className="embedded-browser__guest-snapshot"
+              src={guestSnapshot}
+              alt=""
+            />
+          ) : null}
         </div>
       ) : null}
       <div

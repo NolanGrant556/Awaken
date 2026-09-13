@@ -18,7 +18,9 @@ export function browserViewWebPreferences(options?: {
     contextIsolation: true,
     nodeIntegration: false,
     webSecurity: true,
-    ...(options?.allowFile ? { allowFileAccessFromFileUrls: true } : {}),
+    ...(options?.allowFile
+      ? { allowFileAccessFromFileUrls: true, webSecurity: false }
+      : {}),
   };
 }
 
@@ -34,7 +36,10 @@ export function authorizeEmbeddedBrowserWebview(
   if (allowFile) {
     const parsed = normalizeBrowserAddressInput(src);
     if (!parsed.ok || parsed.kind !== "file") return false;
-    Object.assign(webPreferences, { allowFileAccessFromFileUrls: true });
+    Object.assign(webPreferences, {
+      allowFileAccessFromFileUrls: true,
+      webSecurity: false,
+    });
   } else if (src && src !== "about:blank" && !parseNavigable(src)) {
     return false;
   }
@@ -43,7 +48,7 @@ export function authorizeEmbeddedBrowserWebview(
   webPreferences.nodeIntegration = false;
   webPreferences.contextIsolation = true;
   webPreferences.sandbox = true;
-  webPreferences.webSecurity = true;
+  webPreferences.webSecurity = !allowFile;
   webPreferences.plugins = false;
   return true;
 }

@@ -116,7 +116,7 @@ export const EMBEDDED_BROWSER_OVERLAY_SELECTOR = [
 
 export function embeddedBrowserGuestWebPreferences(allowFile: boolean): string {
   return allowFile
-    ? "contextIsolation=yes,nodeIntegration=no,sandbox=yes,webSecurity=yes,allowFileAccessFromFileUrls=yes"
+    ? "contextIsolation=yes,nodeIntegration=no,sandbox=yes,webSecurity=no,allowFileAccessFromFileUrls=yes"
     : "contextIsolation=yes,nodeIntegration=no,sandbox=yes,webSecurity=yes";
 }
 

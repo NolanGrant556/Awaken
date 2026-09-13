@@ -137,17 +137,15 @@ describe("ProjectFilesWorkspace", () => {
     );
   });
 
-  it("animates the file-list width, content, divider, and folder state with reduced-motion fallback", () => {
+  it("animates the file-list width, content, and divider with reduced-motion fallback", () => {
     expect(projectFileStyles).toContain(
       "transition: grid-template-columns 210ms cubic-bezier(0.2, 0.8, 0.2, 1);",
     );
     expect(projectFileStyles).toContain("transform: translateX(12px);");
     expect(projectFileStyles).toContain("visibility 0s linear 190ms;");
-    expect(projectFileStyles).toContain(
-      ".project-files-pathbar__folder-icon-state--expanded",
-    );
+    expect(projectFileStyles).not.toContain(".project-files-pathbar");
     expect(projectFileStyles).toMatch(
-      /@media \(prefers-reduced-motion: reduce\) \{[\s\S]*?\.project-files-pathbar__folder-icon-state \{\s*transition: none;/,
+      /@media \(prefers-reduced-motion: reduce\) \{[\s\S]*?\.project-files-workspace__body,\s*\.project-files-navigator,\s*\.project-files-divider \{\s*transition: none;/,
     );
   });
 
@@ -414,7 +412,7 @@ createProjectAgentsFile: vi.fn(),
     expect(container.querySelector(".project-files-preview-empty.is-centered")).not.toBeNull();
   });
 
-  it("toggles the complete file list from the pathbar folder button", async () => {
+  it("resizes the file list from the divider and keeps the navigator visible", async () => {
     const listProjectDirectory = vi.fn(async () => ({
       ok: true as const,
       relativePath: "",
@@ -438,6 +436,7 @@ createProjectAgentsFile: vi.fn(),
     const navigator = container.querySelector<HTMLElement>("#awaken-project-files-navigator");
     const body = container.querySelector<HTMLElement>(".project-files-workspace__body");
     const divider = container.querySelector<HTMLElement>('[aria-label="调整文件列表宽度"]');
+    expect(container.querySelector(".project-files-pathbar")).toBeNull();
     expect(
       container.querySelector(".project-files-preview-empty.is-centered")?.textContent,
     ).toContain("打开文件");
@@ -459,19 +458,6 @@ createProjectAgentsFile: vi.fn(),
         width: 240,
         height: 600,
       }) as DOMRect;
-    const toggle = container.querySelector<HTMLButtonElement>('[aria-label="收起文件列表"]');
-    expect(toggle?.getAttribute("aria-expanded")).toBe("true");
-    expect(toggle?.classList).toContain("is-expanded");
-    expect(
-      toggle?.querySelector(
-        ".project-files-pathbar__folder-icon-state--collapsed .aw-icon--folder",
-      ),
-    ).not.toBeNull();
-    expect(
-      toggle?.querySelector(
-        ".project-files-pathbar__folder-icon-state--expanded .aw-icon--folder-open",
-      ),
-    ).not.toBeNull();
     expect(navigator?.getAttribute("aria-hidden")).toBe("false");
     expect(divider?.getAttribute("aria-valuenow")).toBe("240");
     expect(container.textContent).toContain("README.md");
@@ -487,29 +473,11 @@ createProjectAgentsFile: vi.fn(),
       divider?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowRight" }));
     });
     expect(body?.style.getPropertyValue("--project-file-list-width")).toBe("388px");
-
-    await act(async () => toggle?.click());
-    expect(toggle?.getAttribute("aria-label")).toBe("展开文件列表");
-    expect(toggle?.getAttribute("aria-expanded")).toBe("false");
-    expect(toggle?.classList).not.toContain("is-expanded");
-    expect(navigator?.getAttribute("aria-hidden")).toBe("true");
-    expect(divider?.getAttribute("aria-hidden")).toBe("true");
-    expect(divider?.getAttribute("tabindex")).toBe("-1");
-    expect(container.querySelector(".project-files-workspace__body")?.classList).toContain(
-      "is-file-list-collapsed",
-    );
-
-    await act(async () => toggle?.click());
-    expect(toggle?.getAttribute("aria-label")).toBe("收起文件列表");
-    expect(toggle?.getAttribute("aria-expanded")).toBe("true");
-    expect(toggle?.classList).toContain("is-expanded");
     expect(navigator?.getAttribute("aria-hidden")).toBe("false");
-    expect(divider?.getAttribute("aria-hidden")).toBe("false");
-    expect(body?.style.getPropertyValue("--project-file-list-width")).toBe("388px");
     expect(container.textContent).toContain("README.md");
   });
 
-  it("keeps panel expansion out of the pathbar without replacing the file-list control", async () => {
+  it("does not render an internal pathbar or panel-expand control", async () => {
     const listProjectDirectory = vi.fn(async () => ({
       ok: true as const,
       relativePath: "",
@@ -529,8 +497,10 @@ createProjectAgentsFile: vi.fn(),
     });
     await settle();
 
+    expect(container.querySelector(".project-files-pathbar")).toBeNull();
     expect(container.querySelector('[aria-label="展开面板"]')).toBeNull();
-    expect(container.querySelector('[aria-label="收起文件列表"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="收起文件列表"]')).toBeNull();
+    expect(container.querySelector("#awaken-project-files-navigator")).not.toBeNull();
   });
 
   it("reports a primary click but preserves drag selection in the document preview", async () => {
@@ -568,14 +538,6 @@ createProjectAgentsFile: vi.fn(),
       dispatchPreviewPointerEvent(preview, "pointerdown", { clientX: 20 });
       dispatchPreviewPointerEvent(preview, "pointermove", { clientX: 60 });
       dispatchPreviewPointerEvent(preview, "pointerup", { clientX: 60 });
-    });
-    expect(onPreviewPrimaryClick).toHaveBeenCalledTimes(1);
-
-    await act(async () => {
-      const button = container.querySelector<HTMLButtonElement>('[aria-label="收起文件列表"]');
-      if (!button) return;
-      dispatchPreviewPointerEvent(button, "pointerdown", { clientX: 20 });
-      dispatchPreviewPointerEvent(button, "pointerup", { clientX: 20 });
     });
     expect(onPreviewPrimaryClick).toHaveBeenCalledTimes(1);
   });
@@ -631,8 +593,6 @@ createProjectAgentsFile: vi.fn(),
       dispatchTimedPointerEvent(window, "pointerup", 500, 1_590);
     });
 
-    const toggle = container.querySelector<HTMLButtonElement>('[aria-label="收起文件列表"]');
-    expect(toggle?.getAttribute("aria-expanded")).toBe("true");
     expect(navigator?.getAttribute("aria-hidden")).toBe("false");
     expect(body?.style.getPropertyValue("--project-file-list-width")).toBe("240px");
 
@@ -642,7 +602,6 @@ createProjectAgentsFile: vi.fn(),
       dispatchTimedPointerEvent(window, "pointermove", 570, 2_080);
       dispatchTimedPointerEvent(window, "pointerup", 570, 2_090);
     });
-    expect(toggle?.getAttribute("aria-expanded")).toBe("true");
     expect(navigator?.getAttribute("aria-hidden")).toBe("false");
 
     await act(async () => {
@@ -650,18 +609,8 @@ createProjectAgentsFile: vi.fn(),
       dispatchTimedPointerEvent(window, "pointermove", 540, 3_035);
       dispatchTimedPointerEvent(window, "pointermove", 610, 3_070);
     });
-    expect(toggle?.getAttribute("aria-expanded")).toBe("false");
     expect(navigator?.getAttribute("aria-hidden")).toBe("true");
-
-    await act(async () => toggle?.click());
-    await act(async () => {
-      dispatchTimedPointerEvent(divider!, "pointerdown", 480, 4_000);
-      dispatchTimedPointerEvent(window, "pointermove", 550, 4_220);
-      dispatchTimedPointerEvent(window, "pointermove", 620, 4_500);
-      dispatchTimedPointerEvent(window, "pointerup", 620, 4_520);
-    });
-    expect(toggle?.getAttribute("aria-expanded")).toBe("true");
-    expect(navigator?.getAttribute("aria-hidden")).toBe("false");
+    expect(body?.classList).toContain("is-file-list-collapsed");
   });
 
   afterEach(async () => {

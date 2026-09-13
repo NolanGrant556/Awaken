@@ -12,7 +12,7 @@ import {
   type PlatformKind,
   type ProjectItem,
 } from "@awaken/design-system";
-import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type {
   ComposerToken,
   ModelAccessType,
@@ -128,6 +128,7 @@ import { useDesktopRuntime } from "./useDesktopRuntime";
 import { useDesktopUpdate } from "./useDesktopUpdate";
 import { useFileWorkspaceSession } from "./useFileWorkspaceSession";
 import { useNarrativeRenderer } from "./useNarrativeRenderer";
+import { traceFileTarget } from "./traceFileNavigation";
 import { useProjectOperations } from "./useProjectOperations";
 import { useProjectRegistry } from "./useProjectRegistry";
 import { usePromptRewind } from "./usePromptRewind";
@@ -1614,7 +1615,18 @@ export function App() {
 
   const platform = runtimeClient.platform as PlatformKind;
   const mediaRevealLabel = mediaRevealLabelForPlatform(platform);
+  const traceFileContextRef = useRef({ fileWorkspaceProjectId, fileWorkspaceFolders, fileWorkspace });
+  traceFileContextRef.current = { fileWorkspaceProjectId, fileWorkspaceFolders, fileWorkspace };
+  const handleOpenTraceFile = useCallback((path: string, startLine?: number, endLine?: number) => {
+    const context = traceFileContextRef.current;
+    const tab = traceFileTarget(context.fileWorkspaceProjectId, context.fileWorkspaceFolders, path, startLine, endLine);
+    if (!tab) { setNotice("无法在当前项目中定位此文件；仍可展开查看该次执行记录。"); return; }
+    context.fileWorkspace.handleOpenFileWorkspace("files");
+    context.fileWorkspace.handleOpenProjectFileTab(tab);
+  }, []);
   const narrativeRenderer = useNarrativeRenderer({
+    traceRoot: fileWorkspaceFolders.find(folder => folder.isPrimary)?.path,
+    onOpenTraceFile: handleOpenTraceFile,
     runtimeState: {
       activeThreadId: runtimeState.activeThreadId,
       threadId: runtimeState.threadId,

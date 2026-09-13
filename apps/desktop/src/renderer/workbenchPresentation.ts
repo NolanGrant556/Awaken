@@ -1,9 +1,9 @@
 import type { RunNarrativeItem } from "./run-narrative";
 
 type PromptNarrativeItem = Extract<RunNarrativeItem, { kind: "prompt" }>;
-type ActivityNarrativeItem = Extract<
+export type ActivityNarrativeItem = Extract<
   RunNarrativeItem,
-  { kind: "exploring" | "tool" | "skill" | "hook" }
+  { kind: "exploring" | "tool" | "skill" | "hook" | "thinking" | "planning" }
 >;
 
 export type NarrativeActivityBatch = {
@@ -108,7 +108,9 @@ const TURN_MARKER_COMPACT_SIZE = { itemHeight: 12, gap: 8 };
 const TURN_MARKER_SUMMARY_SIZE = { itemHeight: 8, gap: 5 };
 
 function isActivityNarrativeItem(item: RunNarrativeItem): item is ActivityNarrativeItem {
-  return item.kind === "exploring" || item.kind === "tool" || item.kind === "skill" || item.kind === "hook";
+  if (item.kind === "planning") return item.phase !== "compaction";
+  if (item.kind === "hook" && item.status === "blocked") return false;
+  return item.kind === "exploring" || item.kind === "tool" || item.kind === "skill" || item.kind === "hook" || item.kind === "thinking";
 }
 
 function activityActionCount(item: ActivityNarrativeItem): number {
@@ -132,8 +134,9 @@ function activityIsActive(item: ActivityNarrativeItem): boolean {
 }
 
 /**
- * Groups only adjacent tool activity. Any user-visible narrative item is a hard boundary,
- * so this presentation-only projection cannot change runtime ordering or replay semantics.
+ * Stages follow narrative boundaries, including interleaved reasoning and live
+ * model continuation. The boundary identity survives a transient planning item
+ * being replaced, singleton growth, and terminal process disclosure.
  */
 export function projectNarrativeActivitySegments({
   turnId,
@@ -144,23 +147,15 @@ export function projectNarrativeActivitySegments({
 }): NarrativeActivitySegment[] {
   const segments: NarrativeActivitySegment[] = [];
   let pending: ActivityNarrativeItem[] = [];
+  let boundary = "start";
 
   const flush = () => {
     if (pending.length === 0) return;
 
     const actionCount = pending.reduce((count, item) => count + activityActionCount(item), 0);
-    if (actionCount <= 1) {
-      for (const item of pending) {
-        segments.push({ kind: "item", id: `activity-item:${turnId}:${item.id}`, item });
-      }
-      pending = [];
-      return;
-    }
-
-    const firstItem = pending[0];
     segments.push({
       kind: "activityBatch",
-      id: `activity-batch:${turnId}:${firstItem.id}`,
+      id: `activity-stage-v2:${turnId}:${boundary}`,
       items: pending,
       actionCount,
       failedCount: pending.reduce((count, item) => count + activityFailedCount(item), 0),
@@ -176,6 +171,7 @@ export function projectNarrativeActivitySegments({
     }
     flush();
     segments.push({ kind: "item", id: `narrative-item:${turnId}:${item.id}`, item });
+    boundary = item.id;
   }
   flush();
 
@@ -332,7 +328,7 @@ export function projectVisibleNarrativeItems({
     (item, index) =>
       item.kind !== "compactBoundary" &&
       (item.kind !== "planning" || (isBusy && index === trailingIndex)),
-  );
+  ).map(item => item.kind === "planning" && isBusy ? { ...item, status: "active" } : item);
 }
 
 export function shouldShowAssistantAnswerFooter({

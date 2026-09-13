@@ -19,11 +19,16 @@ export const AwakenThoughtTraceStates: AwakenThoughtTraceState[] = [
   },
   {
     id: "active-open",
-    label: "运行中（Desktop 默认）",
+    label: "运行中（正文默认收起）",
     props: {
       text: "I’ll inspect the current implementation and compare it with the Gallery state.",
       status: "active",
     } as unknown as Partial<ComponentProps<typeof AwakenThoughtTrace>>,
+  },
+  {
+    id: "active-manual-open",
+    label: "运行中手动展开",
+    props: { text: "用户展开后，这段思考正文会继续流式更新。", status: "active", defaultOpen: true },
   },
   {
     id: "done-collapsed",

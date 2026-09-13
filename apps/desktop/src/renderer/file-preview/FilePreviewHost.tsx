@@ -51,6 +51,7 @@ export type FilePreviewHostProps = {
   projectId?: string;
   folderPath?: string;
   selection?: ProjectFileSelection;
+  lineRequest?: { id: string; startLine: number; endLine?: number };
   mode: ProjectFileWorkspaceMode;
   onModeChange: (mode: ProjectFileWorkspaceMode) => void;
   onPreviewLabelChange?: (label: string) => void;
@@ -105,6 +106,7 @@ export default function FilePreviewHost({
   projectId,
   folderPath,
   selection,
+  lineRequest,
   mode,
   onModeChange,
   onPreviewLabelChange,
@@ -202,7 +204,8 @@ export default function FilePreviewHost({
     projectId,
     retryGeneration,
     runtimeClient,
-    selection,
+    selection?.name,
+    selection?.relativePath,
   ]);
 
   useEffect(
@@ -447,6 +450,7 @@ export default function FilePreviewHost({
           >
             {preview.transport === "text" && preview.kind === "markdown" ? (
               <MarkdownPreview
+                lineRequest={lineRequest}
                 preview={preview}
                 frameProps={frameProps}
                 onSave={saveTextContent}
@@ -461,6 +465,7 @@ export default function FilePreviewHost({
               />
             ) : preview.transport === "text" && preview.kind === "code" ? (
               <CodePreview
+                lineRequest={lineRequest}
                 preview={preview}
                 frameProps={frameProps}
                 editable

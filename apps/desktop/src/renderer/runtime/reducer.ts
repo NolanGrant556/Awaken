@@ -60,6 +60,7 @@ type StepRecord = RunStepItem & {
 
 type ToolResultRecord = {
   id: string;
+  runId?: string;
   title: string;
   content: string;
   args?: string;
@@ -83,6 +84,7 @@ type ToolResultRecord = {
 
 export type PatchPreviewRecord = {
   id: string;
+  runId?: string;
   title: string;
   patch: string;
   summary?: string;
@@ -111,6 +113,8 @@ export type TurnDiffRecord = {
 };
 
 export type SubagentTaskView = SubagentNarrativeTask & {
+  toolResults?: ToolResultRecord[];
+  patchPreviews?: PatchPreviewRecord[];
   runId?: string;
   background?: boolean;
   closed?: boolean;
@@ -910,6 +914,9 @@ function upsertSubagentTaskView(
   const status = acceptedSubagentStatus(previous?.status, event.subagentStatus);
   const terminal = isTerminalSubagentStatus(status);
   const next: SubagentTaskView = {
+    toolResults: terminal ? previous?.toolResults?.map(record => record.status === "active"
+      ? { ...record, status: status === "cancelled" ? "cancelled" : "interrupted" } : record) : previous?.toolResults,
+    patchPreviews: previous?.patchPreviews,
     runId: event.runId ?? previous?.runId,
     background: event.subagentBackground ?? previous?.background,
     closed,
@@ -1060,6 +1067,12 @@ function reduceSubagentNarrativeEvent(
   const contextWindow = isContextEvent ? mergeContextWindowRecord(task.contextWindow, event) : task.contextWindow;
   const acceptPlan = event.type === "AWAKEN_PLAN_UPDATED" && (event.planVersion ?? 0) >= (task.planVersion ?? 0);
   let gates = withTask;
+  const scopedEvent = scopeSubagentNarrativeEvent(event, withTask, taskId);
+  const traceEvent = ["TOOL_CALL_START", "TOOL_CALL_ARGS", "TOOL_PROGRESS", "TOOL_CALL_RESULT", "AWAKEN_COMMAND_OUTPUT", "AWAKEN_PATCH_UPDATED", "AWAKEN_TOOL_PERMISSION_DECIDED"].includes(event.type);
+  const traceState = traceEvent ? reduceActiveRuntimeState({
+    ...withTask, runId: scopedEvent.runId,
+    toolResults: task.toolResults ?? [], patchPreviews: task.patchPreviews ?? [],
+  }, { type: "run/event", event: { ...scopedEvent, subagentTaskId: undefined, subagentAgentId: undefined } }) : undefined;
   if (event.type.startsWith("AWAKEN_COMPUTER_") || event.type.startsWith("AWAKEN_EXTERNAL_INTERACTION_") || event.type.startsWith("AWAKEN_ACP_PERMISSION_")) {
     const projected = reduceActiveRuntimeState({ ...withTask, runId: event.runId, status: "running" }, {
       type: "run/event", event: { ...event, subagentTaskId: undefined, subagentAgentId: undefined },
@@ -1078,6 +1091,9 @@ function reduceSubagentNarrativeEvent(
       ...withTask.subagentsById,
       [taskId]: {
         ...task,
+        toolResults: (traceState?.toolResults ?? task.toolResults)?.map(record => isTerminalSubagentStatus(task.status) && record.status === "active"
+          ? { ...record, status: task.status === "cancelled" ? "cancelled" : "interrupted" } : record),
+        patchPreviews: traceState?.patchPreviews ?? task.patchPreviews,
         contextWindow,
         planItems: acceptPlan ? event.planItems?.map(item => ({ step: item.step, activeForm: item.activeForm, status: item.status })) : task.planItems,
         planVersion: acceptPlan ? event.planVersion : task.planVersion,
@@ -1421,7 +1437,7 @@ function upsertToolResult(
   records: ToolResultRecord[],
   next: ToolResultRecord,
 ): ToolResultRecord[] {
-  const index = records.findIndex((record) => record.id === next.id);
+  const index = records.findIndex((record) => record.id === next.id && record.runId === next.runId);
   if (index < 0) {
     return [...records, next];
   }
@@ -1429,6 +1445,8 @@ function upsertToolResult(
   updated[index] = {
     ...updated[index],
     ...next,
+    status: next.status === "active" && updated[index].status && updated[index].status !== "active"
+      ? updated[index].status : next.status,
     args: next.args ?? updated[index].args,
     content: next.content || updated[index].content,
     commandOutput: next.commandOutput ?? updated[index].commandOutput,
@@ -1442,7 +1460,7 @@ function upsertPatchPreview(
   records: PatchPreviewRecord[],
   next: PatchPreviewRecord,
 ): PatchPreviewRecord[] {
-  const index = records.findIndex((record) => record.id === next.id);
+  const index = records.findIndex((record) => record.id === next.id && record.runId === next.runId);
   if (index < 0) {
     return [...records, next];
   }
@@ -2047,16 +2065,19 @@ function reduceActiveRuntimeState(
         threadViews: state.threadViews,
       };
     case "run/promptReplaced": {
+      const committedItems = committedItemsBeforePromptRun(state.narrative.committedItems, action.targetRunId);
+      const retainedRunIds = new Set(committedItems.flatMap(item => item.kind === "prompt" && item.runId ? [item.runId] : []));
       const sliced: RuntimeViewState = {
         ...state,
         runId: undefined,
         status: undefined,
+        toolResults: state.toolResults.filter(record => record.runId && retainedRunIds.has(record.runId)),
+        patchPreviews: state.patchPreviews.filter(record => record.runId && retainedRunIds.has(record.runId)),
+        subagentsById: Object.fromEntries(Object.entries(state.subagentsById).filter(([, task]) => task.runId && retainedRunIds.has(task.runId))),
+        subagentOrder: state.subagentOrder.filter(id => state.subagentsById[id]?.runId && retainedRunIds.has(state.subagentsById[id].runId!)),
         narrative: {
           ...createInitialRunNarrativeState(),
-          committedItems: committedItemsBeforePromptRun(
-            state.narrative.committedItems,
-            action.targetRunId,
-          ),
+          committedItems,
         },
       };
       return reduceRuntimeState(sliced, {
@@ -2079,8 +2100,8 @@ function reduceActiveRuntimeState(
         assistantText: "",
         reasoningText: "",
         providerReconnectAttempts: [],
-		toolResults: [],
-		patchPreviews: [],
+        toolResults: shouldAppendNarrative(state) ? state.toolResults : [],
+        patchPreviews: shouldAppendNarrative(state) ? state.patchPreviews : [],
 		userQuestions: [],
 		externalInteractions: state.externalInteractions.filter(item => Boolean(item.taskId)),
 		computerReviews: state.computerReviews.filter(item => Boolean(item.taskId)),
@@ -2801,9 +2822,10 @@ function reduceActiveRuntimeState(
               action.event.toolCallId ||
               `tool-result-${nextState.toolResults.length + 1}`;
             const existing = nextState.toolResults.find(
-              (tool) => tool.id === id,
+              (tool) => tool.id === id && tool.runId === (action.event.runId ?? state.runId),
             );
             nextState.toolResults = upsertToolResult(nextState.toolResults, {
+            runId: action.event.runId ?? state.runId,
               id,
               title:
                 action.event.toolCallName || existing?.title || "Tool call",
@@ -2826,10 +2848,11 @@ function reduceActiveRuntimeState(
           const id =
             action.event.toolCallId ||
             `tool-result-${nextState.toolResults.length + 1}`;
-          const existing = nextState.toolResults.find((tool) => tool.id === id);
+          const existing = nextState.toolResults.find((tool) => tool.id === id && tool.runId === (action.event.runId ?? state.runId));
           const delta = action.event.delta ?? "";
           const args = delta || existing?.args;
           nextState.toolResults = upsertToolResult(nextState.toolResults, {
+            runId: action.event.runId ?? state.runId,
             id,
             title: action.event.toolCallName || existing?.title || "Tool call",
             args,
@@ -2852,13 +2875,14 @@ function reduceActiveRuntimeState(
           const id =
             action.event.toolCallId ||
             `tool-result-${nextState.toolResults.length + 1}`;
-          const existing = nextState.toolResults.find((tool) => tool.id === id);
+          const existing = nextState.toolResults.find((tool) => tool.id === id && tool.runId === (action.event.runId ?? state.runId));
           if (!existing) {
             break;
           }
           const progress =
             action.event.progress || action.event.message || "Tool is running";
           nextState.toolResults = upsertToolResult(nextState.toolResults, {
+            runId: action.event.runId ?? state.runId,
             id,
             title: action.event.toolCallName || existing?.title || "Tool call",
             args: existing?.args,
@@ -2882,13 +2906,14 @@ function reduceActiveRuntimeState(
           const id =
             action.event.toolCallId ||
             `tool-result-${nextState.toolResults.length + 1}`;
-          const existing = nextState.toolResults.find((tool) => tool.id === id);
+          const existing = nextState.toolResults.find((tool) => tool.id === id && tool.runId === (action.event.runId ?? state.runId));
           if (!existing) {
             break;
           }
           const delta = action.event.delta ?? "";
           const stream = action.event.commandStream || "output";
           nextState.toolResults = upsertToolResult(nextState.toolResults, {
+            runId: action.event.runId ?? state.runId,
             id,
             title: action.event.toolCallName || existing?.title || "Command",
             args: existing?.args,
@@ -2913,7 +2938,7 @@ function reduceActiveRuntimeState(
         case "AWAKEN_TOOL_PERMISSION_DECIDED": {
           const decision = toolDecisionRecord(action.event);
           const existing = nextState.toolResults.find(
-            (tool) => tool.id === decision.toolCallId,
+            (tool) => tool.id === decision.toolCallId && tool.runId === (action.event.runId ?? state.runId),
           );
           const status = toolDecisionStatus(decision);
           // Task 16 unified observability: include the profile name, transform
@@ -2953,6 +2978,7 @@ function reduceActiveRuntimeState(
             lastToolDecision: decision,
           };
           nextState.toolResults = upsertToolResult(nextState.toolResults, {
+            runId: action.event.runId ?? state.runId,
             id: decision.toolCallId,
             title: decision.toolName || existing?.title || "Tool decision",
             args: existing?.args,
@@ -2997,11 +3023,12 @@ function reduceActiveRuntimeState(
           const id =
             action.event.toolCallId ||
             `tool-result-${nextState.toolResults.length + 1}`;
-          const existing = nextState.toolResults.find((tool) => tool.id === id);
+          const existing = nextState.toolResults.find((tool) => tool.id === id && tool.runId === (action.event.runId ?? state.runId));
           const displayStatus = toolDisplayStateFromStatus(
             action.event.toolStatus,
           );
           nextState.toolResults = upsertToolResult(nextState.toolResults, {
+            runId: action.event.runId ?? state.runId,
             id,
             title:
               action.event.toolCallName || existing?.title || "Tool result",
@@ -3223,6 +3250,7 @@ function reduceActiveRuntimeState(
             nextState.patchPreviews,
             {
               id,
+              runId: action.event.runId ?? state.runId,
               title: action.event.toolCallName || "Patch preview",
               patch: action.event.patch || "",
               summary: action.event.patchSummary,

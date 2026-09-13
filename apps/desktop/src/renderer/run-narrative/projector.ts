@@ -154,7 +154,7 @@ export function projectAguiEventToNarrative(
     case "AWAKEN_AGENT_PHASE": {
       const id = `planning:${eventScope(event)}:waiting-children`;
       if (event.agentPhase === "waiting_children") {
-        return setActive(base, { kind: "planning", id, text: "等待子任务结果", status: "active" });
+        return setActive(base, { kind: "planning", id, text: "等待子任务结果", status: "active", phase: "waiting_children" });
       }
       return base.activeItem?.id === id ? { ...base, activeItem: undefined } : base;
     }

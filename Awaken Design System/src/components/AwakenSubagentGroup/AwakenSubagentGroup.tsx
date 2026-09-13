@@ -37,9 +37,9 @@ export function AwakenSubagentGroup({
   const canStopAll =
     Boolean(onStopAll) && tasks.some((task) => busyStatuses.has(task.status));
   return (
-    <section className="aw-subagent-group" aria-label="subagent">
+    <section className="aw-subagent-group" aria-label="子任务">
       <header className="aw-subagent-group__header">
-        <strong>subagent</strong>
+        <span>子任务 · {tasks.length}</span>
         {canStopAll ? (
           <button
             type="button"

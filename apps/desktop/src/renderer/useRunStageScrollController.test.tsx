@@ -419,6 +419,27 @@ describe("useRunStageScrollController prompt anchor timing", () => {
       return { runStage: runStage! };
     }
 
+    it("keeps the thought heading in view and focus when collapsing long content, without resuming follow", () => {
+      const { runStage } = renderFollowingController();
+      const trace = document.createElement("section");
+      trace.className = "thought-trace";
+      const heading = document.createElement("button");
+      heading.className = "thought-trace-heading";
+      const collapse = document.createElement("button");
+      trace.append(heading, collapse);
+      runStage.append(trace);
+      heading.getBoundingClientRect = () => domRect(RUN_STAGE_TOP - 360, 28);
+      const previousTop = runStage.scrollTop;
+      act(() => collapse.dispatchEvent(new CustomEvent("aw-trace-collapse", { bubbles: true })));
+      // Browsers emit scroll after the controller adjusts scrollTop; jsdom does not.
+      act(() => runStage.dispatchEvent(new Event("scroll")));
+      expect(runStage.scrollTop).toBe(previousTop - 368);
+      expect(document.activeElement).toBe(heading);
+      defineRunStageScrollGeometry(runStage, 2400);
+      act(() => triggerTurnResizeObserver(runStage, FOLLOW_UP_PROMPT_ID));
+      expect(runStage.scrollTop).toBe(previousTop - 368);
+    });
+
     it("re-pins to the latest tail when the latest turn resize observer fires while following", () => {
       const { runStage } = renderFollowingController();
       expect(runStage.scrollTop).toBe(RUN_STAGE_SCROLL_HEIGHT - RUN_STAGE_HEIGHT);

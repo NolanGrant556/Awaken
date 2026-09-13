@@ -510,7 +510,11 @@ describe("Desktop composition boundaries", () => {
       originalSection,
     );
     expect(segment.mock.calls.at(-1)?.[3]).toBe(originalKey);
-    expect(originalKey).toContain("thread:thread:turn:B:");
+    expect(originalKey).toContain("thread:thread:turn:run-B:");
+    segment.mockClear();
+    await act(async () => root.render(<DesktopExecutionFeed {...props} narrativeSections={{ leadItems: [], turns: [{ ...turn("B"), id: "replayed-prompt" }] }} />));
+    expect(segment.mock.calls[0][3]).toBe(originalKey);
+    expect(segment.mock.calls[0][0]).toBe("run-B");
   });
 
   it("renders reconnect in the narrative body without adding a detail overlay", async () => {

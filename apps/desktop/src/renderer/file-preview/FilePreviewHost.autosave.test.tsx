@@ -76,3 +76,31 @@ it("flushes A to A when selection changes before autosave", async () => {
   });
   expect(editor().state.doc.toString()).toBe("original");
 });
+
+it("navigates once to a source range without reopening the preview or creating a comment", async () => {
+  const content = Array.from({ length: 100 }, (_, i) => `line ${i + 1}`).join("\n");
+  const start = vi.fn<FilePreviewHostProps["runtimeClient"]["startProjectFilePreview"]>(async () => ({ ok: true, preview: { ...preview, content } }));
+  const client: FilePreviewHostProps["runtimeClient"] = {
+    closeProjectFilePreview: vi.fn(async () => undefined), startProjectFilePreview: start,
+    saveProjectMarkdownFile: vi.fn(async () => ({ ok: true as const, digest: "next", byteLength: content.length })),
+    openProjectFileExternally: vi.fn(async () => ({ ok: true as const })), revealProjectFile: vi.fn(async () => ({ ok: true as const })),
+  };
+  const props: FilePreviewHostProps = { runtimeClient: client, projectId: "p", folderPath: "/tmp/fixture", mode: "files", onModeChange: vi.fn() };
+  const request = { id: "locate-1", startLine: 40, endLine: 47 };
+  const view = (lineRequest = request) => <FilePreviewHost {...props} selection={{ name: "a.txt", relativePath: "a.txt" }} lineRequest={lineRequest} />;
+  await render(view());
+  const instance = editor();
+  expect(instance.state.doc.lineAt(instance.state.selection.main.from).number).toBe(40);
+  expect(instance.state.doc.lineAt(instance.state.selection.main.to).number).toBe(47);
+  expect(host.querySelector("textarea")).toBeNull();
+  await act(async () => instance.dispatch({ selection: { anchor: 0 }, changes: { from: 0, to: 4, insert: "edit" } }));
+  await render(view({ ...request }));
+  expect(editor()).toBe(instance);
+  expect(start).toHaveBeenCalledTimes(1);
+  expect(instance.state.selection.main.from).toBe(0);
+  expect(instance.state.doc.toString()).toMatch(/^edit/);
+  await render(view({ id: "locate-2", startLine: 200, endLine: 250 }));
+  expect(instance.state.doc.lineAt(instance.state.selection.main.from).number).toBe(100);
+  expect(start).toHaveBeenCalledTimes(1);
+  expect(host.querySelector("textarea")).toBeNull();
+});

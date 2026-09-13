@@ -34,7 +34,7 @@ export function AwakenToolTraceGroupDemo() {
         <p>
           先按真实 Desktop 终态展示“执行时间”如何兼任过程 disclosure 并收纳活动批次，再集中观测批次摘要、
           单次工具与类型化详情卡。活动组 Chevron 常驻，单条工具 Chevron 仅在悬停、
-          键盘聚焦或展开时可见；执行中文字使用从左到右的扫光反馈。
+          键盘聚焦或展开时可见；当前活动使用轻量文字与三点反馈。
         </p>
         <div className="ads-component-demo-actions" role="group" aria-label="工具轨迹主题预览">
           <AwakenButton size="sm" variant={theme === "light" ? "default" : "ghost"} onClick={() => setTheme("light")}>浅色</AwakenButton>

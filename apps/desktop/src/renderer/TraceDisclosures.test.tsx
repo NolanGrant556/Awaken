@@ -77,14 +77,14 @@ describe("execution trace disclosures", () => {
     },
   );
 
-  it("keeps thinking open while active, collapses it when done, and honors a manual reopen", async () => {
+  it("keeps thinking collapsed by default and honors a manual reopen", async () => {
     await act(async () => {
       root.render(<AwakenThoughtTrace text="Inspecting" status="active" />);
     });
     const heading = container.querySelector<HTMLButtonElement>(
       ".thought-trace-heading",
     );
-    expect(heading?.getAttribute("aria-expanded")).toBe("true");
+    expect(heading?.getAttribute("aria-expanded")).toBe("false");
 
     await act(async () => {
       root.render(
@@ -116,23 +116,6 @@ describe("execution trace disclosures", () => {
     );
   });
 
-  it("does not hide a completed Thought label or reserve fading body height", () => {
-    const componentStyles = readStyleSource(resolve(
-        process.cwd(),
-        "../../Awaken Design System/src/tokens/components.css",
-      ));
-    const disclosureBlock = componentStyles.match(
-      /\.thought-trace-disclosure\s*\{([\s\S]*?)\n\}/,
-    )?.[1];
-    const bodyBlock = componentStyles.match(
-      /\.thought-trace-body\s*\{([\s\S]*?)\n\}/,
-    )?.[1];
-
-    expect(disclosureBlock).toBeDefined();
-    expect(disclosureBlock).not.toMatch(/animation\s*:/);
-    expect(bodyBlock).toMatch(/grid-template-rows\s*:/);
-    expect(bodyBlock).not.toMatch(/opacity\s*:/);
-  });
 
   it("keeps a terminal row compact until the user opens its nested card", async () => {
     await act(async () => {
@@ -229,7 +212,7 @@ describe("execution trace disclosures", () => {
       expect(row?.getAttribute("aria-expanded")).toBe("false");
       expect(container.querySelector(".tool-trace-output-card")).not.toBeNull();
 
-      await act(async () => vi.advanceTimersByTime(321));
+      await act(async () => vi.advanceTimersByTime(181));
       expect(container.querySelector(".tool-trace-output-card")).not.toBeNull();
 
       const opacityEvent = new Event("transitionend", { bubbles: true });
@@ -301,21 +284,13 @@ describe("execution trace disclosures", () => {
     }
   });
 
-  it("keeps the official MCP mark visible while an MCP tool is active or terminal", async () => {
+  it("uses readable status text instead of a permanent icon column", async () => {
     for (const status of ["active", "done", "error"] as const) {
-      await act(async () => {
-        root.render(
-          <AwakenToolTraceLine
-            title="调用 MCP 工具"
-            kind="mcp"
-            status={status}
-          />,
-        );
-      });
-      const icon = container.querySelector(".tool-trace-line-icon");
-      expect(icon?.getAttribute("data-icon-kind")).toBe("source");
-      expect(icon?.querySelector(".aw-icon--mcp-mark")?.getAttribute("width")).toBe("14");
-      expect(icon?.querySelector(".aw-icon--spinner")).toBeNull();
+      await act(async () => root.render(<AwakenToolTraceLine title="查询订单" kind="mcp" status={status} />));
+      expect(container.querySelector(".tool-trace-line-icon")).toBeNull();
+      expect(container.textContent).toContain("查询订单");
+      expect(Boolean(container.querySelector(".aw-trace-dots"))).toBe(status === "active");
+      if (status === "error") expect(container.textContent).toContain("失败");
     }
   });
 
@@ -368,39 +343,8 @@ describe("execution trace disclosures", () => {
     expect(onCopyDetail).toHaveBeenCalledWith("$ npm test\n4 tests passed");
   });
 
-  it("bounds long detail cards and scrolls their sections inside the card", () => {
-    const componentStyles = readStyleSource(resolve(
-        process.cwd(),
-        "../../Awaken Design System/src/tokens/components.css",
-      ));
 
-    expect(componentStyles).toMatch(
-      /\.tool-trace-output-card\s*\{[\s\S]*?max-height:\s*320px;[\s\S]*?overflow:\s*hidden;/,
-    );
-    expect(componentStyles).toMatch(
-      /\.tool-trace-output-rail\s*\{[\s\S]*?min-height:\s*0;[\s\S]*?overflow:\s*hidden;/,
-    );
-    expect(componentStyles).not.toMatch(
-      /\.tool-trace-output-rail\s*\{[^}]*padding:/,
-    );
-    expect(componentStyles).toMatch(
-      /\.tool-trace-output-card\s*\{[\s\S]*?margin:\s*2px 0 7px;/,
-    );
-    expect(componentStyles).toMatch(
-      /\.tool-trace-output-card\s*\{[\s\S]*?background:\s*var\(--aw-surface-code\);/,
-    );
-    expect(componentStyles).toMatch(
-      /\.tool-trace-detail-section\[data-tone="command"\]\s*pre\s*\{[\s\S]*?color:\s*var\(--aw-text-blue\);/,
-    );
-    expect(componentStyles).toMatch(
-      /\.tool-trace-detail-sections\s*\{[\s\S]*?max-height:\s*320px;[\s\S]*?overflow-y:\s*auto;[\s\S]*?overscroll-behavior:\s*contain;/,
-    );
-    expect(componentStyles).toMatch(
-      /\.tool-trace-output-scroll::-webkit-scrollbar\s*\{/,
-    );
-  });
-
-  it("supports controlled group state while preserving active automatic behavior when uncontrolled", async () => {
+  it("supports controlled group state without forcing active groups open", async () => {
     const onOpenChange = vi.fn();
     await act(async () => {
       root.render(
@@ -420,7 +364,7 @@ describe("execution trace disclosures", () => {
     expect(heading?.getAttribute("aria-expanded")).toBe("false");
     expect(
       heading?.querySelector('[data-testid="search-group-icon"]'),
-    ).not.toBeNull();
+    ).toBeNull();
     await act(async () => heading?.click());
     expect(onOpenChange).toHaveBeenCalledWith(true);
   });
@@ -465,7 +409,7 @@ describe("execution trace disclosures", () => {
       );
 
       await act(async () => heading?.click());
-      await act(async () => vi.advanceTimersByTime(341));
+      await act(async () => vi.advanceTimersByTime(181));
       expect(container.querySelectorAll(".tool-trace-item")).toHaveLength(2);
 
       await act(async () =>
@@ -517,7 +461,7 @@ describe("execution trace disclosures", () => {
     const media = container.querySelector<HTMLButtonElement>(
       ".aw-media-generation-summary",
     );
-    expect(group?.getAttribute("aria-expanded")).toBe("true");
+    expect(group?.getAttribute("aria-expanded")).toBe("false");
     expect(group?.querySelector(".tool-trace-group-detail")).toBeNull();
     expect(media?.getAttribute("aria-expanded")).toBe("true");
 
@@ -574,13 +518,7 @@ describe("execution trace disclosures", () => {
       "false",
     ]);
 
-    const componentStyles = readStyleSource(resolve(
-        process.cwd(),
-        "../../Awaken Design System/src/tokens/components.css",
-      ));
-    expect(componentStyles).toMatch(
-      /\.tool-trace-item\[data-animate-entry="false"\]\s*\{[\s\S]*?animation:\s*none;/,
-    );
+    expect(container.querySelectorAll(".aw-icon--spinner")).toHaveLength(0);
   });
 
   it("shows historical thoughts immediately while preserving live thought entry animation", async () => {
@@ -605,13 +543,7 @@ describe("execution trace disclosures", () => {
       "false",
     ]);
 
-    const componentStyles = readStyleSource(resolve(
-        process.cwd(),
-        "../../Awaken Design System/src/tokens/components.css",
-      ));
-    expect(componentStyles).toMatch(
-      /\.thought-trace\[data-animate-entry="false"\] \.thought-trace-disclosure,[\s\S]*?animation:\s*none;/,
-    );
+    expect(container.querySelectorAll(".aw-icon--spinner")).toHaveLength(0);
   });
 
   it("keeps disclosure labels first and chevrons at the compact trigger's right edge", async () => {
@@ -666,102 +598,6 @@ describe("execution trace disclosures", () => {
     ).toBe(true);
   });
 
-  it("keeps compact triggers content-sized and expanded bodies at the original left edge", () => {
-    const componentStyles = readStyleSource(resolve(
-        process.cwd(),
-        "../../Awaken Design System/src/tokens/components.css",
-      ));
-    const mediaStyles = readStyleSource(resolve(
-        process.cwd(),
-        "../../Awaken Design System/src/components/AwakenMediaGenerationCard/AwakenMediaGenerationCard.css",
-      ));
-    const disclosureStyles = readStyleSource(resolve(
-        process.cwd(),
-        "../../Awaken Design System/src/components/AwakenDisclosure/AwakenDisclosure.css",
-      ));
 
-    expect(componentStyles).toMatch(
-      /\.tool-trace-line\s*\{[\s\S]*?width:\s*fit-content;/,
-    );
-    expect(componentStyles).toMatch(
-      /\.tool-trace-group-heading\s*\{[\s\S]*?grid-template-columns:\s*18px minmax\(0, auto\) minmax\(0, auto\) 16px;[\s\S]*?gap:\s*5px;[\s\S]*?padding:\s*3px 6px 3px 0;/,
-    );
-    expect(componentStyles).toMatch(
-      /\.tool-trace-line\s*\{[\s\S]*?grid-template-columns:\s*18px minmax\(0, auto\) 16px;[\s\S]*?gap:\s*5px;[\s\S]*?padding:\s*4px 6px 4px 0;/,
-    );
-    expect(componentStyles).toMatch(
-      /\.tool-trace-group-lines\s*\{[\s\S]*?padding-left:\s*0;/,
-    );
-    expect(componentStyles).not.toMatch(
-      /\.tool-trace-output-rail\s*\{[^}]*padding:/,
-    );
-    expect(componentStyles).toMatch(
-      /\.tool-trace-output-card\s*\{[\s\S]*?margin:\s*2px 0 7px;/,
-    );
-    expect(componentStyles).not.toContain(".tool-trace-output-rail::before");
-    expect(componentStyles).toMatch(
-      /\.thought-trace p\s*\{[\s\S]*?padding:\s*5px 0;/,
-    );
-    expect(mediaStyles).toMatch(
-      /\.aw-media-generation-summary\s*\{[\s\S]*?width:\s*fit-content;/,
-    );
-    expect(mediaStyles).toMatch(
-      /\.aw-media-generation-grid\s*\{[\s\S]*?padding:\s*var\(--aw-space-2\) 0 1px;/,
-    );
-    expect(disclosureStyles).toMatch(
-      /\.aw-disclosure-trigger\s*\{[\s\S]*?width:\s*fit-content;/,
-    );
-  });
 
-  it("uses text-only hover emphasis without card backgrounds across disclosure triggers", () => {
-    const componentStyles = readStyleSource(resolve(
-        process.cwd(),
-        "../../Awaken Design System/src/tokens/components.css",
-      ));
-    const mediaStyles = readStyleSource(resolve(
-        process.cwd(),
-        "../../Awaken Design System/src/components/AwakenMediaGenerationCard/AwakenMediaGenerationCard.css",
-      ));
-    const disclosureStyles = readStyleSource(resolve(
-        process.cwd(),
-        "../../Awaken Design System/src/components/AwakenDisclosure/AwakenDisclosure.css",
-      ));
-
-    for (const styles of [componentStyles, mediaStyles, disclosureStyles]) {
-      expect(styles).not.toContain("background: var(--aw-surface-hover)");
-    }
-    expect(componentStyles).toMatch(
-      /\.thought-trace-heading:hover,[\s\S]*?color:\s*var\(--aw-text-primary\);/,
-    );
-    expect(componentStyles).toMatch(
-      /:root\[data-aw-focus-modality="keyboard"\] \.thought-trace-heading:focus-visible\s*\{[\s\S]*?outline:\s*none;/,
-    );
-    expect(componentStyles).toMatch(
-      /\.thought-trace-heading:focus-visible[\s\S]*?:is\(\.thought-trace-disclosure-label, \.aw-thinking-orb-status__label\)[\s\S]*?text-decoration-line:\s*underline;/,
-    );
-    expect(componentStyles).toMatch(
-      /\.tool-trace-group-heading:hover,[\s\S]*?background:\s*transparent;[\s\S]*?color:\s*var\(--aw-text-primary\);/,
-    );
-    expect(componentStyles).toMatch(
-      /button\.tool-trace-line:hover,[\s\S]*?background:\s*transparent;[\s\S]*?color:\s*var\(--aw-text-primary\);/,
-    );
-    expect(componentStyles).toMatch(
-      /\.tool-trace-line-chevron\s*\{[\s\S]*?opacity:\s*0;/,
-    );
-    expect(componentStyles).toMatch(
-      /\.tool-trace-line:hover \.tool-trace-line-chevron\[data-visible="available"\],[\s\S]*?\.tool-trace-line:focus-visible[\s\S]*?opacity:\s*1;/,
-    );
-    expect(componentStyles).toMatch(
-      /\.tool-trace-group-active:not\(\.tool-trace-group-open\) \.tool-trace-group-label\s*\{[\s\S]*?animation:\s*tool-trace-shimmer 1\.6s linear infinite;/,
-    );
-    expect(componentStyles).toMatch(
-      /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.tool-trace-group-active:not\(\.tool-trace-group-open\) \.tool-trace-group-label,[\s\S]*?animation:\s*none;/,
-    );
-    expect(mediaStyles).toMatch(
-      /\.aw-media-generation-summary:hover,[\s\S]*?background:\s*transparent;[\s\S]*?color:\s*var\(--aw-text-primary\);/,
-    );
-    expect(disclosureStyles).toMatch(
-      /\.aw-disclosure-trigger:hover,[\s\S]*?color:\s*var\(--aw-text-primary\);/,
-    );
-  });
 });

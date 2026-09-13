@@ -93,12 +93,13 @@ export function DesktopExecutionFeed({
         ),
       )}
       {narrativeSections.turns.map((turn, index) => {
-        const turnDisclosureScope = `thread:${runtimeState.activeThreadId ?? runtimeState.threadId ?? "draft"}:turn:${turn.id}`;
+        const traceTurnId = turn.prompt.runId ?? turn.id;
+        const turnDisclosureScope = `thread:${runtimeState.activeThreadId ?? runtimeState.threadId ?? "draft"}:turn:${traceTurnId}`;
         const isLatestPrompt = turn.id === latestPromptId;
         const isActiveTurn = turn.id === activeWorkbenchTurnId;
         const settledElapsedMs = narrativeTurnElapsedMs(turn.items);
         const turnBodySegments = projectNarrativeTurnBodySegments({
-          turnId: turn.id,
+          turnId: traceTurnId,
           items: turn.items,
           // The stable disclosure store owns the live open state.
           // Segmentation only needs the terminal boundary here.
@@ -254,7 +255,7 @@ export function DesktopExecutionFeed({
                 )}
                 {turnBodySegments.flatMap((segment) =>
                   renderTurnBodySegment(
-                    turn.id,
+                    traceTurnId,
                     segment,
                     turnTiming,
                     `${turnDisclosureScope}:body:${segment.id}`,

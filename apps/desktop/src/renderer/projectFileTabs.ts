@@ -7,6 +7,7 @@ export type ProjectFileWorkspaceTab = {
   name: string;
   relativePath: string;
   mode: ProjectFileWorkspaceMode;
+  lineRequest?: { id: string; startLine: number; endLine?: number };
 };
 
 export function projectFileTabId(

@@ -724,7 +724,7 @@
 
 .execution-turn-body {
   display: grid;
-  gap: 14px;
+  gap: 8px;
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
@@ -771,10 +771,19 @@
 
 .execution-process-disclosure-body {
   display: grid;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
   min-width: 0;
   padding-top: 0;
+}
+
+.execution-turn-body > .assistant-message-wrapper:not(:first-child),
+.execution-process-disclosure-body > .assistant-message-wrapper:not(:first-child) {
+  margin-top: 16px;
+}
+.assistant-message-wrapper[data-final="false"] {
+  font-size: 14px;
+  line-height: 1.65;
 }
 
 /* Historical records remain complete and scrollable. Chromium may skip

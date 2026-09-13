@@ -5,6 +5,15 @@ const file = (name: string): ProjectFileWorkspaceTab => ({ id: name, projectId: 
 const artifact = (id: string) => ({ threadId: "t", runId: "r", artifactId: id, title: id });
 const apply = (state: InspectorTabsState, command: InspectorTabsCommand, threadId = "t") => inspectorTabsReducer(state, { ...command, threadId });
 describe("inspector tabs", () => {
+  it("reuses the same file when navigating from a child and passes a fresh line request", () => {
+    let state = apply(createInspectorTabs(), { type: "open-file", tab: file("a") });
+    const id = state.activeId;
+    state = apply(state, { type: "open-subagent", taskId: "child" });
+    state = apply(state, { type: "open-file", tab: { ...file("a"), lineRequest: { id: "location", startLine: 40, endLine: 47 } } });
+    expect(state.tabs).toHaveLength(2);
+    expect(state.activeId).toBe(id);
+    expect(state.tabs[0]).toMatchObject({ tab: { lineRequest: { id: "location", startLine: 40 } } });
+  });
   it("replaces only the active file slot and appends an explicitly requested slot", () => {
     let state = apply(createInspectorTabs(), { type: "open-file", tab: file("a") });
     const id = state.activeId;

@@ -976,6 +976,7 @@ export function ProjectFilesWorkspace({
               projectId={projectId}
               folderPath={activeTab?.folderPath}
               selection={activeTab}
+              lineRequest={activeTab?.lineRequest}
               mode={workspaceMode}
               onModeChange={changeWorkspaceMode}
               onPreviewPrimaryClick={onPreviewPrimaryClick}

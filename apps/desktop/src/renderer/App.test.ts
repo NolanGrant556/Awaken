@@ -508,7 +508,7 @@ describe("tool trace presentation", () => {
       { title: "创建 Issue" },
     );
 
-    expect(presentation.detailCard?.sections[0]).toMatchObject({
+    expect(presentation.detailCard?.sections.find(section => section.format === "json")).toMatchObject({
       label: "脱敏参数",
       format: "json",
     });
@@ -544,34 +544,17 @@ describe("activity batch presentation", () => {
     status: "active" | "done" | "error" = "done",
   ) => ({ kind: "tool", id, title, status }) satisfies RunNarrativeItem;
 
-  it("bypasses a singleton and uses stable turn plus first-item identity for a batch", () => {
-    expect(
-      projectNarrativeActivitySegments({
-        turnId: "turn-1",
-        items: [tool("tool:a", "Read")],
-      }),
-    ).toEqual([
-      {
-        kind: "item",
-        id: "activity-item:turn-1:tool:a",
-        item: tool("tool:a", "Read"),
-      },
-    ]);
-
-    const segments = projectNarrativeActivitySegments({
-      turnId: "turn-1",
-      items: [tool("tool:a", "Read"), tool("tool:b", "Search")],
-    });
-    expect(segments[0]).toMatchObject({
-      kind: "activityBatch",
-      id: "activity-batch:turn-1:tool:a",
-      actionCount: 2,
-      failedCount: 0,
-      status: "done",
-    });
+  it("preserves the stage identity through singleton growth and planning replacement", () => {
+    const one = projectNarrativeActivitySegments({ turnId: "turn-1", items: [tool("tool:a", "Read")] });
+    const many = projectNarrativeActivitySegments({ turnId: "turn-1", items: [tool("tool:a", "Read"), { kind: "thinking", id: "thought:a", text: "inspect", status: "done" }, tool("tool:b", "Edit")] });
+    const pending = projectNarrativeActivitySegments({ turnId: "turn-1", items: [{ kind: "planning", id: "planning:a", text: "思考中", status: "active" }] });
+    expect(one[0]).toMatchObject({ kind: "activityBatch", actionCount: 1 });
+    expect(one[0].id).toBe(many[0].id);
+    expect(one[0].id).toBe(pending[0].id);
+    expect(many[0]).toMatchObject({ actionCount: 3 });
   });
 
-  it("flattens exploring actions and stops at reasoning, visible copy, reconnect, gate, media and final boundaries", () => {
+  it("flattens exploring actions and includes reasoning and stops at visible copy, reconnect, gate, media and final boundaries", () => {
     const exploring: RunNarrativeItem = {
       kind: "exploring",
       id: "exploring:1",
@@ -624,11 +607,10 @@ describe("activity batch presentation", () => {
 
     expect(segments[0]).toMatchObject({
       kind: "activityBatch",
-      actionCount: 2,
+      actionCount: 3,
       failedCount: 1,
     });
-    expect(segments.slice(1, 8).map((segment) => segment.kind)).toEqual([
-      "item",
+    expect(segments.slice(1, 7).map((segment) => segment.kind)).toEqual([
       "item",
       "item",
       "item",
@@ -636,28 +618,28 @@ describe("activity batch presentation", () => {
       "item",
       "item",
     ]);
-    expect(segments[8]).toMatchObject({ kind: "item", item: { id: "tool:c" } });
+    expect(segments[7]).toMatchObject({ kind: "activityBatch", items: [{ id: "tool:c" }] });
   });
 
   it("creates deterministic command, check, skill and error summaries", () => {
     expect(
       activityBatchSummary([
-        { kind: "terminal", title: "运行 git status", status: "done" },
+        { kind: "terminal", toolName: "Bash", title: "运行 git status", status: "done" },
         { kind: "terminal", title: "运行 npm test", status: "error" },
       ]),
-    ).toEqual({ label: "运行了 2 条命令", detail: "1 个异常" });
+    ).toEqual({ label: "运行 1 条命令", detail: "1 项异常" });
     expect(
       activityBatchSummary([
-        { kind: "tool", title: "读取 README", status: "done" },
-        { kind: "tool", title: "搜索 package.json", status: "done" },
+        { kind: "tool", title: "读取 README", toolName: "Read", status: "done", paths: ["README"] },
+        { kind: "tool", title: "搜索 package.json", toolName: "Grep", status: "done" },
       ]),
-    ).toEqual({ label: "检查了 2 项", detail: undefined });
+    ).toEqual({ label: "读取 1 个文件 · 搜索 1 次", detail: undefined });
     expect(
       activityBatchSummary([
         { kind: "skill", title: "PDF Skill", status: "done" },
         { kind: "tool", title: "读取文件", status: "active" },
       ]),
-    ).toEqual({ label: "正在使用 PDF Skill · 1 个工具", detail: undefined });
+    ).toEqual({ label: "PDF Skill 1 次", detail: undefined });
   });
 });
 
@@ -5269,7 +5251,7 @@ describe("App workbench presentation", () => {
         items: [prompt, compactBoundary, planning],
         isBusy: true,
       }),
-    ).toEqual([prompt, planning]);
+    ).toEqual([prompt, { ...planning, status: "active" }]);
 
     expect(
       projectVisibleNarrativeItems({

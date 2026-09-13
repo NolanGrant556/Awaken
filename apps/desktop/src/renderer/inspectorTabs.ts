@@ -63,7 +63,8 @@ export function inspectorTabsReducer(previous: InspectorTabsState, action: Inspe
       return { ...next, nextOrdinal: state.nextOrdinal + 1 };
     }
     case "open-file": {
-      const current = state.tabs.find(tab => tab.id === state.activeId && tab.kind === "file" && tab.projectId === action.tab.projectId);
+      const current = state.tabs.find(tab => tab.kind === "file" && tab.tab?.id === action.tab.id)
+        ?? state.tabs.find(tab => tab.id === state.activeId && tab.kind === "file" && tab.projectId === action.tab.projectId);
       const next = open({ kind: "file", id: current?.id ?? `project-file-slot:${state.nextOrdinal}`, projectId: action.tab.projectId, tab: action.tab, mode: action.tab.mode });
       return { ...next, nextOrdinal: state.nextOrdinal + (current ? 0 : 1) };
     }

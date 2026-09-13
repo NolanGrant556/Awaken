@@ -5,7 +5,6 @@ import {
   AwakenMediaGenerationCard as MediaGenerationCard,
   AwakenReconnectStatus as ReconnectStatus,
   AwakenSubagentGroup as SubagentGroup,
-  AwakenThoughtTrace as ThoughtTrace,
   AwakenToolTraceLine as ToolTraceLine,
   type AwakenMediaMetadata,
   type PlatformKind,
@@ -29,16 +28,22 @@ import type {
 import { RunElapsedTime } from "./RunElapsedTime";
 import type { RuntimeViewState } from "./runtime/reducer";
 import {
-  SEARCH_TRACE_GROUP_ICON,
   StoredExecutionProcessDisclosure,
   StoredToolTraceGroup,
   StoredToolTraceLine,
+  StoredThoughtTrace,
 } from "./StoredExecutionDisclosures";
 import { subagentElapsedMs } from "./subagentPresentation";
+import { toolResultPatch } from "./tracePatch";
 import {
   activityBatchSummary,
   detailCardFromSections,
   toolRecordIdForNarrativeItem,
+  rawToolId,
+  argumentRecord,
+  firstStringArgument,
+  traceOperation,
+  normalizeTracePath,
   ToolTraceActionCacheEntry,
   toolTracePresentation,
 } from "./toolTracePresentation";
@@ -51,6 +56,12 @@ import {
   type NarrativeTurnBodySegment,
 } from "./workbenchPresentation";
 type Options = {
+  traceRoot?: string;
+  onOpenTraceFile?: (
+    path: string,
+    startLine?: number,
+    endLine?: number,
+  ) => void;
   runtimeState: Pick<
     RuntimeViewState,
     | "activeThreadId"
@@ -107,19 +118,43 @@ export function useNarrativeRenderer(options: Options) {
   const toolTraceActionCacheRef = useRef<
     Map<string, ToolTraceActionCacheEntry>
   >(new Map());
+  const traceCacheScope = `${runtimeState.activeThreadId ?? ""}:${runtimeState.threadId ?? ""}`;
+  const traceCacheScopeRef = useRef(traceCacheScope);
+  if (traceCacheScopeRef.current !== traceCacheScope) {
+    traceCacheScopeRef.current = traceCacheScope;
+    toolTraceActionCacheRef.current.clear();
+  }
 
   const toolResultsById = useMemo(
     () =>
-      new Map(runtimeState.toolResults.map((record) => [record.id, record])),
-    [runtimeState.toolResults],
+      new Map(
+        [
+          ...runtimeState.toolResults,
+          ...Object.values(runtimeState.subagentsById).flatMap(
+            (task) => task.toolResults ?? [],
+          ),
+        ].map((record) => [
+          record.runId ? `${record.runId}:${record.id}` : record.id,
+          record,
+        ]),
+      ),
+    [runtimeState.toolResults, runtimeState.subagentsById],
   );
 
   const patchPreviewsById = useMemo(
     () =>
       new Map(
-        runtimeState.patchPreviews.map((preview) => [preview.id, preview]),
+        [
+          ...runtimeState.patchPreviews,
+          ...Object.values(runtimeState.subagentsById).flatMap(
+            (task) => task.patchPreviews ?? [],
+          ),
+        ].map((preview) => [
+          preview.runId ? `${preview.runId}:${preview.id}` : preview.id,
+          preview,
+        ]),
       ),
-    [runtimeState.patchPreviews],
+    [runtimeState.patchPreviews, runtimeState.subagentsById],
   );
 
   const copyToolDetail = useCallback((copyText: string): void => {
@@ -143,6 +178,10 @@ export function useNarrativeRenderer(options: Options) {
     }
     const action = create();
     toolTraceActionCacheRef.current.set(key, { inputs, action });
+    if (toolTraceActionCacheRef.current.size > 4096) {
+      const oldest = toolTraceActionCacheRef.current.keys().next().value;
+      if (oldest !== undefined) toolTraceActionCacheRef.current.delete(oldest);
+    }
     return action;
   }
 
@@ -165,8 +204,10 @@ export function useNarrativeRenderer(options: Options) {
     animateEntry?: boolean,
   ): ToolTraceAction {
     const toolId = toolRecordIdForNarrativeItem({ id, toolCallId });
-    const tool = toolResultsById.get(toolId);
-    const patch = patchPreviewsById.get(toolId);
+    const tool =
+      toolResultsById.get(rawToolId(id)) ?? toolResultsById.get(toolId);
+    const patch =
+      patchPreviewsById.get(rawToolId(id)) ?? patchPreviewsById.get(toolId);
     return cachedToolTraceAction(
       `tool:${id}`,
       [
@@ -178,6 +219,7 @@ export function useNarrativeRenderer(options: Options) {
         status,
         animateEntry,
         copyToolDetail,
+        options.onOpenTraceFile,
       ],
       () => {
         const presentation = toolTracePresentation(tool, detail, {
@@ -186,6 +228,16 @@ export function useNarrativeRenderer(options: Options) {
           allowLegacyFallbackOutput: status !== "active",
           status,
         });
+        const args = argumentRecord(tool?.args);
+        const filePath = firstStringArgument(args, [
+          "file_path",
+          "path",
+          "filePath",
+        ]);
+        const operation = traceOperation(tool?.title, presentation.kind);
+        const hasFile = Boolean(
+          filePath && (operation === "read" || operation === "edit"),
+        );
         return {
           id,
           title: presentation.title || title,
@@ -202,6 +254,20 @@ export function useNarrativeRenderer(options: Options) {
           status,
           animateEntry,
           onCopyDetail: copyToolDetail,
+          fileLabel: hasFile ? filePath!.split(/[\\/]/).at(-1) : undefined,
+          onOpenFile:
+            hasFile && options.onOpenTraceFile
+              ? () =>
+                  options.onOpenTraceFile!(
+                    filePath!,
+                    typeof args?.offset === "number" ? args.offset : undefined,
+                    typeof args?.offset === "number" &&
+                      typeof args?.limit === "number" &&
+                      args.limit > 0
+                      ? args.offset + args.limit - 1
+                      : undefined,
+                  )
+              : undefined,
         };
       },
     );
@@ -224,7 +290,7 @@ export function useNarrativeRenderer(options: Options) {
           });
         }
         if (item.output?.trim()) {
-          sections.push({
+          sections.unshift({
             label: "结果",
             content: item.output.trim(),
             format: "text",
@@ -261,7 +327,7 @@ export function useNarrativeRenderer(options: Options) {
             format: "text",
           });
         if (item.output?.trim())
-          sections.push({
+          sections.unshift({
             label: "安全回执",
             content: item.output.trim(),
             format: "text",
@@ -286,6 +352,7 @@ export function useNarrativeRenderer(options: Options) {
     animateToolEntry: boolean,
   ): ToolTraceAction[] {
     return batch.items.flatMap((item) => {
+      if (item.kind === "thinking" || item.kind === "planning") return [];
       if (item.kind === "exploring") {
         return item.actions.map((action) =>
           toolTraceActionFor(
@@ -330,53 +397,152 @@ export function useNarrativeRenderer(options: Options) {
     animateToolEntry = true,
     disclosureScope = turnId,
   ) {
+    const scope = `${runtimeState.activeThreadId ?? runtimeState.threadId ?? "local"}:${disclosureScope.replace(/:(?:items|execution-items)$/, "")}`;
+    const entryKey = (id: string) => `${scope}:activity-entry:${id}`;
     return projectNarrativeActivitySegments({ turnId, items }).map(
       (segment) => {
-        const segmentDisclosureKey = `${disclosureScope}:segment:${segment.id}`;
-        if (segment.kind === "item") {
+        if (segment.kind === "item")
           return renderNarrativeItem(
             segment.item,
             segment.id,
             animateToolEntry,
-            segmentDisclosureKey,
+            entryKey(segment.item.id),
           );
-        }
-        const actions = actionsForActivityBatch(segment, animateToolEntry);
-        const replayed = segment.items.every((item) =>
-          item.kind === "exploring"
-            ? item.actions.every((action) =>
-                replayedNarrativeItemIds.has(action.id),
-              )
-            : replayedNarrativeItemIds.has(item.id),
-        );
-        const searchOnly = segment.items.every(
-          (item) =>
-            item.kind === "exploring" &&
-            item.actions.length > 0 &&
-            item.actions.every((action) => action.visualKind === "search"),
+        const actions = actionsForActivityBatch(segment, false);
+        const actionsById = new Map(
+          actions.map((action) => [action.id, action]),
         );
         const summary = activityBatchSummary(
-          actions.map((action) => ({
-            kind: action.kind || "tool",
-            title: action.title,
-            status: action.status,
-            fileCount: patchPreviewsById.get(
-              toolRecordIdForNarrativeItem(action),
-            )?.affectedPaths.length,
-          })),
+          actions.map((action) => {
+            const id = rawToolId(action.id);
+            const record =
+              toolResultsById.get(id) ??
+              toolResultsById.get(toolRecordIdForNarrativeItem(action));
+            const patch =
+              patchPreviewsById.get(id) ??
+              patchPreviewsById.get(toolRecordIdForNarrativeItem(action)) ??
+              toolResultPatch(record);
+            const args = argumentRecord(record?.args);
+            const path = firstStringArgument(args, [
+              "file_path",
+              "path",
+              "filePath",
+            ]);
+            const paths = patch?.affectedPaths.length
+              ? patch.affectedPaths
+              : path
+                ? [path]
+                : [];
+            return {
+              id: action.id,
+              kind: action.kind ?? "tool",
+              title: action.title,
+              status: action.status,
+              toolName: record?.title,
+              patch,
+              paths: paths.map((path) =>
+                normalizeTracePath(
+                  !/^(?:[/\\]|[A-Za-z]:)/.test(path) && options.traceRoot
+                    ? `${options.traceRoot}/${path}`
+                    : path,
+                ),
+              ),
+            };
+          }),
+        );
+        const entries = segment.items.flatMap<{
+          id: string;
+          action?: ToolTraceAction;
+          thought?: Extract<
+            RunNarrativeItem,
+            { kind: "thinking" | "planning" }
+          >;
+        }>((item) => {
+          if (item.kind === "exploring")
+            return item.actions.map((action) => ({
+              id: action.id,
+              action: actionsById.get(action.id)!,
+            }));
+          if (item.kind === "thinking" || item.kind === "planning")
+            return [{ id: item.id, thought: item }];
+          return [{ id: item.id, action: actionsById.get(item.id)! }];
+        }) as Array<{
+          id: string;
+          action?: ToolTraceAction;
+          thought?: Extract<
+            RunNarrativeItem,
+            { kind: "thinking" | "planning" }
+          >;
+        }>;
+        const active = entries.filter(
+          (entry) =>
+            (entry.action?.status ?? entry.thought?.status) === "active",
+        );
+        const last = active.at(-1);
+        const currentLabel = last?.thought
+          ? last.thought.kind === "planning" && last.thought.phase
+            ? last.thought.text
+            : "思考中"
+          : last?.action
+            ? `正在${last.action.title.replace(/^正在/, "")}`
+            : undefined;
+        const failures = actions.filter(
+          (action) => action.status !== "active" && action.status !== "done",
         );
         return (
           <StoredToolTraceGroup
             key={segment.id}
-            disclosureKey={`${segmentDisclosureKey}:batch`}
+            disclosureKey={`${scope}:${segment.id}`}
             store={workbenchDisclosureStore}
             actions={actions}
-            replayed={replayed}
+            replayed={!animateToolEntry}
             label={summary.label}
             detail={summary.detail}
-            icon={searchOnly ? SEARCH_TRACE_GROUP_ICON : undefined}
-            animateItems={animateToolEntry}
-          />
+            entryCount={entries.length}
+            activityStatus={active.length ? "active" : "done"}
+            currentActivity={
+              currentLabel
+                ? `${currentLabel}${active.length > 1 ? ` · 另有 ${active.length - 1} 项进行中` : ""}`
+                : undefined
+            }
+            attention={
+              failures.length
+                ? failures
+                    .map(
+                      (action) =>
+                        `${action.title}：${action.detail || "未成功完成"}`,
+                    )
+                    .join("；")
+                : undefined
+            }
+            animateItems={false}
+          >
+            {entries.map((entry) =>
+              entry.thought ? (
+                <StoredThoughtTrace
+                  key={entry.id}
+                  disclosureKey={entryKey(entry.id)}
+                  store={workbenchDisclosureStore}
+                  text={
+                    entry.thought.kind === "planning" ? "" : entry.thought.text
+                  }
+                  status={entry.thought.status}
+                  label={
+                    entry.thought.kind === "planning" && entry.thought.phase
+                      ? entry.thought.text
+                      : undefined
+                  }
+                  animateEntry={false}
+                />
+              ) : (
+                renderStoredToolTraceLine(
+                  entry.action!,
+                  entry.id,
+                  `${entryKey(entry.id)}:tool`,
+                )
+              ),
+            )}
+          </StoredToolTraceGroup>
         );
       },
     );
@@ -390,7 +556,9 @@ export function useNarrativeRenderer(options: Options) {
   ) {
     if (item.kind === "planning" || item.kind === "thinking") {
       const thoughtTrace = (
-        <ThoughtTrace
+        <StoredThoughtTrace
+          disclosureKey={disclosureKey}
+          store={workbenchDisclosureStore}
           text={item.kind === "planning" ? "" : item.text}
           status={item.kind === "planning" ? "active" : item.status}
           animateEntry={
@@ -414,7 +582,11 @@ export function useNarrativeRenderer(options: Options) {
         isFinal: item.isFinal,
       });
       return (
-        <div key={key} className="assistant-message-wrapper">
+        <div
+          key={key}
+          className="assistant-message-wrapper"
+          data-final={item.isFinal ? "true" : "false"}
+        >
           <AssistantMessage
             markdown={item.markdown}
             status={item.status}
@@ -744,8 +916,7 @@ export function useNarrativeRenderer(options: Options) {
                   : undefined,
               onMediaError:
                 mediaRequest && mediaSourceKey
-                  ? () =>
-                      refreshArtifactMediaSource(mediaSourceKey)
+                  ? () => refreshArtifactMediaSource(mediaSourceKey)
                   : undefined,
               onMediaMetadata: mediaSourceKey
                 ? (metadata: AwakenMediaMetadata) =>
@@ -820,12 +991,18 @@ export function useNarrativeRenderer(options: Options) {
     },
     disclosureScope: string,
   ) {
+    // The outer process wrapper changes at completion; entry choices belong to
+    // the turn, independently of that wrapper's body segment identity.
+    const segmentSuffix = `:body:${segment.id}`;
+    const activityScope = disclosureScope.endsWith(segmentSuffix)
+      ? disclosureScope.slice(0, -segmentSuffix.length)
+      : disclosureScope;
     if (segment.kind === "items") {
       return renderNarrativeActivityItems(
         turnId,
         segment.items,
         true,
-        `${disclosureScope}:items`,
+        `${activityScope}:items`,
       );
     }
 
@@ -859,7 +1036,7 @@ export function useNarrativeRenderer(options: Options) {
             turnId,
             segment.items,
             false,
-            `${disclosureScope}:execution-items`,
+            `${activityScope}:execution-items`,
           )}
         </div>
       </StoredExecutionProcessDisclosure>,

@@ -4,16 +4,30 @@ import {
   AwakenDisclosure as Disclosure,
   AwakenToolTraceGroup as ToolTraceGroup,
   AwakenToolTraceLine as ToolTraceLine,
+  AwakenThoughtTrace as ThoughtTrace,
   type AwakenDisclosureProps,
   type ToolTraceAction,
   type AwakenToolTraceGroupProps,
   type AwakenToolTraceLineProps,
 } from "@awaken/design-system";
 import {
-  useAutomaticWorkbenchDisclosure,
   useWorkbenchDisclosure,
   type WorkbenchDisclosureStore,
 } from "./workbenchDisclosureStore";
+
+export function StoredThoughtTrace({
+  disclosureKey,
+  store,
+  ...props
+}: React.ComponentProps<typeof ThoughtTrace> & {
+  disclosureKey: string;
+  store: WorkbenchDisclosureStore;
+}) {
+  const [open, setOpen] = useWorkbenchDisclosure(store, disclosureKey);
+  return (
+    <ThoughtTrace {...props} open={open ?? false} onOpenChange={setOpen} />
+  );
+}
 
 export type StoredToolTraceLineProps = Omit<
   AwakenToolTraceLineProps,
@@ -54,6 +68,11 @@ export function storedToolTraceGroupPropsEqual(
     previous.defaultOpen === next.defaultOpen &&
     previous.icon === next.icon &&
     previous.animateItems === next.animateItems &&
+    previous.children === next.children &&
+    previous.entryCount === next.entryCount &&
+    previous.currentActivity === next.currentActivity &&
+    previous.attention === next.attention &&
+    previous.activityStatus === next.activityStatus &&
     previous.onSelectAction === next.onSelectAction &&
     previous.actions.length === next.actions.length &&
     previous.actions.every((action, index) => action === next.actions[index])
@@ -67,12 +86,7 @@ export const StoredToolTraceGroup = memo(function StoredToolTraceGroup({
   store,
   ...props
 }: StoredToolTraceGroupProps) {
-  const active = actions.some((action) => action.status === "active");
-  const [open, setOpen] = useAutomaticWorkbenchDisclosure(
-    store,
-    disclosureKey,
-    { active, replayed },
-  );
+  const [open, setOpen] = useWorkbenchDisclosure(store, disclosureKey);
   const renderAction = useCallback(
     (action: ToolTraceAction, lineProps: AwakenToolTraceLineProps) => {
       const storedLineProps = { ...lineProps };

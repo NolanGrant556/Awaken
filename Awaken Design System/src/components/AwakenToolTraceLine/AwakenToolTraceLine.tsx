@@ -3,6 +3,7 @@ import { memo, useId, useState, type ReactNode } from "react";
 
 import { AwakenIcon } from "../AwakenIcon";
 import { useAwakenDisclosurePresence } from "../../hooks/useAwakenDisclosurePresence";
+import { TraceDiff } from "./TraceDiff";
 
 export type ToolTraceStatus =
   | "active"
@@ -48,33 +49,9 @@ export type AwakenToolTraceLineProps = {
   /** Disable the mount animation when a consumer reveals already-finished history. */
   animateEntry?: boolean;
   onSelect?: () => void;
+  fileLabel?: string;
+  onOpenFile?: () => void;
 };
-
-// MCP / Skill / Terminal 首先保留来源身份，状态由行的色彩与文案表达。
-// 普通工具则使用状态族的唯一图形，避免 error 与 unsupported 等状态撞形。
-function statusIcon(status: ToolTraceStatus, kind: ToolTraceKind) {
-  if (kind === "mcp") return <AwakenIcon concept="mcp-source" size={14} />;
-  if (kind === "skill") return <AwakenIcon concept="skill" size={14} />;
-  if (kind === "terminal") return <AwakenIcon concept="tool-terminal" size={14} />;
-  switch (status) {
-    case "active":
-      return <AwakenIcon concept="step-running" size={14} />;
-    case "error":
-      return <AwakenIcon concept="error" size={14} />;
-    case "denied":
-      return <AwakenIcon concept="denied" size={14} />;
-    case "cancelled":
-      return <AwakenIcon concept="cancelled" size={14} />;
-    case "interrupted":
-      return <AwakenIcon concept="interrupted" size={14} />;
-    case "blocked":
-      return <AwakenIcon concept="blocked" size={14} />;
-    case "unsupported":
-      return <AwakenIcon concept="unsupported" size={14} />;
-    default:
-      return <AwakenIcon concept="tool" size={14} />;
-  }
-}
 
 export const AwakenToolTraceLine = memo(function AwakenToolTraceLine({
   title,
@@ -85,18 +62,21 @@ export const AwakenToolTraceLine = memo(function AwakenToolTraceLine({
   detailCard,
   status = "done",
   kind = "tool",
-  icon,
   defaultOpen,
   open,
   onOpenChange,
   onCopyDetail,
   animateEntry = true,
   onSelect,
+  fileLabel,
+  onOpenFile,
 }: AwakenToolTraceLineProps) {
   const outputId = useId();
   const hasDetail = Boolean(detailCard?.sections.length || output);
   const detailLabel =
-    detailCard?.title || outputLabel || (kind === "terminal" ? "终端输出" : "工具输出");
+    detailCard?.title ||
+    outputLabel ||
+    (kind === "terminal" ? "终端输出" : "工具输出");
   const autoExpanded = false;
   const [manualExpanded, setManualExpanded] = useState<boolean | null>(
     defaultOpen ?? null,
@@ -106,7 +86,7 @@ export const AwakenToolTraceLine = memo(function AwakenToolTraceLine({
     present: detailPresent,
     prepareOpen,
     onTransitionEnd,
-  } = useAwakenDisclosurePresence(expanded, 320);
+  } = useAwakenDisclosurePresence(expanded, 180);
   const interactive = hasDetail || Boolean(onSelect);
   const lineClassName = `tool-trace-line tool-trace-line-${status} tool-trace-line-${kind}${
     expanded ? " tool-trace-line-open" : ""
@@ -122,26 +102,44 @@ export const AwakenToolTraceLine = memo(function AwakenToolTraceLine({
     onSelect?.();
   }
 
+  const failureLabel =
+    status !== "active" && status !== "done" ? (
+      <span className="tool-trace-failure-label">
+        {
+          {
+            error: "失败",
+            denied: "未获授权",
+            cancelled: "已取消",
+            interrupted: "已中断",
+            blocked: "待处理",
+            unsupported: "不支持",
+          }[status]
+        }
+      </span>
+    ) : null;
+
   const rowContent = (
     <>
-      <span
-        className="tool-trace-line-icon"
-        data-icon-kind={icon || kind !== "tool" ? "source" : "status"}
-      >
-        {icon ?? statusIcon(status, kind)}
-      </span>
       <span className="tool-trace-line-copy">
         <span className="tool-trace-line-title">{title}</span>
-        {detail ? <span className="tool-trace-line-detail">{detail}</span> : null}
+        {detail ? (
+          <span className="tool-trace-line-detail">{detail}</span>
+        ) : null}
       </span>
+      {status === "active" ? (
+        <span className="aw-trace-dots" aria-hidden="true">
+          <i />
+          <i />
+          <i />
+        </span>
+      ) : null}
+      {failureLabel}
       <span
         className="tool-trace-line-chevron"
         aria-hidden="true"
         data-visible={hasDetail ? "available" : "empty"}
       >
-        {hasDetail ? (
-          <AwakenIcon concept="disclose" size={14} />
-        ) : null}
+        {hasDetail ? <AwakenIcon concept="disclose" size={14} /> : null}
       </span>
     </>
   );
@@ -156,7 +154,42 @@ export const AwakenToolTraceLine = memo(function AwakenToolTraceLine({
         expanded ? "open" : detailPresent ? "closing" : "closed"
       }
     >
-      {interactive ? (
+      {onOpenFile ? (
+        <div className={`${lineClassName} tool-trace-file-row`}>
+          <button
+            type="button"
+            className="tool-trace-file-link"
+            title="打开当前磁盘文件"
+            aria-label={`打开文件 ${fileLabel || title}`}
+            onClick={onOpenFile}
+          >
+            {title}
+          </button>
+          {detail ? (
+            <span className="tool-trace-line-detail">{detail}</span>
+          ) : null}
+          {status === "active" ? (
+            <span className="aw-trace-dots" aria-hidden="true">
+              <i />
+              <i />
+              <i />
+            </span>
+          ) : null}
+          {failureLabel}
+          {hasDetail ? (
+            <button
+              type="button"
+              className="tool-trace-detail-toggle"
+              aria-label={`查看 ${fileLabel || title} 的执行详情`}
+              aria-expanded={expanded}
+              aria-controls={outputId}
+              onClick={activate}
+            >
+              <AwakenIcon concept="disclose" size={14} />
+            </button>
+          ) : null}
+        </div>
+      ) : interactive ? (
         <button
           type="button"
           className={lineClassName}
@@ -190,7 +223,9 @@ export const AwakenToolTraceLine = memo(function AwakenToolTraceLine({
                 {outputTruncated || (detailCard?.copyText && onCopyDetail) ? (
                   <div className="tool-trace-output-actions">
                     {outputTruncated ? (
-                      <span className="tool-trace-output-truncated">内容已截断</span>
+                      <span className="tool-trace-output-truncated">
+                        内容已截断
+                      </span>
                     ) : null}
                     {detailCard?.copyText && onCopyDetail ? (
                       <button
@@ -217,8 +252,23 @@ export const AwakenToolTraceLine = memo(function AwakenToolTraceLine({
                         data-format={section.format}
                         data-tone={section.tone || "default"}
                       >
-                        <div className="tool-trace-detail-label">{section.label}</div>
-                        <pre>{section.content}</pre>
+                        {section.format === "json" ? (
+                          <details>
+                            <summary className="tool-trace-detail-label">
+                              {section.label}
+                            </summary>
+                            <pre>{section.content}</pre>
+                          </details>
+                        ) : section.format === "diff" ? (
+                          <TraceDiff patch={section.content} />
+                        ) : (
+                          <>
+                            <div className="tool-trace-detail-label">
+                              {section.label}
+                            </div>
+                            <pre>{section.content}</pre>
+                          </>
+                        )}
                       </section>
                     ))}
                   </div>

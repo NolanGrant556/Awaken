@@ -146,7 +146,7 @@ export type RunNarrativeItem =
       id: string;
       text: string;
       status: "active" | "done";
-      phase?: "continuation" | "compaction";
+      phase?: "continuation" | "compaction" | "waiting_children";
     }
   | { kind: "thinking"; id: string; text: string; status: "active" | "done" }
   | {

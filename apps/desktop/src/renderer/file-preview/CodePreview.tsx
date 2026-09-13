@@ -39,6 +39,7 @@ export type CodePreviewProps = {
   editable?: boolean;
   onSave?: (content: string) => Promise<ProjectFilePreviewSaveResult>;
   commentRequest?: { id: string; startLine: number; endLine: number };
+  lineRequest?: { id: string; startLine: number; endLine?: number };
   onCommentRequestHandled?: (id: string) => void;
   leadingFormatActions?: ReactNode;
 };
@@ -308,12 +309,14 @@ export default function CodePreview({
   editable = false,
   onSave,
   commentRequest,
+  lineRequest,
   onCommentRequestHandled,
   leadingFormatActions,
 }: CodePreviewProps) {
   const editorHostRef = useRef<HTMLDivElement>(null);
   const editorShellRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<EditorView | null>(null);
+  const lastLineRequestRef = useRef<string | undefined>(undefined);
   const wrapCompartmentRef = useRef(new Compartment());
   const [lineWrapping, setLineWrapping] = useState(true);
   const [lineSelection, setLineSelection] = useState<CodePreviewLineSelection>();
@@ -453,6 +456,16 @@ export default function CodePreview({
       host.replaceChildren();
     };
   }, [editable, preview.displayName, preview.language, preview.previewId, updateSelection]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || !lineRequest || lastLineRequestRef.current === lineRequest.id || !Number.isInteger(lineRequest.startLine)) return;
+    lastLineRequestRef.current = lineRequest.id;
+    const line = Math.max(1, Math.min(lineRequest.startLine, editor.state.doc.lines));
+    const endLine = Number.isInteger(lineRequest.endLine)
+      ? Math.max(line, Math.min(lineRequest.endLine!, editor.state.doc.lines)) : line;
+    editor.dispatch({ selection: { anchor: editor.state.doc.line(line).from, head: editor.state.doc.line(endLine).to }, scrollIntoView: true });
+  }, [lineRequest, editorVersion]);
 
   useEffect(() => {
     const editor = editorRef.current;

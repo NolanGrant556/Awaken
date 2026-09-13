@@ -13,7 +13,7 @@ export function AwakenThoughtTraceDemo() {
         <h2>思路轨迹 <code>AwakenThoughtTrace</code></h2>
         <p>
           思考中行内状态从提交后的首个等待帧开始持续显示；runtime 提供 reasoning
-          summary 后，文本在下方流式展开；完成态移除思考球并默认折叠为思考过程，以轻量 Chevron 保留回看能力。
+          summary 后提供正文展开入口；用户展开后文本继续流式更新，完成后保留用户选择和轻量回看入口。
         </p>
       </header>
       <div className="ads-component-demo-grid">

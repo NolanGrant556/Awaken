@@ -94,6 +94,7 @@ export type MarkdownPreviewProps = {
   onAddTextSelection?: (selection: CodePreviewLineSelection) => void;
   onDeleteComment?: (commentId: string) => void;
   commentDisabled?: boolean;
+  lineRequest?: { id: string; startLine: number; endLine?: number };
 };
 
 type MarkdownPreviewSelection = CodePreviewLineSelection & {
@@ -142,6 +143,7 @@ export default function MarkdownPreview({
   onAddTextSelection,
   onDeleteComment,
   commentDisabled = false,
+  lineRequest,
 }: MarkdownPreviewProps) {
   const [mode, setMode] = useState<"preview" | "source">("preview");
   const [content, setContent] = useState(preview.content);
@@ -159,6 +161,8 @@ export default function MarkdownPreview({
     setSelection(undefined);
     setCommentRequest(undefined);
   }, [preview.previewId, preview.content]);
+
+  useEffect(() => { if (lineRequest) setMode("source"); }, [lineRequest?.id, preview.previewId]);
 
   const sanitizeSchema = useMemo(
     () => ({
@@ -190,6 +194,7 @@ export default function MarkdownPreview({
   if (mode === "source") {
     return (
       <CodePreview
+        lineRequest={lineRequest}
         preview={{ ...preview, content }}
         frameProps={frameProps}
         editable={Boolean(onSave)}

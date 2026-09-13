@@ -1,97 +1,66 @@
 .aw-subagent-group {
-  overflow: hidden;
-  border: 1px solid var(--aw-color-border-subtle, rgba(127, 127, 127, 0.22));
-  border-radius: 12px;
-  background: var(--aw-color-surface-raised, rgba(127, 127, 127, 0.04));
+  display: grid;
+  min-width: 0;
+  gap: 0;
 }
-
 .aw-subagent-group__header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--aw-color-border-subtle, rgba(127, 127, 127, 0.18));
-  font-size: 12px;
+  min-height: 28px;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--aw-text-secondary);
 }
-
 .aw-subagent-group__stop-all {
-  flex: 0 0 auto;
-  height: 24px;
-  padding: 0 8px;
   border: 0;
-  border-radius: 8px;
-  background: var(--aw-bg-fill-main, rgba(127, 127, 127, 0.12));
-  color: var(--aw-text-primary);
+  padding: 0;
+  background: transparent;
+  color: var(--aw-text-secondary);
   font: inherit;
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 16px;
-  white-space: nowrap;
+  font-size: 12px;
   cursor: pointer;
 }
-
 .aw-subagent-group__stop-all:hover,
 .aw-subagent-group__stop-all:focus-visible {
-  background: var(--aw-bg-fill-dark, rgba(127, 127, 127, 0.18));
-  outline: none;
+  color: var(--aw-status-danger-text);
 }
-
 .aw-subagent-group__rows {
   display: grid;
 }
-
 .aw-subagent-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
+  display: flex;
+  align-items: baseline;
   gap: 10px;
-  width: 100%;
-  padding: 10px 12px;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 28px;
+  padding: 4px 0;
   border: 0;
-  border-bottom: 1px solid var(--aw-color-border-subtle, rgba(127, 127, 127, 0.14));
   background: transparent;
-  color: inherit;
+  color: var(--aw-text-secondary);
   text-align: left;
   cursor: pointer;
+  font-size: 13px;
+  line-height: 20px;
 }
-
-.aw-subagent-row:last-child {
-  border-bottom: 0;
-}
-
 .aw-subagent-row:hover,
 .aw-subagent-row:focus-visible,
 .aw-subagent-row.is-selected {
-  background: var(--aw-color-surface-hover, rgba(127, 127, 127, 0.09));
-  outline: none;
+  color: var(--aw-text-primary);
+  background: transparent;
 }
-
 .aw-subagent-row__name {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 20px;
+  font-size: inherit;
+  font-weight: 400;
+  overflow-wrap: anywhere;
 }
-
 .aw-subagent-row__label {
+  flex: 0 0 auto;
+  font-size: 12px;
   color: var(--aw-text-secondary);
-  font-size: 11px;
-  line-height: 20px;
-  white-space: nowrap;
 }
-
-.aw-subagent-row--running .aw-subagent-row__label {
-  color: var(--aw-status-running);
-}
-
-.aw-subagent-row--completed .aw-subagent-row__label {
-  color: var(--aw-status-success-text);
-}
-
 .aw-subagent-row--failed .aw-subagent-row__label,
 .aw-subagent-row--interrupted .aw-subagent-row__label {
   color: var(--aw-status-danger-text);

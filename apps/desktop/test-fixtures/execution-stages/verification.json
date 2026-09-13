@@ -1,0 +1,419 @@
+{
+  "schemaVersion": 1,
+  "capturedOn": "2026-09-13",
+  "implementationBase": "9b3ab5aa4eb4a57e8efff695886e7791444d3aea",
+  "implementationState": "截图采集时为 main 上未提交改动；sourceHashes 保留该次原生验收的源码快照。后续主线集成验证单列，不将原截图视为新主线的重新验收。",
+  "entry": "npm run open:desktop / Awaken Dev / com.github.Electron",
+  "projectId": "project_1789292629020224000_1",
+  "threadId": "thread_1789292671091322000_3",
+  "workspace": "/private/tmp/awaken-execution-stage-acceptance",
+  "fixtureSetup": {
+    "files": "README.md 六行；sample-1.ts 到 sample-4.ts 各 100 行，内容 export const valueN = N; // fixture I",
+    "expectedChanges": "sample-1.ts 与 sample-2.ts 的 value1 改为 101；创建 result.md；missing-fixture.txt 保持不存在"
+  },
+  "provider": "Doubao-Seed-Evolving",
+  "themes": [
+    "light",
+    "dark"
+  ],
+  "windowSizes": [
+    {
+      "width": 1440,
+      "height": 903,
+      "role": "初始常规窗口"
+    },
+    {
+      "width": 1120,
+      "height": 760,
+      "role": "Main 最小窗口，使用原生窗口拖动验收"
+    }
+  ],
+  "journal": "/Users/nolangrant/.awaken/store-generations/gen-001/sessions/thread_1789292671091322000_3/journal.jsonl",
+  "runs": [
+    {
+      "runId": "run_1789292671091317000_2",
+      "startedAt": "2026-09-13T09:44:32.053911Z",
+      "terminal": {
+        "timestamp": "2026-09-13T09:46:13.130459Z",
+        "result": "验收全部完成，所有操作均限定在 `/private/tmp/awaken-execution-stage-acceptance` 内。\n\n**真实完成项**\n1. **读取/搜索**：README.md（6 行夹具说明）、sample-1.ts 第 40–47 行（value40–47，fixture 1）、sample-2.ts（100 行，fixture 2）均已读取；Grep `value50` 命中 4 处（sample-1/2/3/4.ts 各第 50 行）。\n2. **子任务 + 编辑**：只读 explore 子任务完成（无副作用），报告 sample-3.ts 共 100 行，导出 value1–value100，注释为 `// fixture 3`；主任务已将 sample-1.ts、sample-2.ts 的 value1 从 1 改为 101，并复核第 1 行确认。\n3. **命令输出**：Python 退出码 0，约 11.2 秒内每秒输出“验证步骤 1–12”，随后输出 100 行夹具结果（fixture-result-001 至 100）。\n4. **汇总**：子任务结果已等待取回；result.md 已在验收目录创建（2146 字节），记录全部阶段。\n\n**预期错误**：Read `missing-fixture.txt` 返回 `read_failed: no such file or directory`——这是预期的失败，已观察一次后直接继续，未重试、未创建该文件。\n\n**过程中的小问题**：首次调用 subagent wait 时误用单数参数 `task_id`，工具返回 `subagent_invalid_input: task_ids is required`；改用 `task_ids` 数组后立即成功，不影响结果。",
+        "status": "finished",
+        "terminal_reason": "completed"
+      },
+      "tools": [
+        {
+          "toolCallId": "call_4fdbkviw90aysl01h4ax6oz0",
+          "toolName": "Read",
+          "status": "succeeded",
+          "isError": false
+        },
+        {
+          "toolCallId": "call_4i4np1oucy6r64bzy74zfl1z",
+          "toolName": "Read",
+          "status": "succeeded",
+          "isError": false
+        },
+        {
+          "toolCallId": "call_cmdazzkcyguvlopx5v2dxepp",
+          "toolName": "Read",
+          "status": "succeeded",
+          "isError": false
+        },
+        {
+          "toolCallId": "call_58forn6no9ea6pwx73zp4wwr",
+          "toolName": "Grep",
+          "status": "succeeded",
+          "isError": false
+        },
+        {
+          "toolCallId": "call_a8jpb0ckpwjm71bhbdzx86sn",
+          "toolName": "subagent",
+          "status": "succeeded",
+          "isError": false
+        },
+        {
+          "toolCallId": "call_g5mdbj6zkb8l7fuuwubnn9pt",
+          "toolName": "Read",
+          "status": "succeeded",
+          "isError": false
+        },
+        {
+          "toolCallId": "call_8dgfoasya9zfni2220f9kvxp",
+          "toolName": "Read",
+          "status": "succeeded",
+          "isError": false
+        },
+        {
+          "toolCallId": "call_rjsqoch2doouilqeeeyg2dzc",
+          "toolName": "Edit",
+          "status": "succeeded",
+          "isError": false
+        },
+        {
+          "toolCallId": "call_2l33ce73k130xejmkuc3wdru",
+          "toolName": "Edit",
+          "status": "succeeded",
+          "isError": false
+        },
+        {
+          "toolCallId": "call_q8r5mc4tjb29qkqvyu3j4lxj",
+          "toolName": "Bash",
+          "status": "succeeded",
+          "isError": false
+        },
+        {
+          "toolCallId": "call_3azzid2nmd308vjd52v76fqe",
+          "toolName": "Read",
+          "status": "failed",
+          "isError": true
+        },
+        {
+          "toolCallId": "call_uhj7fh1zaa1m032f4klgfiyn",
+          "toolName": "subagent",
+          "status": "failed",
+          "isError": true
+        },
+        {
+          "toolCallId": "call_kjkbv4jt703jd950j3ssz0y4",
+          "toolName": "Read",
+          "status": "succeeded",
+          "isError": false
+        },
+        {
+          "toolCallId": "call_cf8fjkznapw2oebauhuzdoxb",
+          "toolName": "Read",
+          "status": "succeeded",
+          "isError": false
+        },
+        {
+          "toolCallId": "call_05jp1srkn56pljv5edmozefw",
+          "toolName": "subagent",
+          "status": "succeeded",
+          "isError": false
+        },
+        {
+          "toolCallId": "call_oo6ncolkkd7jatg8a07cl3ql",
+          "toolName": "Write",
+          "status": "succeeded",
+          "isError": false
+        }
+      ]
+    },
+    {
+      "runId": "run_1789294278755897000_6",
+      "startedAt": "2026-09-13T10:11:19.09048Z",
+      "terminal": {
+        "timestamp": "2026-09-13T10:12:44.006883Z",
+        "code": "RUN_CANCELLED",
+        "error": "context canceled",
+        "status": "cancelled",
+        "stop_source": "user",
+        "terminal_reason": "aborted_tools"
+      },
+      "tools": [
+        {
+          "toolCallId": "call_042apys5lwpt1xozs0vnsx8x",
+          "toolName": "Bash",
+          "status": "cancelled",
+          "isError": true
+        }
+      ]
+    },
+    {
+      "runId": "run_1789295372882099000_7",
+      "startedAt": "2026-09-13T10:29:33.310505Z",
+      "terminal": {
+        "timestamp": "2026-09-13T10:30:06.779326Z",
+        "result": "最终验收完成：README.md 已读取，Python 已完整输出 final-fixture-step 1–20（退出码 0，约 19.1 秒），未改动任何文件。",
+        "status": "finished",
+        "terminal_reason": "completed"
+      },
+      "tools": [
+        {
+          "toolCallId": "call_g6ostwvfwctcydbti2fyxz0b",
+          "toolName": "Read",
+          "status": "succeeded",
+          "isError": false
+        },
+        {
+          "toolCallId": "call_7udmyticebxu5vhlmsdrkm2i",
+          "toolName": "Bash",
+          "status": "succeeded",
+          "isError": false
+        }
+      ]
+    }
+  ],
+  "nativeDesktopChecks": [
+    "实际 Read/Grep/Edit/Bash/Write、只读子任务与最终回答；失败缺失文件保持独立提示",
+    "阶段默认收起，展开组与单项详情；思考正文按需展开；真实 Edit 回执显示旧新行号与累计 +2 −2",
+    "源码第 40 行定位；主任务与子任务右侧标签切换；草稿 DRAFT-KEEP-913 保留，随后已清除",
+    "每秒持续输出的 Bash；运行 46 秒与 68 秒的截图保持相同历史阅读位置；回到最新输出；中途取消后无活动动画",
+    "新一轮保留上一轮规范摘要与记录；消息撤回后前缀重放；轻量子任务完成态",
+    "深浅主题与最小窗口的 diff、异常提示、详情按钮与 composer 可见",
+    "最终代码第三轮真实验收：首帧思考中；Read 后 Bash 输出 20 次成功完成，手动打开的命令详情在升级组与整轮收尾后保留",
+    "原生 Space/Enter 折叠与展开、复制命令和全部已保留输出（粘入未发送草稿回读后清空）",
+    "最终代码已定位第 40–47 行；重复打开同一文件保持一个标签，无评论编辑框；主题恢复 light，窗口恢复常规大小"
+  ],
+  "automationChecks": {
+    "desktopVitest": "npm --workspace @awaken/desktop test -- --maxWorkers=4",
+    "designSystemSmoke": "npm run smoke:ui：73 components passed",
+    "typechecks": [
+      "npm run typecheck:ui",
+      "npm --workspace @awaken/desktop run typecheck"
+    ],
+    "builds": [
+      "npm run build:ui（smoke 前置构建）",
+      "npm --workspace @awaken/desktop run build"
+    ],
+    "docs": [
+      "node scripts/check-docs.mjs：16/38/76",
+      "npm run check:docs-links：77 files / 536 local links",
+      "git diff --check"
+    ],
+    "desktopVitestResult": {
+      "filesPassed": 155,
+      "testsPassed": 1620,
+      "log": "/tmp/awaken-stream-tests-complete.log",
+      "status": "passed"
+    },
+    "typecheckStatus": "passed",
+    "buildStatus": "passed",
+    "scope": "全量 Desktop 测试曾出现定时任务并行超时，单独复核通过；最终 maxWorkers=4 全量 155 文件 / 1620 测试通过。组件 smoke 73 项与生产包构建独立执行。"
+  },
+  "remainingValidation": [
+    "未在改造前捕获旧版 Awaken 同场景原生截图，保留源码基准，不将中途截图称为改造前基线",
+    "外部 MCP 认证、媒体供应商与 ACP 的真实外部服务状态未在该本地场景重跑，使用现有 renderer/reducer/组件夹具核对兼容性",
+    "系统减少动态效果由组件行为和 CSS 验证，未修改本机辅助功能设置",
+    "旧记录缺少 structured 搜索命中身份时保留纯文本结果，不从输出解析文件跳转；覆盖 Write 缺少 before 时不制造 diff"
+  ],
+  "testOperationIncident": {
+    "runId": "run_1789294134496376000_4",
+    "description": "电脑工具粘贴提交的文本与指定验收输入不符，立即停止并通过正式 UI 撤回。日志工具调用数为 0；该轮不计入功能通过证据。"
+  },
+  "screenshots": [
+    {
+      "file": "light-diff.jpg",
+      "title": "留存浅色主题的真实 diff 展示证据",
+      "capturedAt": "2026-09-13T09:58:49.453Z",
+      "sourceCallId": "call_OhTkqAuTBmo1kByVDJyiUbRz",
+      "source": "cua_repl native Awaken Dev screenshot",
+      "sha256": "4ce1e9aa3601205e7b5d4173f5bbdd10549ceeb5528be637120b456c9081ce3c"
+    },
+    {
+      "file": "source-line-40.jpg",
+      "title": "打开 sample-1.ts 并定位第 40 行",
+      "capturedAt": "2026-09-13T09:59:05.532Z",
+      "sourceCallId": "call_De0chZFU1uiyFNOWvTTol5Ne",
+      "source": "cua_repl native Awaken Dev screenshot",
+      "sha256": "9becd6d2c3946604ceeb23d26c2698413acfcdbaf1389950e571ad64bfc525ce"
+    },
+    {
+      "file": "child-detail-draft.jpg",
+      "title": "留存子任务独立工具结果和草稿保留证据",
+      "capturedAt": "2026-09-13T09:59:40.585Z",
+      "sourceCallId": "call_yx5gixJGfXyWd9CxW0mfNV0c",
+      "source": "cua_repl native Awaken Dev screenshot",
+      "sha256": "fb5ed5950f9c8263a4b4fecc3e6013588d62a200f26609edd6c98769414ebc85"
+    },
+    {
+      "file": "dark-stages.jpg",
+      "title": "检查深色主题的阶段摘要与历史详情",
+      "capturedAt": "2026-09-13T10:06:29.197Z",
+      "sourceCallId": "call_hhkJihvGDjsm07rsCAfm4X0g",
+      "source": "cua_repl native Awaken Dev screenshot",
+      "sha256": "8a2d02622de5ac6162a0de27dd4c6bd764127c14a4ba9836c010aa76b9546324"
+    },
+    {
+      "file": "history-during-run-46s.jpg",
+      "title": "运行期间回看上一轮，检查自动跟随暂停",
+      "capturedAt": "2026-09-13T10:12:05.717Z",
+      "sourceCallId": "call_30yeofHSiTBSzqGHXfr5nqZO",
+      "source": "cua_repl native Awaken Dev screenshot",
+      "sha256": "772d49cbe599c8ab833d0a0ebebe07e93defa3a73ef9b339e0a42559af599e4f"
+    },
+    {
+      "file": "history-during-run-68s.jpg",
+      "title": "核对持续输出没有抢占历史阅读位置",
+      "capturedAt": "2026-09-13T10:12:28.129Z",
+      "sourceCallId": "call_C7IPMMO5CbwGYnG0r56MpO5q",
+      "source": "cua_repl native Awaken Dev screenshot",
+      "sha256": "35083864e4becad942af0046b403daae41d42f5a0c92a1bdffd26819f069468d"
+    },
+    {
+      "file": "live-command.jpg",
+      "title": "展开长命令实时输出",
+      "capturedAt": "2026-09-13T10:12:37.630Z",
+      "sourceCallId": "call_lb4XQa5nOc5gOHEwJgywC8yl",
+      "source": "cua_repl native Awaken Dev screenshot",
+      "sha256": "9bdd3dcffe7010822b4dd9df3a33ae6a2c44598e25ca320491a9b17358ad7c48"
+    },
+    {
+      "file": "cancelled-command.jpg",
+      "title": "核对取消后的命令记录、已保留输出与静止状态",
+      "capturedAt": "2026-09-13T10:12:54.547Z",
+      "sourceCallId": "call_bTpAHMQSCBECH2DEuaT1bgpf",
+      "source": "cua_repl native Awaken Dev screenshot",
+      "sha256": "c0210c48100bb4785d3d385ca72f465b4c7f2c908c16940d64b7b384377ef7d6"
+    },
+    {
+      "file": "dark-minimum-diff.jpg",
+      "title": "调整阅读位置，完整展示窄窗 diff",
+      "capturedAt": "2026-09-13T10:20:29.374Z",
+      "sourceCallId": "call_AGLnpEYAfK9oqQa2bnvHyLKg",
+      "source": "cua_repl native Awaken Dev screenshot",
+      "sha256": "26ed5c2806fbc98abd4e2be933e41956846c822ef10e003bb25e47c4fed67cd9"
+    },
+    {
+      "file": "light-minimum-diff.jpg",
+      "title": "留存浅色最小窗口 diff 与异常展示",
+      "capturedAt": "2026-09-13T10:23:38.756Z",
+      "sourceCallId": "call_kVcKXyMZfN2u3Q4AqWcKsyxH",
+      "source": "cua_repl native Awaken Dev screenshot",
+      "sha256": "6626accadfc7fada3353ee9619a601db020014dc15551e09ed0900b44bc70661"
+    },
+    {
+      "file": "initial-thinking-final.jpg",
+      "title": "确认第三轮输入与即时思考状态",
+      "capturedAt": "2026-09-13T10:29:33.802Z",
+      "sourceCallId": "call_K5yljEbufuF4X1GHcp1DEApJ",
+      "source": "cua_repl native Awaken Dev screenshot",
+      "sha256": "9c64125d76dd087317661bd6c5de3d146466d08218d53f05728e3ccf57048682"
+    },
+    {
+      "file": "manual-command-live.jpg",
+      "title": "运行中主动展开命令，验证收尾时保留选择",
+      "capturedAt": "2026-09-13T10:30:00.891Z",
+      "sourceCallId": "call_SQQ7tAxSv1bvKJH2SzcGhxfE",
+      "source": "cua_repl native Awaken Dev screenshot",
+      "sha256": "b6a16d64b23fa67c63155c4631c3fc83692907c8ddfac8c12fe4ce2780b5a5bb"
+    },
+    {
+      "file": "manual-command-finished.jpg",
+      "title": "检查单项升级活动组后保留的命令详情选择",
+      "capturedAt": "2026-09-13T10:30:33.057Z",
+      "sourceCallId": "call_EnhQziySPdLbob2HGTiUA4nu",
+      "source": "cua_repl native Awaken Dev screenshot",
+      "sha256": "fedc9dc92ae70849eb143a01cf437818d6888ae3e7c1363a87953ce5f52f7144"
+    },
+    {
+      "file": "source-range-40-47.jpg",
+      "title": "验证当前文件第 40–47 行定位且不进入评论编辑",
+      "capturedAt": "2026-09-13T10:31:22.590Z",
+      "sourceCallId": "call_O3WfNAC8cR2zspaECfqgKkux",
+      "source": "cua_repl native Awaken Dev screenshot",
+      "sha256": "c949c37e0c7958ef69e32763931bf3f9bc4482c3b02e9ab8e3f212a0ec08e69f"
+    },
+    {
+      "file": "final-light-stages-diff.jpg",
+      "title": "留存最终默认执行流与展开 diff 的常规窗口效果",
+      "capturedAt": "2026-09-13T10:34:42.313Z",
+      "sourceCallId": "call_mrbuIIzjD7AcEy2mJGNLzNTa",
+      "source": "cua_repl native Awaken Dev screenshot",
+      "sha256": "655d791bb93e8738527c8b086dce7419505171f6d22f98566358b6b96bb58a05"
+    }
+  ],
+  "sourceHashes": {
+    "Awaken Design System/src/components/AwakenSubagentGroup/AwakenSubagentGroup.css": "f43cd3ceea00bec1550711334b2eafbf6924c73fa8d31d5f7a78a48c8c92ebe6",
+    "Awaken Design System/src/components/AwakenSubagentGroup/AwakenSubagentGroup.tsx": "c1e145e64047dc609ace87defff26e055ac83475bbe34fae4bdd761ef8534c8b",
+    "Awaken Design System/src/components/AwakenThoughtTrace/AwakenThoughtTrace.css": "2897a2d82255d64082202116b92f1d35e39740105251a96e143d6640450ae963",
+    "Awaken Design System/src/components/AwakenThoughtTrace/AwakenThoughtTrace.demo.tsx": "808ff284d27104d99a337bf38bbc642c4524dcb5d28041a3801043b93e411815",
+    "Awaken Design System/src/components/AwakenThoughtTrace/AwakenThoughtTrace.states.ts": "a02a5c70e9899af0379190b0117233fd0ebe1a9c520fdefd40ecc6742f69ae5c",
+    "Awaken Design System/src/components/AwakenThoughtTrace/AwakenThoughtTrace.tsx": "59edb10986331689bff3ed40c8290ce73595cd278c3cf0a0e9fd70ae04adeb73",
+    "Awaken Design System/src/components/AwakenThoughtTrace/README.md": "e4e2cb59e57aeddacf6331cf2183677727304c9de3afda16cde5e5e5d060702c",
+    "Awaken Design System/src/components/AwakenToolTraceGroup/AwakenToolTraceGroup.demo.tsx": "24826a294ed5817b3ca96fbe4c5c0fb77351ab3161cc8f451781dc7d6e6164b1",
+    "Awaken Design System/src/components/AwakenToolTraceGroup/AwakenToolTraceGroup.states.ts": "7d3e0aeda7ec40ab1ca71296c177b522a4d752bc0d046a9ec42b723bdc52344f",
+    "Awaken Design System/src/components/AwakenToolTraceGroup/AwakenToolTraceGroup.tsx": "2daccc558bc80a427e2c0faa0aa78741dc0085b6421ba9f6489e826df8061364",
+    "Awaken Design System/src/components/AwakenToolTraceGroup/README.md": "11ec0b2b84793eb1ccd4456ed31a50a7f5a36a55de73d958262235af03295a1d",
+    "Awaken Design System/src/components/AwakenToolTraceLine/AwakenToolTraceLine.css": "a675b8f535dd31f5f9f23a2d5ba3b9279cba99cc4bc72d3842ebe0ba974c2552",
+    "Awaken Design System/src/components/AwakenToolTraceLine/AwakenToolTraceLine.tsx": "602d9e66a40f75d849d8d130f5c991a73ec40a891466db29c4895d45208db9e8",
+    "Awaken Design System/src/components/AwakenToolTraceLine/README.md": "25420de8c501543bced661e01837b5b8e5cc4d4e7ff7d3b4df2b07e0a9f34733",
+    "Awaken Design System/src/components/AwakenToolTraceLine/TraceDiff.tsx": "c8a82fec238a2c4562240c93040eebd7dfb4e9b03e20a627170ce8c84cbee1fe",
+    "apps/desktop/src/renderer/App.tsx": "9295bd7c019cf108700db50cc2e7bf806951b2f6815b9c51f914f72c22179e2b",
+    "apps/desktop/src/renderer/DesktopExecutionFeed.tsx": "5816292054a06ed7614fe61af6b7f7dfcd24cfb621312d23a07993ddd7165f4f",
+    "apps/desktop/src/renderer/ProjectFilesWorkspace.tsx": "fb2a2e0059114cad0c588c8de7c13e889cf427b9441982af24d331d54c759c2d",
+    "apps/desktop/src/renderer/StoredExecutionDisclosures.tsx": "bb57f83bc2c324830be899462d5170ac1f030dfb949f658730ab42682dd7ff27",
+    "apps/desktop/src/renderer/file-preview/CodePreview.tsx": "329599f53fe4e03173d9244cbdf64c5ab008be4d57864ff9c3603cc8e39d2ea6",
+    "apps/desktop/src/renderer/file-preview/FilePreviewHost.tsx": "dfaa4f6678b94d5d6f00bdf6b9bd4286837aab7ba3a42d8a5f2b5f7a2f1bdb4f",
+    "apps/desktop/src/renderer/file-preview/MarkdownPreview.tsx": "3343834c23ebb07a54eb26add49f51c8ea052838b7310c3071757c897a9e4aa7",
+    "apps/desktop/src/renderer/inspectorTabs.ts": "df4d7f0466a06a9faafeb6c225bc01254363344deec997daab4b90f6c99086dd",
+    "apps/desktop/src/renderer/projectFileTabs.ts": "64dcfb9b9226227592daea73ae207aebf889bc715b6bd5ccf5f8cb8004d1eee4",
+    "apps/desktop/src/renderer/run-narrative/projector.ts": "aaebd4b2b3aba58020bee408c52f8ba596258bb859981af5252a76dc908b932a",
+    "apps/desktop/src/renderer/run-narrative/types.ts": "5e50a9038c9184a6de6023ff676af821b89e2e426e99c3fb1dea3d322ee30064",
+    "apps/desktop/src/renderer/runtime/reducer.ts": "741df154558da8ba5bac86b115d520df48561526551190e7ff6acca3ea8c343e",
+    "apps/desktop/src/renderer/styles/workbench.css": "939299dda99691629ac758df9cd0cfd0d25743c3ba27a19d0d430b9d5e42b0e5",
+    "apps/desktop/src/renderer/toolTracePresentation.ts": "38ea9c337304f64c1eaf0883c6bfad4d43f170b136fd9566d493244d88b8941e",
+    "apps/desktop/src/renderer/traceFileNavigation.ts": "d1f8e0c49fd8e175dbe5e0763252545f109a6ad21ffebd9f63581c5d1b457245",
+    "apps/desktop/src/renderer/tracePatch.ts": "bcfe36e78316a64ace33470b5a66c1c12e3a97760d3a0835d87621fa29410a6b",
+    "apps/desktop/src/renderer/useNarrativeRenderer.tsx": "a58bebd26497bc86176dbe3f0b039bd0347937ac0313f1b8ca5a5261f24f198e",
+    "apps/desktop/src/renderer/useRunStageScrollController.ts": "b05f60623fff56a3c0986c4a643c13779f2a60d61c2c2fc773716df6bdc11784",
+    "apps/desktop/src/renderer/workbenchPresentation.ts": "896d1cd00f61a115f65ac8e64cca2a6e9511354d8e47a1af7658719f26b6122e"
+  },
+  "mainlineIntegration": {
+    "verifiedAt": "2026-09-13T11:54:18.512901+00:00",
+    "upstreamCommit": "ca603ee3de918d1b64cac8a8cab2dcb5fd718688",
+    "integration": "本功能提交无文本冲突地重放到 GitHub main 的 21 个新提交之后；检查了文件定位、预览加载和标签复用的交叉修改。",
+    "desktopVitest": {
+      "command": "npm --workspace @awaken/desktop test -- --maxWorkers=4",
+      "filesPassed": 160,
+      "testsPassed": 1672,
+      "status": "passed"
+    },
+    "desktopTypecheck": {
+      "command": "npm --workspace @awaken/desktop run typecheck",
+      "status": "passed"
+    },
+    "desktopBuild": {
+      "command": "npm --workspace @awaken/desktop run build",
+      "status": "passed",
+      "warning": "Vite 保留大于 500 kB 的产物体积提示"
+    },
+    "docs": "结构 16/38/76；链接 77 个文件 / 543 个本地链接；git diff HEAD^ --check 通过",
+    "nativeDesktop": "沿用本记录的集成前原生验收；主线集成后未重新运行原生 Desktop 场景。",
+    "sourceHashesChangedByUpstream": {
+      "apps/desktop/src/renderer/App.tsx": "30b59dc023d6cbb877b90bb843c4afdee102e8684ea6352bdff7b04100b153b2",
+      "apps/desktop/src/renderer/ProjectFilesWorkspace.tsx": "188997a08e2c0bd690d45e036c190d798ac1fb057412ba9f69812f6d6551c6d3",
+      "apps/desktop/src/renderer/file-preview/FilePreviewHost.tsx": "3cc197882f8ff811d15e590fc8a018471a81cd21192dff474da43439434c14b0",
+      "apps/desktop/src/renderer/inspectorTabs.ts": "57a5ee7c988d7db5545efc0ed420a7a69ea4df0f440e073f966577f1746f703a"
+    }
+  }
+}

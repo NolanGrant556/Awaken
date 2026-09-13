@@ -662,6 +662,16 @@ export function useRunStageScrollController({
         }
       };
 
+      const handleTraceCollapse = (event: Event) => {
+        const target = event.target instanceof HTMLElement ? event.target : undefined;
+        const heading = target?.closest(".thought-trace")?.querySelector<HTMLElement>(".thought-trace-heading");
+        if (!heading) return;
+        pauseLatestOutputFollowForUser(true);
+        const top = heading.getBoundingClientRect().top - element.getBoundingClientRect().top;
+        if (top < 0) element.scrollTop = Math.max(0, element.scrollTop + top - 8);
+        heading.focus({ preventScroll: true });
+      };
+      element.addEventListener("aw-trace-collapse", handleTraceCollapse);
       element.addEventListener("wheel", handleWheel, { passive: true });
       element.addEventListener("pointerdown", handlePointerDown, {
         passive: true,
@@ -672,6 +682,7 @@ export function useRunStageScrollController({
       element.addEventListener("touchmove", handleTouchMove, { passive: true });
       runStageInputIntentCleanupRef.current = () => {
         element.removeEventListener("wheel", handleWheel);
+        element.removeEventListener("aw-trace-collapse", handleTraceCollapse);
         element.removeEventListener("pointerdown", handlePointerDown);
         element.removeEventListener("touchstart", handleTouchStart);
         element.removeEventListener("touchmove", handleTouchMove);

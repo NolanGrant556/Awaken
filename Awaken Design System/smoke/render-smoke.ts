@@ -165,12 +165,13 @@ const activeThoughtTraceHtml = renderToString(
 );
 
 if (
-  !activeThoughtTraceHtml.includes('aria-label="思考中..."') ||
-  !activeThoughtTraceHtml.includes("aw-thinking-orb-status") ||
-  !activeThoughtTraceHtml.includes('data-size="20"') ||
-  activeThoughtTraceHtml.includes('data-paused="true"')
+  !activeThoughtTraceHtml.includes("思考中") ||
+  !activeThoughtTraceHtml.includes("aw-trace-dots") ||
+  !activeThoughtTraceHtml.includes('aria-expanded="false"') ||
+  activeThoughtTraceHtml.includes("Inspecting the current implementation") ||
+  activeThoughtTraceHtml.includes("<canvas")
 ) {
-  throw new Error("Active AwakenThoughtTrace must use the compact animated Thinking line");
+  throw new Error("Active AwakenThoughtTrace must use a collapsed text-and-dots disclosure");
 }
 
 const completedThoughtTraceHtml = renderToString(
@@ -188,7 +189,7 @@ if (
   completedThoughtTraceHtml.includes("aw-thinking-orb-status") ||
   completedThoughtTraceHtml.includes("<canvas")
 ) {
-  throw new Error("Completed AwakenThoughtTrace must replace the orb with a disclosure chevron");
+  throw new Error("Completed AwakenThoughtTrace must show a static disclosure chevron");
 }
 
 const richMarkdownState = AwakenDesignSystem.AwakenAssistantMessageStates.find(

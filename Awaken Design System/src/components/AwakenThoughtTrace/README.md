@@ -4,9 +4,11 @@
 
 ## 用途
 
-`AwakenThoughtTrace` 用于在执行流中展示并折叠单段模型思考轨迹，支持进行中、完成和错误状态，也可以带持续时间标签。进行中以 `AwakenThinkingOrbStatus` 的 20px 行内规格作为 summary，显示思考球、`思考中` 文字和三点节奏动效，不使用胶囊表面；完成或错误后移除仅属于运行状态的粒子球，立即显示位于文字右侧的 12px Chevron 与静态历史标题，避免自动收尾时出现孤立 Chevron。标题触发区按内容宽度收紧并始终透明，默认使用统一浅色文字与 Chevron，悬停或键盘聚焦时只提亮前景色；正文从同一左边缘向下展开，不增加连接线或子级缩进，并只使用 `grid-template-rows` 裁切高度，不通过更快的透明度动画制造仍占布局的空白。父级负责编排顺序、传入文本、状态和当前主题，本组件不读取 runtime。
+`AwakenThoughtTrace` 展示一次思考的标题与正文。运行中使用“思考中”和轻量三点，不在执行过程使用思考球。标题为 13px/20px、最小行盒 28px；正文使用次要文字色并沿同一左边缘排列。
 
-Awaken Desktop 在 run 尚未产生首个可见输出时传入空文本和 `active`，因此只显示动态思考中状态行；收到 runtime 明确提供的 reasoning summary 后，文本在同一组件下方流式展开。`active` 自动展开，`done` 默认折叠成带 Chevron 的 `思考过程` 历史入口，用户点击后的选择优先于自动状态；最终回答出现后仍由 Desktop 的“执行过程”外层 disclosure 收起。折叠的历史正文不进入 DOM；打开时挂载完整文本，关闭时等待实际高度过渡完成后卸载，减少动态效果时直接进入折叠终态，数据仍由 props 完整保留。`animateEntry=false` 关闭正文的挂载入场动画，供历史 replay 首帧直接显示；它不停止 active 状态本身的思考球。`error`、自定义 `label`、`durationLabel` 和 `defaultOpen` 属于通用组件 API。
+无正文时只有不可展开的状态行。已有正文默认收起，`open/onOpenChange` 支持与工具一致的受控披露；用户展开后新正文原位增长，状态变化不覆盖选择。长正文在主滚动内展开，末尾收起按钮派发 `aw-trace-collapse`，由 Desktop 保持阅读位置和焦点。没有真实耗时就不传 `durationLabel`。
+
+展开收起高度为 180ms，透明度为 120ms。折叠内容按需挂载，关闭过渡结束后卸载；历史一次展示全部已有正文。减少动态效果时直接切换，终态停止三点动画。`theme` 保留 API 兼容，实际颜色来自所属主题容器，不再绑定 Canvas。
 
 ## 文件
 
@@ -20,5 +22,4 @@ Awaken Desktop 在 run 尚未产生首个可见输出时传入空文本和 `acti
 
 - 仅包含 UI：不产生 runtime、Electron、AG-UI、A2UI 或文件系统副作用。
 - 通过 props 输入，通过回调输出。
-- `theme` 由 consumer 显式传入时必须同时作用于状态文字和 Canvas；`auto` 才跟随系统主题。
 - 公共 API 变化时同步更新可观测状态。

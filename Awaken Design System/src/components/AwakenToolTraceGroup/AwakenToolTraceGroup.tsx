@@ -28,6 +28,11 @@ export type AwakenToolTraceGroupProps = {
     action: ToolTraceAction,
     lineProps: AwakenToolTraceLineProps,
   ) => ReactNode;
+  children?: ReactNode;
+  entryCount?: number;
+  currentActivity?: string;
+  attention?: string;
+  activityStatus?: "active" | "done";
 };
 
 export const AwakenToolTraceGroup = memo(function AwakenToolTraceGroup({
@@ -37,28 +42,37 @@ export const AwakenToolTraceGroup = memo(function AwakenToolTraceGroup({
   defaultOpen,
   open,
   onOpenChange,
-  icon,
   animateItems = true,
   onSelectAction,
   renderAction,
+  children,
+  entryCount,
+  currentActivity,
+  attention,
+  activityStatus,
 }: AwakenToolTraceGroupProps) {
   const bodyId = useId();
-  const active = actions.some((action) => action.status === "active");
-  const failed = actions.filter((action) => action.status !== "active" && action.status !== "done").length;
+  const active =
+    activityStatus === "active" ||
+    actions.some((action) => action.status === "active");
+  const failed = actions.filter(
+    (action) => action.status !== "active" && action.status !== "done",
+  ).length;
   const [manualExpanded, setManualExpanded] = useState<boolean | null>(
     defaultOpen ?? null,
   );
-  const expanded = open ?? manualExpanded ?? active;
+  const singleton = entryCount !== undefined && entryCount <= 1;
+  const expanded = singleton || (open ?? manualExpanded ?? false);
   const {
     present: linesPresent,
     prepareOpen,
     onTransitionEnd,
-  } = useAwakenDisclosurePresence(expanded, 340);
+  } = useAwakenDisclosurePresence(expanded, 180);
   const summary = label || `${actions.length} 个工具调用`;
   const detail = detailProp ?? (failed > 0 ? `${failed} 个异常` : undefined);
 
   function toggleOpen() {
-    const nextOpen = !(open ?? manualExpanded ?? active);
+    const nextOpen = !(open ?? manualExpanded ?? false);
     if (nextOpen) prepareOpen();
     if (open === undefined) setManualExpanded(nextOpen);
     onOpenChange?.(nextOpen);
@@ -71,22 +85,23 @@ export const AwakenToolTraceGroup = memo(function AwakenToolTraceGroup({
         expanded ? "open" : linesPresent ? "closing" : "closed"
       }
     >
-      <button
-        type="button"
-        className="tool-trace-group-heading"
-        aria-expanded={expanded}
-        aria-controls={bodyId}
-        onClick={toggleOpen}
-      >
-        <span className="tool-trace-group-icon" aria-hidden="true">
-          {icon ?? (active ? <AwakenIcon concept="step-running" size={14} /> : <AwakenIcon concept="tool" size={14} />)}
-        </span>
-        <span className="tool-trace-group-label">{summary}</span>
-        {detail ? <span className="tool-trace-group-detail">{detail}</span> : null}
-        <span className="tool-trace-group-chevron" aria-hidden="true">
-          <AwakenIcon concept="disclose" size={14} />
-        </span>
-      </button>
+      {!singleton ? (
+        <button
+          type="button"
+          className="tool-trace-group-heading"
+          aria-expanded={expanded}
+          aria-controls={bodyId}
+          onClick={toggleOpen}
+        >
+          <span className="tool-trace-group-label">{summary}</span>
+          {detail ? (
+            <span className="tool-trace-group-detail">{detail}</span>
+          ) : null}
+          <span className="tool-trace-group-chevron" aria-hidden="true">
+            <AwakenIcon concept="disclose" size={14} />
+          </span>
+        </button>
+      ) : null}
       <div
         id={bodyId}
         className="tool-trace-group-disclosure"
@@ -97,28 +112,42 @@ export const AwakenToolTraceGroup = memo(function AwakenToolTraceGroup({
       >
         {linesPresent ? (
           <div className="tool-trace-group-lines">
-            {actions.map((action) => {
-              const { id, ...actionProps } = action;
-              const lineProps: AwakenToolTraceLineProps = {
-                ...actionProps,
-                animateEntry: animateItems && action.animateEntry !== false,
-                onSelect: onSelectAction
-                  ? () => {
-                      onSelectAction(action);
-                    }
-                  : undefined,
-              };
-              return renderAction ? (
-                <Fragment key={id}>
-                  {renderAction(action, lineProps)}
-                </Fragment>
-              ) : (
-                <AwakenToolTraceLine key={id} {...lineProps} />
-              );
-            })}
+            {children ??
+              actions.map((action) => {
+                const { id, ...actionProps } = action;
+                const lineProps: AwakenToolTraceLineProps = {
+                  ...actionProps,
+                  animateEntry: animateItems && action.animateEntry !== false,
+                  onSelect: onSelectAction
+                    ? () => {
+                        onSelectAction(action);
+                      }
+                    : undefined,
+                };
+                return renderAction ? (
+                  <Fragment key={id}>
+                    {renderAction(action, lineProps)}
+                  </Fragment>
+                ) : (
+                  <AwakenToolTraceLine key={id} {...lineProps} />
+                );
+              })}
           </div>
         ) : null}
       </div>
+      {!expanded && currentActivity ? (
+        <div className="tool-trace-current" role="status">
+          <span>{currentActivity}</span>
+          <span className="aw-trace-dots" aria-hidden="true">
+            <i />
+            <i />
+            <i />
+          </span>
+        </div>
+      ) : null}
+      {!expanded && attention ? (
+        <div className="tool-trace-attention">{attention}</div>
+      ) : null}
     </article>
   );
 });

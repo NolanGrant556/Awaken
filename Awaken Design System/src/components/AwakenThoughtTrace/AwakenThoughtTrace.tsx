@@ -1,10 +1,7 @@
 import "./AwakenThoughtTrace.css";
 import { AwakenIcon } from "../AwakenIcon";
 import { memo, useId, useState } from "react";
-import {
-  AwakenThinkingOrbStatus,
-  type AwakenThinkingOrbTheme,
-} from "../AwakenThinkingOrb";
+import { type AwakenThinkingOrbTheme } from "../AwakenThinkingOrb";
 import { useAwakenDisclosurePresence } from "../../hooks/useAwakenDisclosurePresence";
 
 type ThoughtTraceStatus = "active" | "done" | "error";
@@ -17,6 +14,8 @@ export type AwakenThoughtTraceProps = {
   defaultOpen?: boolean;
   theme?: AwakenThinkingOrbTheme;
   animateEntry?: boolean;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 };
 
 export const AwakenThoughtTrace = memo(function AwakenThoughtTrace({
@@ -25,20 +24,20 @@ export const AwakenThoughtTrace = memo(function AwakenThoughtTrace({
   label,
   durationLabel,
   defaultOpen,
-  theme = "auto",
   animateEntry = true,
+  open,
+  onOpenChange,
 }: AwakenThoughtTraceProps) {
   const bodyId = useId();
   const [manualExpanded, setManualExpanded] = useState<boolean | null>(
     defaultOpen ?? null,
   );
-  const autoExpanded = status === "active";
-  const expanded = manualExpanded ?? autoExpanded;
+  const expanded = Boolean(text.trim()) && (open ?? manualExpanded ?? false);
   const {
     present: bodyPresent,
     prepareOpen,
     onTransitionEnd,
-  } = useAwakenDisclosurePresence(expanded, 400);
+  } = useAwakenDisclosurePresence(expanded, 180);
   const statusLabel =
     label ??
     (status === "active"
@@ -46,7 +45,31 @@ export const AwakenThoughtTrace = memo(function AwakenThoughtTrace({
       : status === "error"
         ? "思考已中断"
         : "思考过程");
-  const heading = durationLabel ? `${statusLabel} ${durationLabel}` : statusLabel;
+  const heading = durationLabel
+    ? `${statusLabel} ${durationLabel}`
+    : statusLabel;
+  function toggle() {
+    if (!expanded) prepareOpen();
+    if (open === undefined) setManualExpanded(!expanded);
+    onOpenChange?.(!expanded);
+  }
+  const headingContent = (
+    <>
+      <span className="thought-trace-disclosure-label">{heading}</span>
+      {status === "active" ? (
+        <span className="aw-trace-dots" aria-hidden="true">
+          <i />
+          <i />
+          <i />
+        </span>
+      ) : null}
+      {text.trim() ? (
+        <span className="thought-trace-disclosure-icon" aria-hidden="true">
+          <AwakenIcon concept="disclose" size={12} />
+        </span>
+      ) : null}
+    </>
+  );
 
   return (
     <section
@@ -59,36 +82,21 @@ export const AwakenThoughtTrace = memo(function AwakenThoughtTrace({
         expanded ? "open" : bodyPresent ? "closing" : "closed"
       }
     >
-      <button
-        type="button"
-        className="thought-trace-heading"
-        aria-expanded={expanded}
-        aria-controls={bodyId}
-        onClick={() => {
-          const nextExpanded = !(manualExpanded ?? autoExpanded);
-          if (nextExpanded) prepareOpen();
-          setManualExpanded(nextExpanded);
-        }}
-      >
-        {status === "active" ? (
-          <AwakenThinkingOrbStatus
-            className="thought-trace-status"
-            label={heading}
-            state="composing"
-            size={20}
-            speed={2.4}
-            showEllipsis
-            theme={theme}
-          />
-        ) : (
-          <span className="thought-trace-disclosure">
-            <span className="thought-trace-disclosure-label">{heading}</span>
-          </span>
-        )}
-        <span className="thought-trace-disclosure-icon" aria-hidden="true">
-          <AwakenIcon concept="disclose" size={12} />
-        </span>
-      </button>
+      {text.trim() ? (
+        <button
+          type="button"
+          className="thought-trace-heading"
+          aria-expanded={expanded}
+          aria-controls={bodyId}
+          onClick={toggle}
+        >
+          {headingContent}
+        </button>
+      ) : (
+        <div className="thought-trace-heading" role="status">
+          {headingContent}
+        </div>
+      )}
       <div
         id={bodyId}
         className="thought-trace-body"
@@ -100,6 +108,20 @@ export const AwakenThoughtTrace = memo(function AwakenThoughtTrace({
         {bodyPresent ? (
           <div className="thought-trace-body-inner">
             {text ? <p>{text}</p> : null}
+            {text.length > 600 ? (
+              <button
+                className="thought-trace-collapse"
+                type="button"
+                onClick={(event) => {
+                  event.currentTarget.dispatchEvent(
+                    new CustomEvent("aw-trace-collapse", { bubbles: true }),
+                  );
+                  toggle();
+                }}
+              >
+                收起思考正文
+              </button>
+            ) : null}
           </div>
         ) : null}
       </div>

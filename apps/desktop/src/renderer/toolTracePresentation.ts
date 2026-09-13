@@ -5,6 +5,7 @@ import {
 import { describeGlobPattern } from "./run-narrative/tool-display";
 import type { ToolDisplayState } from "../shared/toolStatus";
 import { diffLineStats } from "./workbenchPresentation";
+import { toolResultPatch } from "./tracePatch";
 
 export function rawToolId(selectionId: string): string {
   if (selectionId.startsWith("tool:")) {
@@ -161,6 +162,7 @@ export function compactToolFailureContext(value?: string): string | undefined {
   if (/not found|no such file|enoent/i.test(raw)) return "目标不存在";
   if (/cancelled|canceled/i.test(raw)) return "已取消";
   if (/interrupted/i.test(raw)) return "已中断";
+  if (/subagent_invalid_input/.test(raw)) return "子任务参数不完整或无效";
   const withoutQuotedPaths = redactShellText(raw).replace(
     /(["'])(?:\/|[A-Za-z]:\\)[^"'\n]+\1/g,
     "$1…$1",
@@ -194,7 +196,8 @@ export function naturalToolTitle(
       "label",
       "summary",
     ]);
-    if (description) return `运行 ${compactInlineLabel(description)}`;
+    if (description)
+      return `运行 ${compactInlineLabel(description.replace(/^运行\s*/, ""))}`;
     const command = firstStringArgument(args, ["command", "cmd", "script"]);
     if (command) return `运行 ${compactInlineLabel(redactShellText(command))}`;
     return "运行命令";
@@ -226,7 +229,8 @@ export function naturalToolTitle(
       return "搜索文件";
     }
     if (path) {
-      return `${/list|列出/i.test(title) ? "列出" : "读取"} ${compactPathLabel(path)}`;
+      const offset = typeof args?.offset === "number" ? args.offset : undefined;
+      return `${/list|列出/i.test(title) ? "列出" : "读取"} ${compactPathLabel(path)}${offset ? ` · 第 ${offset} 行起` : ""}`;
     }
     return /list|列出/i.test(title) ? "列出文件" : "读取文件";
   }
@@ -255,6 +259,7 @@ export function naturalToolTitle(
     if (target) return `${action} ${compactPathLabel(target)}`;
     return `${action}文件`;
   }
+  if (title === "subagent") return "子任务操作";
   return title.replace(/\s*\{\s*$/, "").trim() || "使用工具";
 }
 
@@ -311,8 +316,12 @@ export function toolTracePresentation(
       kind: requestedMcpIdentity ? ("mcp" as const) : ("tool" as const),
     };
   }
+  const patch = options.patch ?? toolResultPatch(tool);
   const commandOutput = tool.commandOutput?.trim();
-  const result = tool.content?.trim();
+  const result =
+    tool.content?.trim() === "Tool returned empty content"
+      ? undefined
+      : tool.content?.trim();
   const active = !tool.status || tool.status === "active";
   const failed = Boolean(
     tool.status && tool.status !== "active" && tool.status !== "done",
@@ -346,8 +355,7 @@ export function toolTracePresentation(
     ? firstStringArgument(args, ["command", "cmd", "script"])
     : undefined;
   const knownReadableTool = READ_TOOL_TITLE.test(sourceTitle);
-  const knownFileTool =
-    FILE_TOOL_TITLE.test(sourceTitle) || Boolean(options.patch);
+  const knownFileTool = FILE_TOOL_TITLE.test(sourceTitle) || Boolean(patch);
   const sanitizedArgs = mcpProvider
     ? args
       ? redactSensitiveValue(args)
@@ -382,17 +390,10 @@ export function toolTracePresentation(
       format: "json",
     });
   }
-  if (options.patch) {
-    if (options.patch.affectedPaths.length > 0) {
-      sections.push({
-        label: "文件",
-        content: options.patch.affectedPaths.join("\n"),
-        format: "text",
-      });
-    }
+  if (patch) {
     sections.push({
       label: "变更",
-      content: options.patch.patch,
+      content: patch.patch,
       format: "diff",
     });
   }
@@ -402,11 +403,17 @@ export function toolTracePresentation(
       content: redactShellText(commandOutput),
       format: "code",
     });
-  } else if (result) {
+  } else if (result && !patch) {
     sections.push({
-      label: mcpProvider ? "结果" : knownReadableTool ? "匹配摘要" : "结果",
+      label: mcpProvider
+        ? "结果"
+        : tool.title?.toLowerCase() === "read"
+          ? "读取记录"
+          : knownReadableTool
+            ? "匹配摘要"
+            : "结果",
       content: result,
-      format: "text",
+      format: knownFileTool && /^[\[{]/.test(result) ? "json" : "text",
     });
   }
   if (errorContent) {
@@ -417,6 +424,18 @@ export function toolTracePresentation(
       tone: failed ? "danger" : "muted",
     });
   }
+  if (shellTool && !active && !commandOutput && !result) {
+    sections.push({
+      label: "输出",
+      content: "命令已结束，无输出。",
+      format: "text",
+    });
+  }
+  // Readable results lead; parameters and diagnostics stay available on demand.
+  if (mcpProvider || patch)
+    sections.sort(
+      (a, b) => Number(a.format === "json") - Number(b.format === "json"),
+    );
   const detailCard = detailCardFromSections(
     kind === "terminal"
       ? "Shell 详情"
@@ -425,9 +444,8 @@ export function toolTracePresentation(
         : "工具详情",
     sections,
   );
-  const patchStats = options.patch
-    ? diffLineStats(options.patch.patch)
-    : undefined;
+  const patchStats =
+    patch && !patch.truncated ? diffLineStats(patch.patch) : undefined;
   const lineChangeDetail = patchStats
     ? `+${patchStats.added} −${patchStats.removed} 行`
     : undefined;
@@ -445,63 +463,139 @@ export function toolTracePresentation(
     output,
     outputLabel:
       kind === "terminal" ? "终端输出" : mcpProvider ? "MCP 输出" : "工具输出",
-    outputTruncated: tool.commandOutputTruncated,
+    outputTruncated: tool.commandOutputTruncated || patch?.truncated,
     detailCard,
     kind: kind as "tool" | "mcp" | "terminal",
   };
 }
 
 export type ActivitySummaryInput = {
+  id?: string;
   kind: "tool" | "skill" | "terminal" | "mcp";
   title: string;
   status: ToolDisplayState;
+  toolName?: string;
+  paths?: string[];
+  patch?: ToolTracePatchView;
   fileCount?: number;
 };
+
+export type TraceOperation = "read" | "search" | "edit" | "command" | "other";
+export function traceOperation(name?: string, kind?: string): TraceOperation {
+  if (kind === "mcp" || kind === "skill") return "other";
+  switch (name?.toLowerCase()) {
+    case "read":
+      return "read";
+    case "grep":
+    case "glob":
+    case "websearch":
+    case "webfetch":
+      return "search";
+    case "write":
+    case "edit":
+    case "apply_patch":
+    case "patch":
+      return "edit";
+    case "bash":
+    case "shell":
+    case "command":
+      return "command";
+    default:
+      return "other";
+  }
+}
+
+/** Lexical identity only. File opening still goes through Main project validation. */
+export function normalizeTracePath(path: string): string {
+  const value = path.replace(/\\/g, "/");
+  const absolute = value.startsWith("/");
+  const parts: string[] = [];
+  for (const part of value.split("/")) {
+    if (!part || part === ".") continue;
+    if (part === ".." && parts.length && parts.at(-1) !== "..") parts.pop();
+    else parts.push(part);
+  }
+  return `${absolute ? "/" : ""}${parts.join("/")}`;
+}
 
 export function activityBatchSummary(actions: ActivitySummaryInput[]): {
   label: string;
   detail?: string;
 } {
-  const active = actions.some((action) => action.status === "active");
-  const failed = actions.filter(
-    (action) => action.status !== "active" && action.status !== "done",
-  ).length;
-  const commandCount = actions.filter(
-    (action) => action.kind === "terminal",
-  ).length;
-  const skillActions = actions.filter((action) => action.kind === "skill");
-  const checkedCount = actions.filter((action) =>
-    READ_TOOL_TITLE.test(action.title),
-  ).length;
-  const editedFiles = actions.reduce(
-    (count, action) => count + (action.fileCount || 0),
-    0,
-  );
-  let label: string;
-  if (commandCount === actions.length) {
-    label = active
-      ? `正在运行 ${commandCount} 条命令`
-      : `运行了 ${commandCount} 条命令`;
-  } else if (checkedCount === actions.length) {
-    label = active
-      ? `正在检查 ${checkedCount} 项`
-      : `检查了 ${checkedCount} 项`;
-  } else if (
-    editedFiles > 0 &&
-    actions.every((action) => FILE_TOOL_TITLE.test(action.title))
-  ) {
-    label = active
-      ? `正在编辑 ${editedFiles} 个文件`
-      : `编辑了 ${editedFiles} 个文件`;
-  } else if (skillActions.length > 0) {
-    const skillName = skillActions[0].title.replace(/^使用\s*/i, "");
-    const toolCount = actions.length - skillActions.length;
-    const toolSuffix = toolCount > 0 ? ` · ${toolCount} 个工具` : "";
-    label = `${active ? "正在使用" : "使用了"} ${skillName}${toolSuffix}`;
-  } else {
-    label = active
-      ? `正在运行 ${actions.length} 个工具`
-      : `使用了 ${actions.length} 个工具`;
+  const unique = [
+    ...new Map(
+      actions.map((action, index) => [action.id ?? `legacy:${index}`, action]),
+    ).values(),
+  ];
+  const completed = unique.filter((action) => action.status === "done");
+  const counts = { read: 0, search: 0, edit: 0, command: 0, other: 0 };
+  const readPaths = new Set<string>();
+  const editPaths = new Set<string>();
+  const namedOther = new Map<string, { label: string; count: number }>();
+  let added = 0,
+    removed = 0,
+    completeDiff = true;
+  for (const action of completed) {
+    const operation = traceOperation(action.toolName, action.kind);
+    if (operation === "read" || operation === "edit") {
+      const paths = action.paths?.filter(Boolean) ?? [];
+      if (paths.length)
+        paths.forEach((path) =>
+          (operation === "read" ? readPaths : editPaths).add(
+            normalizeTracePath(path),
+          ),
+        );
+      else counts[operation]++;
+      if (operation === "edit") {
+        if (!action.patch || action.patch.truncated) completeDiff = false;
+        else {
+          const stats = diffLineStats(action.patch.patch);
+          added += stats.added;
+          removed += stats.removed;
+        }
+      }
+    } else if (
+      operation === "other" &&
+      (action.toolName || action.kind === "skill")
+    ) {
+      const key = action.toolName || action.title;
+      const previous = namedOther.get(key);
+      namedOther.set(key, {
+        label: action.title,
+        count: (previous?.count ?? 0) + 1,
+      });
+    } else counts[operation]++;
   }
-  return { label, detail: failed > 0 ? `${failed} 个异常` : undefined };
+  const parts = [
+    readPaths.size ? `读取 ${readPaths.size} 个文件` : "",
+    counts.read ? `读取 ${counts.read} 次` : "",
+    counts.search ? `搜索 ${counts.search} 次` : "",
+    editPaths.size ? `修改 ${editPaths.size} 个文件` : "",
+    counts.edit ? `修改 ${counts.edit} 次` : "",
+    counts.command ? `运行 ${counts.command} 条命令` : "",
+    ...[...namedOther.values()]
+      .slice(0, 3)
+      .map(({ label, count }) => `${label} ${count} 次`),
+    namedOther.size > 3
+      ? `其他 ${[...namedOther.values()].slice(3).reduce((sum, item) => sum + item.count, 0)} 次活动`
+      : "",
+    counts.other ? `使用 ${counts.other} 次工具或技能` : "",
+  ].filter(Boolean);
+  const failed = unique.filter(
+    (action) => action.status !== "done" && action.status !== "active",
+  ).length;
+  const detail = [
+    completeDiff && (added || removed) ? `累计 +${added} −${removed}` : "",
+    failed ? `${failed} 项异常` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return {
+    label:
+      parts.join(" · ") ||
+      (unique.some((action) => action.status === "active")
+        ? "执行过程"
+        : "活动记录"),
+    detail: detail || undefined,
+  };
 }

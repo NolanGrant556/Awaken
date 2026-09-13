@@ -4188,6 +4188,16 @@ describe("runtime reducer supervisor state", () => {
     expect(state.supervisorStatus).toBe("crashed");
   });
 
+  it("preserves external-attached so the workbench can treat an inherited Core as ready", () => {
+    const state = dispatch([
+      {
+        type: "supervisor/status-changed",
+        info: { status: "external-attached" },
+      },
+    ]);
+    expect(state.supervisorStatus).toBe("external-attached");
+  });
+
   it("supervisor state is preserved across run/reset", () => {
     const state = dispatch([
       {

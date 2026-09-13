@@ -2204,11 +2204,23 @@ export type RunStreamHandlers = {
   onClose?: () => void;
 };
 
-export type SupervisorStatus = "stopped" | "starting" | "running" | "crashed" | "stopping";
+export type SupervisorStatus =
+  | "stopped"
+  | "starting"
+  | "running"
+  | "external-attached"
+  | "crashed"
+  | "stopping";
 
 export type SupervisorStatusInfo = {
   status: SupervisorStatus;
 };
+
+export function isDesktopRuntimeAvailable(
+  status: SupervisorStatus | null | undefined,
+): boolean {
+  return status === "running" || status === "external-attached";
+}
 
 export type ComputerHostStatus = {
   available: boolean;

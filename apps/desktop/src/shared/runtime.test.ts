@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   calculateAutoCompactThreshold,
   effectiveContextWindow,
+  isDesktopRuntimeAvailable,
   normalizeModelProfileBalance,
   normalizeModelProfileRunConfig,
   normalizeModelProfileSummary,
@@ -825,5 +826,21 @@ describe("runtime thread archive normalization", () => {
       archivedAt: undefined,
       source: undefined,
     });
+  });
+});
+
+describe("isDesktopRuntimeAvailable", () => {
+  it("treats owned and attached Core as available", () => {
+    expect(isDesktopRuntimeAvailable("running")).toBe(true);
+    expect(isDesktopRuntimeAvailable("external-attached")).toBe(true);
+  });
+
+  it("treats startup, crash and missing status as unavailable", () => {
+    expect(isDesktopRuntimeAvailable("starting")).toBe(false);
+    expect(isDesktopRuntimeAvailable("stopped")).toBe(false);
+    expect(isDesktopRuntimeAvailable("stopping")).toBe(false);
+    expect(isDesktopRuntimeAvailable("crashed")).toBe(false);
+    expect(isDesktopRuntimeAvailable(null)).toBe(false);
+    expect(isDesktopRuntimeAvailable(undefined)).toBe(false);
   });
 });

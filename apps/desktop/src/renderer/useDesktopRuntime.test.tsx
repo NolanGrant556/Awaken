@@ -38,6 +38,25 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); vi.useRealTimers(); });
 
 describe("runtime metadata refresh", () => {
+  it("treats an attached Core as ready and refreshes runtime info", async () => {
+    await render("external-attached");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(result.desktopReady).toBe(true);
+    expect(result.desktopStarting).toBe(false);
+    expect(client.getRuntimeInfo).toHaveBeenCalled();
+    expect(client.listModelProfiles).toHaveBeenCalled();
+    expect(client.listModelProviders).toHaveBeenCalled();
+  });
+
+  it("keeps starting until Core is running or attached", async () => {
+    await render("starting");
+    expect(result.desktopReady).toBe(false);
+    expect(result.desktopStarting).toBe(true);
+    expect(client.getRuntimeInfo).not.toHaveBeenCalled();
+  });
+
   it("preserves the last model list on failure and distinguishes a successful empty list", async () => {
     await render();
     vi.mocked(client.listModelProfiles).mockRejectedValueOnce(new Error("offline"));

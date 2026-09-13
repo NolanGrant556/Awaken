@@ -31,6 +31,7 @@ import {
   StoredToolTraceLine,
   StoredThoughtTrace,
 } from "./StoredExecutionDisclosures";
+import { RunElapsedTime, resolvedRunElapsedMs } from "./RunElapsedTime";
 import { subagentElapsedMs } from "./subagentPresentation";
 import { toolResultPatch } from "./tracePatch";
 import {
@@ -947,7 +948,7 @@ export function useNarrativeRenderer(options: Options) {
   function renderTurnBodySegment(
     turnId: string,
     segment: NarrativeTurnBodySegment,
-    _timing: {
+    timing: {
       startedAtMs?: number;
       completedAtMs?: number;
       running: boolean;
@@ -968,6 +969,12 @@ export function useNarrativeRenderer(options: Options) {
         `${activityScope}:items`,
       );
     }
+
+    const hasElapsedTime = resolvedRunElapsedMs({
+      ...timing,
+      elapsedMs: segment.elapsedMs,
+      nowMs: Date.now(),
+    }) !== undefined;
 
     const summary = activityBatchSummary(
       summaryInputsForActions(
@@ -1002,7 +1009,14 @@ export function useNarrativeRenderer(options: Options) {
         store={workbenchDisclosureStore}
         title={
           <span className="execution-process-disclosure-title">
-            {summary.label}
+            {hasElapsedTime ? (
+              <RunElapsedTime
+                elapsedMs={segment.elapsedMs}
+                startedAtMs={timing.startedAtMs}
+                completedAtMs={timing.completedAtMs}
+                running={timing.running}
+              />
+            ) : segment.title}
           </span>
         }
         meta={processMeta}

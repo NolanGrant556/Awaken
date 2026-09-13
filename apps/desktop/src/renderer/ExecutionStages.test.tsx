@@ -272,12 +272,47 @@ describe("Cursor-style execution stages", () => {
       ".aw-disclosure-trigger",
     );
     expect(process).not.toBeNull();
-    expect(process?.textContent).not.toContain("执行时间");
-    expect(process?.textContent).toContain("使用 1 次工具或技能");
+    expect(process?.textContent).toBe("执行过程");
+    expect(process?.textContent).not.toContain("使用 1 次工具或技能");
     await act(async () => process!.click());
     expect(container.textContent).toContain("进一步分析");
     expect(container.textContent).toContain("思考 片刻");
     expect(container.querySelector(".aw-trace-dots")).toBeNull();
+  });
+
+  it.each([
+    { label: "durable elapsed", elapsedMs: 29_000, timing: { running: false }, expected: "执行时间 29 秒" },
+    { label: "zero elapsed", elapsedMs: 0, timing: { running: false }, expected: "执行时间 0 秒" },
+    { label: "current terminal timestamps", elapsedMs: undefined, timing: { running: false, startedAtMs: 1_000, completedAtMs: 18_000 }, expected: "执行时间 17 秒" },
+    { label: "durable elapsed takes priority", elapsedMs: 29_000, timing: { running: false, startedAtMs: 1_000, completedAtMs: 18_000 }, expected: "执行时间 29 秒" },
+    { label: "old history without timing", elapsedMs: undefined, timing: { running: false }, expected: "执行过程" },
+    { label: "incomplete historical timing", elapsedMs: undefined, timing: { running: false, startedAtMs: 1_000 }, expected: "执行过程" },
+    { label: "invalid historical timing", elapsedMs: Number.NaN, timing: { running: false }, expected: "执行过程" },
+  ])("uses elapsed time for the outer process title: $label", async ({ elapsedMs, timing, expected }) => {
+    const store = createWorkbenchDisclosureStore();
+    const state = createInitialRuntimeState();
+    function Feed() {
+      const renderer = useNarrativeRenderer({ runtimeState: state, appearanceTheme: "light", platform: "macos",
+        replayedNarrativeItemIds: new Set(), media: {} as never, subagentNowMs: 0,
+        handleOpenSubagent: () => {}, openMediaPreview: () => {}, handleOpenDeliverablePreview: () => {},
+        setNotice: () => {}, workbenchDisclosureStore: store });
+      return <>{renderer.renderTurnBodySegment("turn", { kind: "executionProcess", id: "execution:turn",
+        title: "执行过程", elapsedMs, open: false, items: [
+          { kind: "tool", id: "tool:r:one", toolCallId: "one", title: "Bash", detail: "保留工具详情", status: "done" },
+        ] }, timing, "thread:fixture:turn:turn:body:execution:turn")}</>;
+    }
+    await act(async () => root.render(<Feed />));
+    const heading = container.querySelector<HTMLButtonElement>(".aw-disclosure-trigger")!;
+    expect(heading.textContent).toBe(expected);
+    expect(container.querySelectorAll('[role="timer"]')).toHaveLength(expected === "执行过程" ? 0 : 1);
+    expect(heading.getAttribute("aria-expanded")).toBe("false");
+    await act(async () => heading.click());
+    expect(heading.textContent).toBe(expected);
+    expect(container.querySelector(".execution-activity-list")).not.toBeNull();
+    await act(async () => root.render(null));
+    await act(async () => root.render(<Feed />));
+    expect(container.querySelector(".aw-disclosure-trigger")?.textContent).toBe(expected);
+    expect(container.querySelector(".aw-disclosure-trigger")?.getAttribute("aria-expanded")).toBe("true");
   });
 
   it("preserves explicit thinking expansion across remount and omits empty disclosures", async () => {

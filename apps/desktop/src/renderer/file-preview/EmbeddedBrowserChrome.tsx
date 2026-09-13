@@ -35,6 +35,7 @@ export type EmbeddedHtmlNavigation = {
 type Props = {
   client: EmbeddedBrowserClient;
   viewRef: EmbeddedBrowserTabRef;
+  enabled?: boolean;
   active: boolean;
   htmlOccupied?: boolean;
   onLeaveHtmlPreview?: () => void;
@@ -49,6 +50,7 @@ function chromeCoveredByModal(): boolean {
 export default function EmbeddedBrowserChrome({
   client,
   viewRef,
+  enabled = true,
   active,
   htmlOccupied = false,
   onLeaveHtmlPreview,
@@ -81,7 +83,7 @@ export default function EmbeddedBrowserChrome({
   }, [htmlNavigation, state.hasPage]);
 
   useEffect(() => {
-    if (!active) {
+    if (!enabled || !active) {
       void client.setActive(null);
       return;
     }
@@ -89,9 +91,9 @@ export default function EmbeddedBrowserChrome({
     return () => {
       void client.setActive(null);
     };
-  }, [active, client, viewRef.threadId, viewRef.viewId]);
+  }, [active, client, enabled, viewRef.threadId, viewRef.viewId]);
 
-  const showPage = active && state.hasPage && !htmlOccupied;
+  const showPage = enabled && active && state.hasPage && !htmlOccupied;
   useEffect(() => {
     if (!showPage) {
       void client.setViewport(viewRef, null);
@@ -119,7 +121,8 @@ export default function EmbeddedBrowserChrome({
     };
   }, [client, showPage, viewRef.threadId, viewRef.viewId]);
 
-  const showingHtml = htmlOccupied || (Boolean(htmlNavigation) && !state.hasPage);
+  const showingHtml =
+    enabled && (htmlOccupied || (Boolean(htmlNavigation) && !state.hasPage));
   const toolbarCanGoBack = showingHtml
     ? Boolean(htmlNavigation?.canGoBack)
     : state.canGoBack;
@@ -149,86 +152,100 @@ export default function EmbeddedBrowserChrome({
     void client.navigate(viewRef, parsed.url);
   };
 
+  const emptyState = (
+    <div className="project-files-preview-empty is-centered">
+      <AwakenIcon concept="browser" size={24} />
+      <strong>浏览器</strong>
+      <span>输入网址，或从文件树打开 HTML 文件</span>
+    </div>
+  );
+
   return (
-    <div className="embedded-browser">
-      <form className="embedded-browser__toolbar" onSubmit={submitAddress}>
-        <button
-          type="button"
-          aria-label="后退"
-          title="后退"
-          disabled={!toolbarCanGoBack}
-          onClick={() =>
-            showingHtml ? htmlNavigation?.goBack() : void client.back(viewRef)
-          }
-        >
-          <AwakenIcon concept="navigate-back" size={16} />
-        </button>
-        <button
-          type="button"
-          aria-label="前进"
-          title="前进"
-          disabled={!toolbarCanGoForward}
-          onClick={() =>
-            showingHtml
-              ? htmlNavigation?.goForward()
-              : void client.forward(viewRef)
-          }
-        >
-          <AwakenIcon concept="forward" size={16} />
-        </button>
-        <button
-          type="button"
-          aria-label={toolbarLoading ? "停止加载" : "刷新页面"}
-          title={toolbarLoading ? "停止加载" : "刷新页面"}
-          onClick={() => {
-            if (showingHtml) {
-              htmlNavigation?.reload();
-              return;
+    <div
+      className={enabled ? "embedded-browser" : "file-preview-host-shell"}
+    >
+      {enabled ? (
+        <form className="embedded-browser__toolbar" onSubmit={submitAddress}>
+          <button
+            type="button"
+            aria-label="后退"
+            title="后退"
+            disabled={!toolbarCanGoBack}
+            onClick={() =>
+              showingHtml ? htmlNavigation?.goBack() : void client.back(viewRef)
             }
-            void (state.loading ? client.stop(viewRef) : client.reload(viewRef));
-          }}
-        >
-          <AwakenIcon concept={toolbarLoading ? "close" : "refresh"} size={16} />
-        </button>
-        <input
-          className="embedded-browser__address"
-          aria-label="当前地址"
-          placeholder="输入网址，或从文件树打开 HTML"
-          value={address}
-          onChange={(event) => {
-            editingRef.current = true;
-            setAddressError(undefined);
-            setAddress(event.target.value);
-          }}
-          onFocus={() => {
-            editingRef.current = true;
-          }}
-          onBlur={() => {
-            editingRef.current = false;
-            if (!address.trim()) {
-              setAddress(showingHtml ? (htmlNavigation?.address ?? "") : state.url);
+          >
+            <AwakenIcon concept="navigate-back" size={16} />
+          </button>
+          <button
+            type="button"
+            aria-label="前进"
+            title="前进"
+            disabled={!toolbarCanGoForward}
+            onClick={() =>
+              showingHtml
+                ? htmlNavigation?.goForward()
+                : void client.forward(viewRef)
             }
-          }}
-        />
-      </form>
-      {addressError ? (
+          >
+            <AwakenIcon concept="forward" size={16} />
+          </button>
+          <button
+            type="button"
+            aria-label={toolbarLoading ? "停止加载" : "刷新页面"}
+            title={toolbarLoading ? "停止加载" : "刷新页面"}
+            onClick={() => {
+              if (showingHtml) {
+                htmlNavigation?.reload();
+                return;
+              }
+              void (state.loading ? client.stop(viewRef) : client.reload(viewRef));
+            }}
+          >
+            <AwakenIcon concept={toolbarLoading ? "close" : "refresh"} size={16} />
+          </button>
+          <input
+            className="embedded-browser__address"
+            aria-label="当前地址"
+            placeholder="输入网址，或从文件树打开 HTML"
+            value={address}
+            onChange={(event) => {
+              editingRef.current = true;
+              setAddressError(undefined);
+              setAddress(event.target.value);
+            }}
+            onFocus={() => {
+              editingRef.current = true;
+            }}
+            onBlur={() => {
+              editingRef.current = false;
+              if (!address.trim()) {
+                setAddress(showingHtml ? (htmlNavigation?.address ?? "") : state.url);
+              }
+            }}
+          />
+        </form>
+      ) : null}
+      {enabled && addressError ? (
         <p className="embedded-browser__error" role="alert">
           {addressError}
         </p>
       ) : null}
       {showPage ? (
-        <div ref={stripRef} className="embedded-browser__page" />
-      ) : (
-        <div className="embedded-browser__page">
-          {children ?? (
-            <div className="project-files-preview-empty is-centered">
-              <AwakenIcon concept="browser" size={24} />
-              <strong>浏览器</strong>
-              <span>输入网址，或从文件树打开 HTML 文件</span>
-            </div>
-          )}
-        </div>
-      )}
+        <div
+          key="native-page"
+          ref={stripRef}
+          className="embedded-browser__page"
+        />
+      ) : null}
+      <div
+        key="preview-body"
+        className={enabled && !showPage ? "embedded-browser__page" : undefined}
+        hidden={showPage || undefined}
+        aria-hidden={showPage || undefined}
+      >
+        {children ?? (enabled ? emptyState : null)}
+      </div>
     </div>
   );
 }

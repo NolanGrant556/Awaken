@@ -158,16 +158,13 @@ export default function WebviewPreview({
     />
   );
 
-  if (embedded) {
-    return <div className="project-file-webview-preview is-embedded">{guest}</div>;
-  }
-
   return (
     <PreviewFrame
       {...frameProps}
+      hideChrome={embedded}
       formatLabel={preview.kind === "html" ? "HTML" : "Office"}
       formatActions={
-        preview.kind === "html" ? (
+        embedded || preview.kind !== "html" ? undefined : (
           <>
             <button
               type="button"
@@ -202,10 +199,16 @@ export default function WebviewPreview({
               {address}
             </output>
           </>
-        ) : undefined
+        )
       }
     >
-      {guest}
+      <div
+        className={`project-file-webview-preview${
+          embedded ? " is-embedded" : ""
+        }`}
+      >
+        {guest}
+      </div>
     </PreviewFrame>
   );
 }

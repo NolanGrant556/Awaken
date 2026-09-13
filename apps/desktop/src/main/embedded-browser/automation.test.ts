@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { EMPTY_EMBEDDED_BROWSER_STATE } from "../../shared/embedded-browser";
-import { runBrowserAutomation } from "./automation";
+import { EMPTY_EMBEDDED_BROWSER_STATE } from "../../shared/embedded-browser.js";
+import { runBrowserAutomation, type BrowserAutomationHost } from "./automation.js";
 
 function fakeController(overrides: Record<string, unknown> = {}) {
   return {
@@ -22,8 +22,8 @@ function fakeController(overrides: Record<string, unknown> = {}) {
       secure: url.startsWith("https:"),
     })),
     executeJavaScript: vi.fn(async (code: string) => {
-      if (code.includes("querySelector")) return true;
-      if (code.includes("innerText")) {
+      if (code.includes("querySelector('[data-awaken-ref")) return true;
+      if (code.includes("document.body")) {
         return { url: "https://example.com/", title: "Example", text: "hello world" };
       }
       return {
@@ -33,7 +33,11 @@ function fakeController(overrides: Record<string, unknown> = {}) {
       };
     }),
     ...overrides,
-  } as never;
+  };
+}
+
+function asHost(manager: object): BrowserAutomationHost {
+  return manager as BrowserAutomationHost;
 }
 
 describe("runBrowserAutomation", () => {
@@ -42,12 +46,12 @@ describe("runBrowserAutomation", () => {
       ensureVisibleForAgent: vi.fn(),
       viewForAction: vi.fn(),
     };
-    expect(await runBrowserAutomation(manager, { action: "snapshot", threadId: "" })).toEqual({
+    expect(await runBrowserAutomation(asHost(manager), { action: "snapshot", threadId: "" })).toEqual({
       ok: false,
       error: "thread_id_required",
     });
     expect(
-      await runBrowserAutomation(manager, {
+      await runBrowserAutomation(asHost(manager), {
         action: "navigate",
         threadId: "t",
         url: "file:///tmp/index.html",
@@ -61,7 +65,7 @@ describe("runBrowserAutomation", () => {
       ensureVisibleForAgent: vi.fn(async () => controller),
       viewForAction: vi.fn(() => controller),
     };
-    const navigated = await runBrowserAutomation(manager, {
+    const navigated = await runBrowserAutomation(asHost(manager), {
       action: "navigate",
       threadId: "thread",
       url: "example.com",
@@ -69,7 +73,7 @@ describe("runBrowserAutomation", () => {
     expect(navigated.ok).toBe(true);
     expect(controller.navigate).toHaveBeenCalledWith("https://example.com/");
 
-    const snapshot = await runBrowserAutomation(manager, {
+    const snapshot = await runBrowserAutomation(asHost(manager), {
       action: "snapshot",
       threadId: "thread",
     });
@@ -82,7 +86,7 @@ describe("runBrowserAutomation", () => {
       viewForAction: vi.fn(() => null),
     };
     expect(
-      await runBrowserAutomation(manager, {
+      await runBrowserAutomation(asHost(manager), {
         action: "click",
         threadId: "thread",
         ref: "[1]",
@@ -97,7 +101,7 @@ describe("runBrowserAutomation", () => {
       viewForAction: vi.fn(() => controller),
     };
     expect(
-      await runBrowserAutomation(manager, {
+      await runBrowserAutomation(asHost(manager), {
         action: "click",
         threadId: "thread",
         ref: "1",

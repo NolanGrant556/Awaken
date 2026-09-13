@@ -8,8 +8,8 @@ import {
   type EmbeddedBrowserViewRect,
   originOf,
   parseNavigable,
-} from "../../shared/embedded-browser";
-import { EmbeddedBrowserViewController } from "./controller";
+} from "../../shared/embedded-browser.js";
+import { EmbeddedBrowserViewController } from "./controller.js";
 
 const VIEWPORT_RESTORE_WAIT_MS = 4000;
 

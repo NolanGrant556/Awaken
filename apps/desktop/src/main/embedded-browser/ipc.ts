@@ -3,8 +3,8 @@ import {
   EMBEDDED_BROWSER_CHANNELS,
   type EmbeddedBrowserTabRef,
   type EmbeddedBrowserViewRect,
-} from "../../shared/embedded-browser";
-import { EmbeddedBrowserViewManager } from "./manager";
+} from "../../shared/embedded-browser.js";
+import { EmbeddedBrowserViewManager } from "./manager.js";
 
 export function registerEmbeddedBrowserIpc(options: {
   getWindow: () => BrowserWindow | null;

@@ -2,8 +2,8 @@ import {
   type EmbeddedBrowserActionKind,
   originOf,
   parseNavigable,
-} from "../../shared/embedded-browser";
-import type { EmbeddedBrowserViewController } from "./controller";
+} from "../../shared/embedded-browser.js";
+import type { EmbeddedBrowserViewController } from "./controller.js";
 
 export type BrowserHostAction =
   | "navigate"

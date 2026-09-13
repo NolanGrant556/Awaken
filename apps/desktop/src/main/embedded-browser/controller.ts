@@ -8,8 +8,8 @@ import {
   parseNavigable,
   safeExternalUrl,
   viewportBounds,
-} from "../../shared/embedded-browser";
-import { browserViewWebPreferences } from "./options";
+} from "../../shared/embedded-browser.js";
+import { browserViewWebPreferences } from "./options.js";
 
 const backstopInstalledFor = new WeakSet<Session>();
 const VIEWPORT_RESTORE_POLL_MS = 16;

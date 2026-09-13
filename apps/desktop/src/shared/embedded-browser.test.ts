@@ -8,7 +8,7 @@ import {
   parseNavigable,
   safeExternalUrl,
   viewportBounds,
-} from "./embedded-browser";
+} from "./embedded-browser.js";
 
 describe("normalizeBrowserAddressInput", () => {
   it("treats a bare host as https", () => {

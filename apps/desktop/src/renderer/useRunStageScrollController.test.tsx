@@ -58,21 +58,25 @@ const followUpAnswerNarrativeItems: RunNarrativeItem[] = [
 type ControllerHarnessHandle = {
   submitFollowUp: () => void;
   appendFollowUpAnswer: () => void;
+  setSuspended: (value: boolean) => void;
 };
 
 const ControllerHarness = forwardRef<ControllerHarnessHandle>(
   function ControllerHarness(_props, ref) {
+    const [suspended, setSuspended] = useState(false);
     const [narrativeItems, setNarrativeItems] = useState<RunNarrativeItem[]>(
       () => [...initialNarrativeItems],
     );
     const controller = useRunStageScrollController({
       showCenterComposer: false,
       narrativeItems,
+      narrativeSuspended: suspended,
     });
 
     useImperativeHandle(
       ref,
       () => ({
+        setSuspended,
         submitFollowUp: () => {
           controller.prepareForRunStart();
           setNarrativeItems([...followUpNarrativeItems]);
@@ -91,7 +95,7 @@ const ControllerHarness = forwardRef<ControllerHarnessHandle>(
         ref={controller.setRunStageScrollElement}
         onScroll={controller.handleRunStageScroll}
       >
-        {controller.narrativeSections.turns.map((turn) => (
+        {!suspended && controller.narrativeSections.turns.map((turn) => (
           <section key={turn.id} data-execution-turn-id={turn.id}>
             <div className="execution-turn-header">{turn.prompt.text}</div>
             <div className="execution-turn-body">
@@ -369,6 +373,7 @@ describe("useRunStageScrollController prompt anchor timing", () => {
       scrollHeight: number,
     ): void {
       Object.defineProperties(element, {
+        clientWidth: { configurable: true, value: 760 },
         clientHeight: { configurable: true, value: RUN_STAGE_HEIGHT },
         scrollHeight: { configurable: true, value: scrollHeight },
       });
@@ -395,7 +400,7 @@ describe("useRunStageScrollController prompt anchor timing", () => {
       record?.callback([], {} as ResizeObserver);
     }
 
-    function renderFollowingController(): { runStage: HTMLElement } {
+    function renderFollowingController(): { runStage: HTMLElement; setSuspended: (value: boolean) => void } {
       const harnessRef = createRef<ControllerHarnessHandle>();
       root = createRoot(host);
       act(() => {
@@ -416,8 +421,43 @@ describe("useRunStageScrollController prompt anchor timing", () => {
       act(() => {
         flushAnimationFrames();
       });
-      return { runStage: runStage! };
+      return { runStage: runStage!, setSuspended: value => harnessRef.current?.setSuspended(value) };
     }
+
+    it("preserves the visible turn when opening an inspector reflows earlier answers", () => {
+      const { runStage } = renderFollowingController();
+      act(() => runStage.dispatchEvent(new Event('pointerdown')));
+      runStage.scrollTop = 950;
+      act(() => runStage.dispatchEvent(new Event('scroll')));
+      const before = runStage.querySelector(`[data-execution-turn-id="${FOLLOW_UP_PROMPT_ID}"]`)!.getBoundingClientRect().top;
+      defineRunStageScrollGeometry(runStage, 2400);
+      Object.defineProperty(runStage, 'clientWidth', { configurable:true, value:400 });
+      followUpPromptOffset = 1300;
+      act(() => triggerTurnResizeObserver(runStage, FOLLOW_UP_PROMPT_ID));
+      expect(runStage.scrollTop).toBe(1350);
+      expect(runStage.querySelector(`[data-execution-turn-id="${FOLLOW_UP_PROMPT_ID}"]`)!.getBoundingClientRect().top).toBe(before);
+      act(() => flushAnimationFrames());
+      Object.defineProperty(runStage, 'scrollHeight', { configurable:true, value:2700 });
+      act(() => triggerTurnResizeObserver(runStage, FOLLOW_UP_PROMPT_ID));
+      expect(runStage.scrollTop).toBe(1350);
+    });
+
+    it("restores reading after the expanded file surface temporarily unmounts the narrative", () => {
+      const { runStage, setSuspended } = renderFollowingController();
+      act(() => runStage.dispatchEvent(new Event('pointerdown')));
+      runStage.scrollTop = 950;
+      act(() => runStage.dispatchEvent(new Event('scroll')));
+      act(() => setSuspended(true));
+      expect(runStage.querySelector('[data-execution-turn-id]')).toBeNull();
+      runStage.scrollTop = 0;
+      act(() => runStage.dispatchEvent(new Event('scroll')));
+      act(() => setSuspended(false));
+      expect(runStage.scrollTop).toBe(950);
+      act(() => flushAnimationFrames());
+      defineRunStageScrollGeometry(runStage, 2500);
+      act(() => triggerTurnResizeObserver(runStage, FOLLOW_UP_PROMPT_ID));
+      expect(runStage.scrollTop).toBe(950);
+    });
 
     it("keeps the thought heading in view and focus when collapsing long content, without resuming follow", () => {
       const { runStage } = renderFollowingController();

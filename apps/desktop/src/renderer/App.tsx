@@ -1114,6 +1114,7 @@ export function App() {
   const scrollController = useRunStageScrollController({
     showCenterComposer,
     narrativeItems: visibleNarrativeItems,
+    narrativeSuspended: fileWorkspaceSurfaceActive,
   });
   const {
     activeWorkbenchTurnId,

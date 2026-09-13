@@ -77,7 +77,8 @@ export type LatestOutputResumeIntent =
   | "return_button";
 
 export type ProgrammaticRunStageScrollReason =
-  "none" | "anchor_prompt" | "follow_latest" | "marker_jump" | "thread_restore";
+  | "restore_reading"
+  | "none" | "anchor_prompt" | "follow_latest" | "marker_jump" | "thread_restore";
 
 const TURN_MARKER_MIN_TURN_COUNT = 3;
 const TURN_MARKER_REGULAR_LIMIT = 12;

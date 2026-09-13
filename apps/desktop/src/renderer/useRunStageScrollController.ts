@@ -9,6 +9,7 @@ import {
 } from "react";
 import type { UIEvent as ReactUIEvent } from "react";
 import type { RunNarrativeItem } from "./run-narrative";
+import { captureRunStageReadingPosition, restoredRunStageScrollTop, type RunStageReadingPosition } from "./runStageReadingPosition";
 import {
   activeTurnIdForAnchor,
   anchoredTurnMinHeight,
@@ -43,6 +44,7 @@ const RUN_STAGE_NESTED_SCROLL_SELECTOR = "[data-aw-run-stage-scroll-boundary]";
 type RunStageScrollControllerOptions = {
   showCenterComposer: boolean;
   narrativeItems: RunNarrativeItem[];
+  narrativeSuspended?: boolean;
 };
 
 type ScrollInteractionState = {
@@ -293,6 +295,7 @@ function isNestedRunStageScrollTarget(
 export function useRunStageScrollController({
   showCenterComposer,
   narrativeItems,
+  narrativeSuspended = false,
 }: RunStageScrollControllerOptions) {
   const [interactionState, dispatchInteraction] = useReducer(
     reduceScrollInteractionState,
@@ -305,6 +308,8 @@ export function useRunStageScrollController({
   const runStageResizeObserverRef = useRef<ResizeObserver | null>(null);
   const runStageScrollRef = useRef<HTMLDivElement | null>(null);
   const composerDockElementRef = useRef<HTMLDivElement | null>(null);
+  const readingPositionRef = useRef<RunStageReadingPosition | undefined>(undefined);
+  const narrativeSuspendedRef = useRef(narrativeSuspended);
 
   const [latestTurnMinHeightPx, setLatestTurnMinHeightPx] = useState(0);
   const [composerContentBottomInsetPx, setComposerContentBottomInsetPx] =
@@ -394,16 +399,19 @@ export function useRunStageScrollController({
   );
 
   const prepareForRunStart = useCallback((): void => {
+    readingPositionRef.current = undefined;
     dispatchInteraction({ type: "prepare-run-start" });
     setLatestTurnMinHeightPx(0);
   }, []);
 
   const prepareForThreadSwitch = useCallback((): void => {
+    readingPositionRef.current = undefined;
     dispatchInteraction({ type: "prepare-thread-switch" });
     setLatestTurnMinHeightPx(0);
   }, []);
 
   const prepareForNewTask = useCallback((): void => {
+    readingPositionRef.current = undefined;
     dispatchInteraction({ type: "prepare-new-task" });
     setLatestTurnMinHeightPx(0);
   }, []);
@@ -736,6 +744,12 @@ export function useRunStageScrollController({
 
   function handleRunStageScroll(event: ReactUIEvent<HTMLDivElement>): void {
     const element = event.currentTarget;
+    if (narrativeSuspendedRef.current) return;
+    // A width change can emit scroll before ResizeObserver. Keep the previous
+    // block until the observer restores it, rather than recording the wrong turn.
+    if (!readingPositionRef.current || readingPositionRef.current.width === element.clientWidth) {
+      readingPositionRef.current = captureRunStageReadingPosition(element) ?? readingPositionRef.current;
+    }
     const previousScrollTop = runStageLastScrollTopRef.current;
     const nextScrollTop = element.scrollTop;
     runStageLastScrollTopRef.current = nextScrollTop;
@@ -813,6 +827,20 @@ export function useRunStageScrollController({
       dispatchInteraction({ type: "resume-follow", turnId: latestPromptId });
     }
   }
+
+  useLayoutEffect(() => {
+    const wasSuspended = narrativeSuspendedRef.current;
+    narrativeSuspendedRef.current = narrativeSuspended;
+    const element = runStageScrollRef.current;
+    if (!narrativeSuspended && wasSuspended && element && readingPositionRef.current &&
+        interactionStateRef.current.followMode === "paused_by_user") {
+      const top = restoredRunStageScrollTop(element, readingPositionRef.current);
+      if (top !== undefined) {
+        scrollRunStageTo(element, top, "restore_reading");
+        runStageLastScrollTopRef.current = top;
+      }
+    }
+  }, [narrativeSuspended]);
 
   useLayoutEffect(() => {
     const element = runStageScrollRef.current;
@@ -900,6 +928,7 @@ export function useRunStageScrollController({
 
   useLayoutEffect(() => {
     const element = runStageScrollRef.current;
+    if (narrativeSuspended) return;
     if (!latestPromptId) {
       dispatchInteraction({ type: "reset-empty" });
       setLatestTurnMinHeightPx((current) => (current === 0 ? current : 0));
@@ -986,11 +1015,12 @@ export function useRunStageScrollController({
     latestPromptId,
     latestTurnMinHeightPx,
     narrativeItems,
+    narrativeSuspended,
     runStageAttachVersion,
   ]);
 
   useLayoutEffect(() => {
-    if (!latestPromptId) {
+    if (!latestPromptId || narrativeSuspended) {
       return;
     }
 
@@ -1005,6 +1035,7 @@ export function useRunStageScrollController({
     }
 
     const resizeObserver = new ResizeObserver(() => {
+      if (narrativeSuspendedRef.current) return;
       measureLatestTurnMinHeight(latestPromptId);
       // 异步高度变化（旧轮次媒体切换真实比例、mermaid 占位坍缩、SVG/图片注入）
       // 发生时，在同一帧守住 pending prompt anchor 或 native tail；RO 回调先于
@@ -1012,6 +1043,14 @@ export function useRunStageScrollController({
       // 暂停、pending anchor 和非 follow 的程序滚动期间不介入，避免与用户意图
       // 或进行中的 anchor/marker 滚动冲突。
       const state = interactionStateRef.current;
+      const position = readingPositionRef.current;
+      if (state.followMode === "paused_by_user" && position && position.width !== element.clientWidth) {
+        const top = restoredRunStageScrollTop(element, position);
+        if (top !== undefined) {
+          scrollRunStageTo(element, top, "restore_reading");
+          runStageLastScrollTopRef.current = top;
+        }
+      }
       const hasConflictingProgrammaticScroll =
         state.programmaticScrollReason !== "none" &&
         state.programmaticScrollReason !== "follow_latest" &&
@@ -1032,6 +1071,7 @@ export function useRunStageScrollController({
         scrollLatestTurnToScrollTail(latestPromptId, "follow_latest");
       }
       syncLatestOutputViewport(element);
+      readingPositionRef.current = captureRunStageReadingPosition(element) ?? readingPositionRef.current;
     });
     resizeObserver.observe(element);
     for (const observedTurn of turnElements(element)) {
@@ -1041,7 +1081,7 @@ export function useRunStageScrollController({
     return () => {
       resizeObserver.disconnect();
     };
-  }, [composerOutputGapPx, latestPromptId, runStageAttachVersion]);
+  }, [composerOutputGapPx, latestPromptId, runStageAttachVersion, narrativeSuspended]);
 
   useEffect(() => {
     return () => {

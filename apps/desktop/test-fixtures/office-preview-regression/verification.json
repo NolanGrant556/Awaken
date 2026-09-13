@@ -1,0 +1,150 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-13T12:23:33.942558+00:00",
+  "implementationBase": "f114263cf8bac801cc17f61cc340cf864bfcee32",
+  "implementationState": "main 上本次未提交修复；开始时工作区干净",
+  "entry": "npm run close:desktop && npm run open:desktop；正式 Awaken Dev，1440×903，macOS",
+  "threadId": "thread_1789296089793985000_9",
+  "threadTitle": "项目PDF文件内容梳理",
+  "projectId": "project_1785740853124476000_7",
+  "sourceFiles": [
+    {
+      "path": "/Users/nolangrant/Awaken 测试集/Nolan实业有限公司/报告输出/Nolan实业_PDF清单与内容分析报告.docx",
+      "sha256": "42a6bd67179f7854274715ab872ed74ca2bccd083341e8903bdc3e249a1f4cdd",
+      "artifactId": "artifact_publish:报告输出/Nolan实业_PDF清单与内容分析报告.docx"
+    },
+    {
+      "path": "/Users/nolangrant/Awaken 测试集/Nolan实业有限公司/报告输出/Nolan实业_PDF清单与内容分析报告.pdf",
+      "sha256": "5cb89eba2b02c919602380f46e82745e34cba722408347165bd20d061bd24f28",
+      "artifactId": "artifact_publish:报告输出/Nolan实业_PDF清单与内容分析报告.pdf"
+    },
+    {
+      "path": "/Users/nolangrant/Awaken 测试集/Nolan实业有限公司/报告输出/Nolan实业_PDF清单与内容分析报告.pptx",
+      "sha256": "3e3f41463a9babb9174842cb3c88e56c7cf21da49c904c789b77c561cbc5bf87",
+      "artifactId": "artifact_publish:报告输出/Nolan实业_PDF清单与内容分析报告.pptx"
+    },
+    {
+      "path": "/Users/nolangrant/Awaken 测试集/Nolan实业有限公司/报告输出/Nolan实业_PDF清单与内容分析报告.xlsx",
+      "sha256": "17571a515c828cd9eae1d9fd3bf7d07153726b68a0a91ce4d67aa44a8a55b7e4",
+      "artifactId": "artifact_publish:报告输出/Nolan实业_PDF清单与内容分析报告.xlsx"
+    }
+  ],
+  "reproduced": [
+    "在报告末尾打开 Word 卡片后，中间正文回到了前一轮回答",
+    "展开文件面板后返回会话，正文回到第一条 prompt",
+    "Office 宿主高度退回约 150px，下面空白区域不响应预览滚轮",
+    "Word 转换产物固定表格 col 宽度总和大于 table 声明宽度，右侧文字超出页面",
+    "Excel 非初始工作表在隐藏时测量冻结行，切表并滚动后表头被字母列头遮挡"
+  ],
+  "nativeChecks": [
+    "普通分栏打开交付卡后仍停留当前报告附近；card-before/card-after",
+    "文件覆盖态返回会话仍显示当前报告与交付卡；conversation-return",
+    "Word 预览充满正文区域，滚轮跨页阅读，固定表格列宽进入纸张；word-fit/word-tables-scroll",
+    "最终版本将 Word 修正收窄为确实溢出的固定表格并提升缓存版本至 2，重启正式 Desktop 后再次打开同一文件；word-fit-final",
+    "Excel PDF完整清单工作表切换后滚动，字母列头和业务表头同时可见；excel-frozen-rows",
+    "Excel 聚焦后用 Right 键横向滚动，可以读到右侧路径列；excel-horizontal-scroll",
+    "Excel 切到部门汇总，数值与长正文显示；excel-summary-sheet",
+    "最终缓存版本 2 从项目文件树打开原始 Excel，切 PDF完整清单后滚轮到第 32 行，冻结标题完整；project-excel-final",
+    "PowerPoint 封面与目录在完整高度 guest 内显示；ppt-preview",
+    "PDF 独立查看器显示 9 页，点击下一页后页码与画面标记均为第 2 页；pdf-preview 保存第 1 页画面"
+  ],
+  "automation": {
+    "desktopFullSuite": {
+      "files": 161,
+      "tests": 1678,
+      "status": "passed",
+      "scope": "初版修复全量，maxWorkers=4"
+    },
+    "finalFocused": {
+      "files": 7,
+      "tests": 68,
+      "status": "passed",
+      "scope": "Word 修正范围收窄后重新执行预览、路径安全、图片、滚动相关测试"
+    },
+    "desktopTypecheck": "passed",
+    "desktopBuild": "passed；仅 Vite 大包体积提示",
+    "docs": "node scripts/check-docs.mjs：16/38/76；npm run check:docs-links：77 文件 / 549 本地链接；git diff --check 通过"
+  },
+  "limitations": [
+    "未执行 Windows/Linux 原生验收",
+    "Word 仍为 OfficeCLI HTML 转换；不以本次截图宣称所有字体、分页与 WPS 逐像素一致",
+    "Excel 原文件合并范围与列宽仍保留；不为预览擅自扩展原始单元格",
+    "水平滚轮/鼠标滚动条操作未得到可靠位移证据；水平可达性以原生键盘 Right 验证"
+  ],
+  "screenshots": [
+    {
+      "file": "card-after.jpg",
+      "sha256": "aac09cdb86b38b866b8ec682d64beda5389de62ecb8993a8378ef0d3f4c844eb",
+      "source": "cua_repl 原生 Awaken Desktop screenshot"
+    },
+    {
+      "file": "card-before.jpg",
+      "sha256": "3d2a55f9af12e80101cceb9ff30b021d42f7ecaa397409addd66997bd114accd",
+      "source": "cua_repl 原生 Awaken Desktop screenshot"
+    },
+    {
+      "file": "conversation-return.jpg",
+      "sha256": "8ca77303b73a15fbf65a7001a3ab8c7bc237dcc83556dec5d3ecd43043d955bc",
+      "source": "cua_repl 原生 Awaken Desktop screenshot"
+    },
+    {
+      "file": "excel-frozen-rows.jpg",
+      "sha256": "91fe6ca9db8c9a7a41faab0c3001c63ef3863a6690a2ea48f16a96f2850ad7e3",
+      "source": "cua_repl 原生 Awaken Desktop screenshot"
+    },
+    {
+      "file": "excel-horizontal-scroll.jpg",
+      "sha256": "9e66e692ecce9f2b3f632339b63efc86b1613727655a684ffa72ef0498e0fe59",
+      "source": "cua_repl 原生 Awaken Desktop screenshot"
+    },
+    {
+      "file": "excel-summary-sheet.jpg",
+      "sha256": "69569b1ae121c2e6d132c78b3e93581f7a118766f61f458be8104323d5f5c3fa",
+      "source": "cua_repl 原生 Awaken Desktop screenshot"
+    },
+    {
+      "file": "pdf-preview.jpg",
+      "sha256": "aa0117686e76df0b5612cf2fcdc1d186ac02576aa32b487a822461b055e02ce4",
+      "source": "cua_repl 原生 Awaken Desktop screenshot"
+    },
+    {
+      "file": "ppt-preview.jpg",
+      "sha256": "d26019d10d47ab876a8ea91160dee90e6449588f693c9cee55cb5b7d66455781",
+      "source": "cua_repl 原生 Awaken Desktop screenshot"
+    },
+    {
+      "file": "project-excel-final.jpg",
+      "sha256": "b7c8c2f42dd491295eed2be23f4ef364344e0652990adf7814fc7b77de7aa8a0",
+      "source": "cua_repl 原生 Awaken Desktop screenshot"
+    },
+    {
+      "file": "word-fit-final.jpg",
+      "sha256": "84b4a6bdb312fc8a35d877904da2bb4a32d02eccd92efd096825814099892fab",
+      "source": "cua_repl 原生 Awaken Desktop screenshot"
+    },
+    {
+      "file": "word-fit.jpg",
+      "sha256": "f75dceb5a5c301447eeb6c0c5998c153db7d313c6d04314cca36b745151ae1b2",
+      "source": "cua_repl 原生 Awaken Desktop screenshot"
+    },
+    {
+      "file": "word-tables-scroll.jpg",
+      "sha256": "e4b1a311e63197cbc658b3a8755e06e52d0f2590a90132c553031d87d124b8c1",
+      "source": "cua_repl 原生 Awaken Desktop screenshot"
+    }
+  ],
+  "sourceHashes": {
+    "apps/desktop/src/main/office-preview-layout.ts": "68ca51b483668b72631b0d2304ec59d1e24a0dddad94e0d2f3399603b597e72a",
+    "apps/desktop/src/main/officecli.ts": "f25b4a4053f0c38ecfd65efa30f5cb43c60c4341c84f188e39e7cf38f601b49b",
+    "apps/desktop/src/renderer/App.tsx": "840d623f0abf11c833df213fbf6207b0a19747e7f0e3eddbc96630d15de376eb",
+    "apps/desktop/src/renderer/file-preview/OfficeLayout.test.tsx": "013d12b420eaf831bde9e2a5ea3ef5f4d5313f1d3921214d7c932381196dd0e5",
+    "apps/desktop/src/renderer/runStageReadingPosition.ts": "746a25545235f0ec58e6426ac9d0649f7ef94583320e39bb523b4dfa6e10ff95",
+    "apps/desktop/src/renderer/styles/project-files.css": "a99b0a8df991da05c75d40e1e1c1af3a61774f88ffa05257688dcb41ba436dc9",
+    "apps/desktop/src/renderer/useRunStageScrollController.test.tsx": "733716af829601bb0b758bdcaebd8805734110552c9b4a09f3e11939c4240a27",
+    "apps/desktop/src/renderer/useRunStageScrollController.ts": "ac313900f33cd537c7a98aff01a401e3cf6ccfee495447886c1af688c03441ea",
+    "apps/desktop/src/renderer/workbenchPresentation.ts": "25df265d00fb130c74065c319178a3b9ae57f0b7d0491cf687fd042b6b1bb680",
+    "apps/desktop/src/shared/office-preview-layout.ts": "19899bbc0b5fbb16cccc3fb1d2db808ce9073064941f4769ea9defba03db20b2"
+  },
+  "sourceFilesUnchangedAtFinalReadback": true,
+  "finalVerifiedAt": "2026-09-13T12:27:25.473434+00:00"
+}

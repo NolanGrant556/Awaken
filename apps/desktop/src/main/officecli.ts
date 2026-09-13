@@ -3,6 +3,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { correctXlsxPictureLayout, XLSX_PICTURE_LAYOUT_VERSION } from "./xlsx-preview-pictures.js";
+import { normalizeOfficePreviewLayout, OFFICE_PREVIEW_LAYOUT_VERSION } from "./office-preview-layout.js";
 import {
   MAX_OFFICE_HTML_BYTES,
   MAX_OFFICE_STDERR_BYTES,
@@ -326,6 +327,7 @@ export class OfficeCliRenderer {
           mtimeMs: originalStat.mtimeMs,
           version: manifest.version,
           pictureLayoutVersion: XLSX_PICTURE_LAYOUT_VERSION,
+          previewLayoutVersion: OFFICE_PREVIEW_LAYOUT_VERSION,
         }),
       )
       .digest("hex");
@@ -355,6 +357,8 @@ export class OfficeCliRenderer {
         throw new OfficeCliError("PREVIEW_RESOURCE_LIMIT", "Office 预览结果超过安全上限。");
       }
       await correctXlsxPictureLayout(sourcePath, temporaryPath, signal);
+      const html = await fs.readFile(temporaryPath, 'utf8');
+      await fs.writeFile(temporaryPath, normalizeOfficePreviewLayout(html, path.extname(sourcePath).toLowerCase()), 'utf8');
       const [outputStat, afterStat] = await Promise.all([
         fs.stat(temporaryPath),
         fs.stat(sourcePath),

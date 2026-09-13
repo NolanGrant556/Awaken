@@ -33,7 +33,7 @@ describe("FilePreviewHost", () => {
     vi.restoreAllMocks();
   });
 
-  it("centers the browser empty state with the HTML preview description", async () => {
+  it("centers the browser empty state with an address-only prompt", async () => {
     await act(async () => {
       root.render(
         <FilePreviewHost
@@ -60,9 +60,7 @@ describe("FilePreviewHost", () => {
     );
     expect(emptyState).not.toBeNull();
     expect(emptyState?.querySelector("strong")?.textContent).toBe("浏览器");
-    expect(emptyState?.querySelector("span")?.textContent).toBe(
-      "输入网址，或从文件树打开 HTML 文件",
-    );
+    expect(emptyState?.querySelector("span")?.textContent).toBe("输入网址");
     expect(
       container.querySelector('input[aria-label="当前地址"]'),
     ).not.toBeNull();
@@ -251,153 +249,60 @@ describe("FilePreviewHost", () => {
     expect(container.textContent).not.toContain("搜索");
   });
 
-  it("routes HTML handles to the isolated browser surface", async () => {
+  it("shows project HTML as editable source in the file tab", async () => {
     const onModeChange = vi.fn();
-    const runtimeClient = {
-      startProjectFilePreview: vi.fn(async (request) => ({
-        ok: true as const,
-        preview: {
-          previewId: "preview-html",
-          requestId: request.requestId,
-          kind: "html" as const,
-          transport: "url" as const,
-          displayName: "index.html",
-          relativePath: "site/index.html",
-          byteLength: 128,
-          src: "awaken-preview://preview-html/site/index.html",
-          partition: "awaken-preview-preview-html",
-        },
-      })),
-      closeProjectFilePreview: vi.fn(async () => undefined),
-      openProjectFileExternally: vi.fn(async () => ({ ok: true as const })),
-      revealProjectFile: vi.fn(async () => ({ ok: true as const })),
-      saveProjectMarkdownFile: vi.fn(async () => ({
-        ok: true as const,
-        byteLength: 0,
-      })),
-    };
-    const selection = { name: "index.html", relativePath: "site/index.html" };
-    const close = vi.fn(async () => undefined);
-    const embeddedBrowser = {
-      navigate: vi.fn(async () => ({
-        url: "",
-        title: "",
-        canGoBack: false,
-        canGoForward: false,
-        loading: false,
-        secure: false,
-        hasPage: false,
-      })),
-      back: vi.fn(async () => ({
-        url: "",
-        title: "",
-        canGoBack: false,
-        canGoForward: false,
-        loading: false,
-        secure: false,
-        hasPage: false,
-      })),
-      forward: vi.fn(async () => ({
-        url: "",
-        title: "",
-        canGoBack: false,
-        canGoForward: false,
-        loading: false,
-        secure: false,
-        hasPage: false,
-      })),
-      reload: vi.fn(async () => ({
-        url: "",
-        title: "",
-        canGoBack: false,
-        canGoForward: false,
-        loading: false,
-        secure: false,
-        hasPage: false,
-      })),
-      stop: vi.fn(async () => ({
-        url: "",
-        title: "",
-        canGoBack: false,
-        canGoForward: false,
-        loading: false,
-        secure: false,
-        hasPage: false,
-      })),
-      close,
-      getState: vi.fn(async () => ({
-        url: "",
-        title: "",
-        canGoBack: false,
-        canGoForward: false,
-        loading: false,
-        secure: false,
-        hasPage: false,
-      })),
-      setViewport: vi.fn(async () => undefined),
-      setActive: vi.fn(async () => undefined),
-      onStateChanged: vi.fn(() => () => {}),
-      onGuestHttpNavigate: vi.fn(() => () => {}),
-    };
-    const hostProps = {
-      runtimeClient,
-      projectId: "project-1",
-      folderPath: "/workspace",
-      selection,
-      onModeChange,
-      threadId: "thread-1",
-      viewId: "project-file-slot:1",
-      embeddedBrowser,
-    };
     await act(async () => {
       root.render(
         <FilePreviewHost
-          {...hostProps}
+          runtimeClient={{
+            startProjectFilePreview: vi.fn(async (request) => ({
+              ok: true as const,
+              preview: {
+                previewId: "preview-html",
+                requestId: request.requestId,
+                kind: "code" as const,
+                transport: "text" as const,
+                displayName: "index.html",
+                relativePath: "site/index.html",
+                byteLength: 15,
+                content: "<h1>Local</h1>\n",
+                language: "html",
+              },
+            })),
+            closeProjectFilePreview: vi.fn(async () => undefined),
+            openProjectFileExternally: vi.fn(async () => ({
+              ok: true as const,
+            })),
+            revealProjectFile: vi.fn(async () => ({ ok: true as const })),
+            saveProjectMarkdownFile: vi.fn(async () => ({
+              ok: true as const,
+              byteLength: 0,
+            })),
+          }}
+          projectId="project-1"
+          folderPath="/workspace"
+          selection={{ name: "index.html", relativePath: "site/index.html" }}
           mode="files"
+          onModeChange={onModeChange}
         />,
       );
     });
-    await settleUntil(() => onModeChange.mock.calls.length > 0);
-
-    expect(onModeChange).toHaveBeenCalledWith("browser");
-    const webview = container.querySelector("webview");
-    expect(webview).not.toBeNull();
-    expect(
-      webview?.closest(".project-file-preview-mode-stack__preview")?.classList,
-    ).toContain("is-hidden");
-
-    await act(async () => {
-      root.render(
-        <FilePreviewHost
-          {...hostProps}
-          mode="browser"
-        />,
-      );
-    });
-    await settleUntil(() => container.querySelector("webview") !== null);
-
-    expect(runtimeClient.startProjectFilePreview).toHaveBeenCalledTimes(1);
-    expect(container.querySelector("webview")).toBe(webview);
-    expect(webview?.getAttribute("partition")).toBe(
-      "awaken-preview-preview-html",
+    await settleUntil(
+      () =>
+        container.querySelector('[aria-label="index.html 文本编辑器"]') !== null,
     );
-    expect(
-      webview?.closest(".project-file-webview-preview")?.classList.contains(
-        "is-embedded",
-      ),
-    ).toBe(true);
-    expect(container.querySelectorAll('input[aria-label="当前地址"]')).toHaveLength(
-      1,
+
+    expect(onModeChange).toHaveBeenCalledWith("files");
+    expect(container.querySelector("webview")).toBeNull();
+    expect(container.querySelector(".embedded-browser__toolbar")).toBeNull();
+    expect(container.textContent).not.toContain("查看源代码");
+    expect(container.querySelector(".project-file-preview-heading")?.textContent).toContain(
+      "index.html",
     );
-    expect(container.querySelector(".project-file-preview-heading")).toBeNull();
-    expect(container.querySelector(".project-file-browser-toolbar")).toBeNull();
-    expect(container.querySelectorAll(".embedded-browser__toolbar")).toHaveLength(
-      1,
+    expect(container.querySelector(".project-file-preview-heading")?.textContent).toContain(
+      "html",
     );
-    expect(close).toHaveBeenCalledWith({
-      threadId: "thread-1",
-      viewId: "project-file-slot:1",
-    });
+    expect(container.querySelector('[aria-label="自动换行"]')).not.toBeNull();
   });
 
   it("navigates the address bar to https without stacking a second toolbar", async () => {
@@ -654,7 +559,7 @@ describe("FilePreviewHost", () => {
     ).toContain("is-hidden");
     expect(
       container.querySelector(".project-files-preview-empty")?.textContent,
-    ).toContain("输入网址，或从文件树打开 HTML 文件");
+    ).toContain("输入网址");
 
     await act(async () => root.render(render("files")));
     expect(container.querySelector("webview")).toBe(webview);

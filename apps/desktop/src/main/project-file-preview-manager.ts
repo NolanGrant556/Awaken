@@ -34,7 +34,6 @@ import { resolveArtifactTarget } from "./artifact-open.js";
 import { OfficeCliError, OfficeCliRenderer, type OfficeCliRuntimePaths } from "./officecli.js";
 import { resolveProjectFile, type ResolvedProjectFile } from "./project-files.js";
 import {
-  MAX_HTML_TEXT_RESOURCE_BYTES,
   MAX_IMAGE_PIXELS,
   MAX_PREVIEW_INFLIGHT_REQUESTS,
   MAX_PREVIEW_REQUESTS,
@@ -459,10 +458,6 @@ export class ProjectFilePreviewManager {
       }
       classification = classifyPreviewFile(source.displayName, true)!;
     }
-    if (sourceRef.kind === "artifact" && classification.kind === "html") {
-      return previewError("UNSUPPORTED_FILE_TYPE", "交付物暂不支持内嵌预览 HTML。");
-    }
-
     const limit = previewByteLimit(classification.kind);
     if (stat.size > limit) {
       return previewError(
@@ -650,13 +645,13 @@ export class ProjectFilePreviewManager {
       return;
     }
     guest.setWindowOpenHandler(({ url }) => {
-      if (isHttpUrl(url)) this.routeGuestHttp(record, url);
+      if (isHttpUrl(url)) this.routeGuestHttp(url);
       return { action: "deny" };
     });
     const handleNavigation = (event: Electron.Event, url: string) => {
       if (isAllowedGuestInternalUrl(url)) return;
       event.preventDefault();
-      if (isHttpUrl(url)) this.routeGuestHttp(record, url);
+      if (isHttpUrl(url)) this.routeGuestHttp(url);
     };
     guest.on("will-navigate", handleNavigation);
     guest.on("will-redirect", handleNavigation);
@@ -679,11 +674,7 @@ export class ProjectFilePreviewManager {
     });
   }
 
-  private routeGuestHttp(record: PreviewRecord, url: string): void {
-    if (record.kind === "html" && this.options.onGuestHttpNavigate) {
-      this.options.onGuestHttpNavigate({ previewId: record.previewId, url });
-      return;
-    }
+  private routeGuestHttp(url: string): void {
     void this.options.openExternal(url);
   }
 
@@ -992,22 +983,6 @@ export class ProjectFilePreviewManager {
         mimeType: mimeTypeForFile(refreshed.displayName),
       };
     }
-    if (
-      record.kind !== "html" ||
-      !requestedPath ||
-      record.sourceRef.kind !== "project"
-    ) return undefined;
-    const child = await resolveProjectFile(await this.options.getProjects(), {
-      projectId: record.sourceRef.request.projectId,
-      folderPath: record.sourceRef.request.folderPath,
-      relativePath: requestedPath,
-    });
-    if (!child.ok) return undefined;
-    const stat = await fs.stat(child.file.realPath);
-    const mimeType = mimeTypeForFile(child.file.displayName);
-    const textResource = /^(text\/|application\/(javascript|json|xml))/.test(mimeType);
-    const limit = textResource ? MAX_HTML_TEXT_RESOURCE_BYTES : previewByteLimit("image");
-    if (stat.size > limit) return undefined;
-    return { filePath: child.file.realPath, mimeType };
+    return undefined;
   }
 }

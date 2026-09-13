@@ -408,8 +408,58 @@ createProjectAgentsFile: vi.fn(),
     await settle();
 
     expect(container.textContent).toContain("浏览器");
-    expect(container.textContent).toContain("输入网址，或从文件树打开 HTML 文件");
+    expect(container.textContent).toContain("输入网址");
+    expect(container.textContent).not.toContain("从文件树打开 HTML");
     expect(container.querySelector(".project-files-preview-empty.is-centered")).not.toBeNull();
+    expect(
+      container.querySelector(".project-files-workspace__body")?.classList,
+    ).toContain("is-file-list-collapsed");
+    expect(
+      container.querySelector(".project-files-navigator")?.getAttribute("aria-hidden"),
+    ).toBe("true");
+  });
+
+  it("hides the file navigator in browser mode and restores it for file tabs", async () => {
+    const listProjectDirectory = vi.fn(async () => ({
+      ok: true as const,
+      relativePath: "",
+      entries: [{ name: "README.md", relativePath: "README.md", kind: "file" as const }],
+    }));
+    const props = {
+      runtimeClient: {
+        createProjectAgentsFile: vi.fn(),
+        listProjectDirectory,
+        ...previewRuntimeClient(),
+      },
+      projectId: "project-1",
+      projectLabel: "Awaken",
+      folders: [{ path: "/workspace/app", label: "App", isPrimary: true }],
+    };
+
+    await act(async () => {
+      root.render(<ProjectFilesWorkspace {...props} initialMode="browser" />);
+    });
+    await settle();
+
+    expect(
+      container.querySelector(".project-files-workspace__body")?.classList,
+    ).toContain("is-file-list-collapsed");
+    expect(
+      container.querySelector(".project-files-navigator")?.getAttribute("aria-hidden"),
+    ).toBe("true");
+
+    await act(async () => {
+      root.render(<ProjectFilesWorkspace {...props} initialMode="files" />);
+    });
+    await settle();
+
+    expect(
+      container.querySelector(".project-files-workspace__body")?.classList,
+    ).not.toContain("is-file-list-collapsed");
+    expect(
+      container.querySelector(".project-files-navigator")?.getAttribute("aria-hidden"),
+    ).toBe("false");
+    expect(container.textContent).toContain("README.md");
   });
 
   it("resizes the file list from the divider and keeps the navigator visible", async () => {
@@ -895,10 +945,10 @@ createProjectAgentsFile: vi.fn(),
         folderPath: "/workspace/app",
         name: "index.html",
         relativePath: "site/index.html",
-        mode: "browser",
+        mode: "files",
       }),
     );
-    expect(onWorkspaceModeChange.mock.calls).toEqual([["files"], ["browser"]]);
+    expect(onWorkspaceModeChange.mock.calls).toEqual([["files"], ["files"]]);
   });
 
   it("offers only add, copy, and open-with actions for files", async () => {

@@ -156,7 +156,7 @@ export default function EmbeddedBrowserChrome({
     <div className="project-files-preview-empty is-centered">
       <AwakenIcon concept="browser" size={24} />
       <strong>浏览器</strong>
-      <span>输入网址，或从文件树打开 HTML 文件</span>
+      <span>输入网址</span>
     </div>
   );
 
@@ -207,7 +207,7 @@ export default function EmbeddedBrowserChrome({
           <input
             className="embedded-browser__address"
             aria-label="当前地址"
-            placeholder="输入网址，或从文件树打开 HTML"
+            placeholder="输入网址"
             value={address}
             onChange={(event) => {
               editingRef.current = true;

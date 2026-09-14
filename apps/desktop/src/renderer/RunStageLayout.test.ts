@@ -206,15 +206,12 @@ describe("RunStage layout", () => {
     expect(narrowPosition).toBe("relative");
   });
 
-  it("keeps process rows spaced from the reply text above them", () => {
-    const workbenchStyles = readStyleSource(new URL("./styles/workbench.css", import.meta.url));
-
-    expect(workbenchStyles).toContain(
-      ".assistant-message-wrapper + :not(.assistant-message-wrapper)",
-    );
-    expect(workbenchStyles).toMatch(
-      /\.assistant-message-wrapper \+ :not\(\.assistant-message-wrapper\)[\s\S]{0,200}margin-top:\s*16px;/,
-    );
+  it("uses one row gap before and after commentary in live and replayed transcripts", () => {
+    const styles = readStyleSource(new URL("./styles/workbench.css", import.meta.url));
+    expect(cssRule(styles, ".execution-turn-body")).toContain("gap: var(--aw-execution-row-gap);");
+    expect(cssRule(styles, ".execution-process-disclosure-body")).toContain("gap: var(--aw-execution-row-gap);");
+    expect(styles).not.toContain(".assistant-message-wrapper + :not(.assistant-message-wrapper)");
+    expect(styles).not.toContain('.assistant-message-wrapper:not(:first-child)');
   });
 
   it("bounds the run-plan overlay between the stage top and measured composer", () => {

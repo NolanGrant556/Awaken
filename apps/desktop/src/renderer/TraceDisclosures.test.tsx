@@ -64,6 +64,7 @@ describe("execution trace disclosures", () => {
       } });
       await act(async () => root.render(renderPanel()));
       expect(container.querySelector(".thought-trace-active")).toBeNull();
+      expect(container.querySelector(".aw-trace-shimmer")).toBeNull();
       expect(container.querySelector(".thought-trace-status")).toBeNull();
       expect(container.textContent).not.toContain("思考 中");
       expect(container.textContent).toContain("思考 片刻");
@@ -74,6 +75,7 @@ describe("execution trace disclosures", () => {
       await act(async () => root.render(null));
       await act(async () => root.render(renderPanel()));
       expect(container.querySelector(".thought-trace-active")).toBeNull();
+      expect(container.querySelector(".aw-trace-shimmer")).toBeNull();
     },
   );
 
@@ -289,7 +291,7 @@ describe("execution trace disclosures", () => {
       await act(async () => root.render(<AwakenToolTraceLine title="查询订单" kind="mcp" status={status} />));
       expect(container.querySelector(".tool-trace-line-icon")).toBeNull();
       expect(container.textContent).toContain("查询订单");
-      expect(Boolean(container.querySelector(".aw-trace-dots"))).toBe(status === "active");
+      expect(Boolean(container.querySelector(".aw-trace-shimmer"))).toBe(status === "active");
       expect(container.textContent).not.toContain("失败");
     }
   });

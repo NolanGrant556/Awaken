@@ -1,4 +1,4 @@
-@import "../../tokens/base.css";
+@import "../executionTrace.css";
 
 .tool-trace-group,
 .tool-trace-item {
@@ -15,17 +15,17 @@
   width: fit-content;
   max-width: 100%;
   min-width: 0;
-  min-height: 20px;
+  min-height: var(--aw-execution-line-height);
   padding: 0;
   box-sizing: border-box;
   border: 0;
   background: transparent;
   color: var(--aw-text-subtle);
-  font-size: 13px;
+  font-size: var(--aw-execution-font-size);
   font-weight: 400;
-  line-height: 20px;
+  line-height: var(--aw-execution-line-height);
   text-align: left;
-  transition: color 120ms ease;
+  transition: color 100ms ease-in-out;
 }
 .tool-trace-group-heading,
 button.tool-trace-line {
@@ -44,20 +44,11 @@ button.tool-trace-line:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.aw-trace-title {
-  min-width: 0;
-}
-.aw-trace-verb {
-  color: var(--aw-text-primary);
-}
-.aw-trace-fact {
-  color: var(--aw-text-disabled);
-}
 .tool-trace-group-heading:hover .aw-trace-fact,
 .tool-trace-group-heading:focus-visible .aw-trace-fact,
 button.tool-trace-line:hover .aw-trace-fact,
 button.tool-trace-line:focus-visible .aw-trace-fact {
-  color: var(--aw-text-subtle);
+  color: var(--aw-text-secondary);
 }
 .tool-trace-group-label {
   white-space: normal;
@@ -75,7 +66,7 @@ button.tool-trace-line:focus-visible .aw-trace-fact {
 .tool-trace-group-chevron svg,
 .tool-trace-line-chevron svg,
 .tool-trace-detail-toggle svg {
-  transition: transform 180ms ease;
+  transition: transform 150ms ease-in-out;
 }
 .tool-trace-group-open .tool-trace-group-chevron svg,
 .tool-trace-line-open .tool-trace-line-chevron svg,
@@ -84,7 +75,7 @@ button.tool-trace-line:focus-visible .aw-trace-fact {
 }
 .tool-trace-line-chevron {
   opacity: 0;
-  transition: opacity 120ms ease;
+  transition: opacity 100ms ease-in-out;
 }
 .tool-trace-line:hover .tool-trace-line-chevron,
 .tool-trace-line:focus-visible .tool-trace-line-chevron,
@@ -107,7 +98,7 @@ button.tool-trace-line:focus-visible .aw-trace-fact {
 }
 .tool-trace-group-lines {
   display: grid;
-  gap: 0;
+  gap: var(--aw-execution-step-gap);
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -127,7 +118,8 @@ button.tool-trace-line:focus-visible .aw-trace-fact {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: inherit;
+  color: var(--aw-text-subtle);
   max-width: min(52ch, 55%);
 }
 .tool-trace-line-active,
@@ -138,9 +130,9 @@ button.tool-trace-line:focus-visible .aw-trace-fact {
   display: flex;
   align-items: center;
   gap: 5px;
-  min-height: 20px;
-  font-size: 13px;
-  line-height: 20px;
+  min-height: var(--aw-execution-line-height);
+  font-size: var(--aw-execution-font-size);
+  line-height: var(--aw-execution-line-height);
 }
 .tool-trace-current > span:first-child {
   overflow: hidden;
@@ -150,7 +142,7 @@ button.tool-trace-line:focus-visible .aw-trace-fact {
 .tool-trace-attention {
   color: var(--aw-status-danger-text);
   font-size: 12px;
-  line-height: 20px;
+  line-height: var(--aw-execution-line-height);
 }
 .tool-trace-file-link,
 .tool-trace-detail-toggle,
@@ -171,6 +163,7 @@ button.tool-trace-line:focus-visible .aw-trace-fact {
   text-align: left;
 }
 .tool-trace-file-link:hover,
+.tool-trace-file-link:focus-visible,
 .trace-diff-more:hover {
   color: var(--aw-text-primary);
   text-decoration: underline;
@@ -306,6 +299,7 @@ summary.tool-trace-detail-label {
   .tool-trace-group-disclosure,
   .tool-trace-output-disclosure,
   .tool-trace-group-chevron svg,
+  .tool-trace-line-chevron,
   .tool-trace-line-chevron svg,
   .tool-trace-detail-toggle svg {
     transition: none;

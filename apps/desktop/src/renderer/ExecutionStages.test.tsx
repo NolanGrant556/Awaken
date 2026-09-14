@@ -277,7 +277,7 @@ describe("Cursor-style execution stages", () => {
     await act(async () => process!.click());
     expect(container.textContent).toContain("进一步分析");
     expect(container.textContent).toContain("思考 片刻");
-    expect(container.querySelector(".aw-trace-dots")).toBeNull();
+    expect(container.querySelector(".aw-trace-shimmer")).toBeNull();
   });
 
   it.each([

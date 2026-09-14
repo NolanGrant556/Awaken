@@ -110,19 +110,12 @@ export const AwakenToolTraceLine = memo(function AwakenToolTraceLine({
 
   const rowContent = (
     <>
-      <span className="tool-trace-line-copy">
+      <span className={`tool-trace-line-copy${status === "active" ? " aw-trace-shimmer" : ""}`}>
         <span className="tool-trace-line-title">{titleNode}</span>
         {detail ? (
           <span className="tool-trace-line-detail">{detail}</span>
         ) : null}
       </span>
-      {status === "active" ? (
-        <span className="aw-trace-dots" aria-hidden="true">
-          <i />
-          <i />
-          <i />
-        </span>
-      ) : null}
       <span
         className="tool-trace-line-chevron"
         aria-hidden="true"
@@ -145,7 +138,7 @@ export const AwakenToolTraceLine = memo(function AwakenToolTraceLine({
     >
       {onOpenFile ? (
         <div className={`${lineClassName} tool-trace-file-row`}>
-          <span className="tool-trace-line-copy">
+          <span className={`tool-trace-line-copy${status === "active" ? " aw-trace-shimmer" : ""}`}>
             <span className="tool-trace-line-title">
               <span className="aw-trace-title">
                 <span className="aw-trace-verb">{verb}</span>
@@ -168,13 +161,6 @@ export const AwakenToolTraceLine = memo(function AwakenToolTraceLine({
           </span>
           {detail ? (
             <span className="tool-trace-line-detail">{detail}</span>
-          ) : null}
-          {status === "active" ? (
-            <span className="aw-trace-dots" aria-hidden="true">
-              <i />
-              <i />
-              <i />
-            </span>
           ) : null}
           {hasDetail ? (
             <button

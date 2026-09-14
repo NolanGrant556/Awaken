@@ -23,6 +23,8 @@
   --aw-text-secondary: #575757;
   --aw-text-tertiary: #696969;
   --aw-text-disabled: #aaaab0;
+  --aw-execution-shimmer-base: #707070;
+  --aw-execution-shimmer-peak: #111111;
   --aw-text-blue: #2f74ff;
   --aw-text-onblack: #ffffff;
 
@@ -219,6 +221,11 @@
   --aw-line-height-lg: 24px;
   --aw-line-height-xl: 36px;
   --aw-line-height-reading: 24px;
+  /* Execution transcript: one reading scale, separate row and step spacing. */
+  --aw-execution-font-size: var(--aw-font-size-reading);
+  --aw-execution-line-height: var(--aw-line-height-reading);
+  --aw-execution-row-gap: 14px;
+  --aw-execution-step-gap: 6px;
   --aw-line-height-reading-h1: 30px;
   --aw-line-height-reading-h2: 26px;
   --aw-line-height-reading-h3: 24px;
@@ -277,6 +284,8 @@
   --aw-text-secondary: #bdbdbd;
   --aw-text-tertiary: #a0a0a0;
   --aw-text-disabled: #707070;
+  --aw-execution-shimmer-base: #858585;
+  --aw-execution-shimmer-peak: #ffffff;
   --aw-text-blue: #8ab3ff;
   --aw-text-onblack: #1a1a1a;
 

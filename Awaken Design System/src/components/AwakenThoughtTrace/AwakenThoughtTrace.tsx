@@ -56,16 +56,9 @@ export const AwakenThoughtTrace = memo(function AwakenThoughtTrace({
   }
   const headingContent = (
     <>
-      <span className="thought-trace-disclosure-label">
+      <span className={`thought-trace-disclosure-label${status === "active" ? " aw-trace-shimmer" : ""}`}>
         <AwakenTraceTitle title={heading} />
       </span>
-      {status === "active" ? (
-        <span className="aw-trace-dots" aria-hidden="true">
-          <i />
-          <i />
-          <i />
-        </span>
-      ) : null}
       {text.trim() ? (
         <span className="thought-trace-disclosure-icon" aria-hidden="true">
           <AwakenIcon concept="disclose" size={12} />

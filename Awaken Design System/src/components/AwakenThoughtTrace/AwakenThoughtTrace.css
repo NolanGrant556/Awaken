@@ -1,4 +1,4 @@
-@import "../../tokens/base.css";
+@import "../executionTrace.css";
 .thought-trace {
   display: grid;
   min-width: 0;
@@ -11,13 +11,13 @@
   gap: 6px;
   width: fit-content;
   max-width: 100%;
-  min-height: 20px;
+  min-height: var(--aw-execution-line-height);
   box-sizing: border-box;
   padding: 0;
   border: 0;
   background: transparent;
   color: var(--aw-text-subtle);
-  font: 400 13px/20px var(--aw-font-sans);
+  font: 400 var(--aw-execution-font-size)/var(--aw-execution-line-height) var(--aw-font-sans);
   text-align: left;
 }
 button.thought-trace-heading {
@@ -25,20 +25,21 @@ button.thought-trace-heading {
 }
 button.thought-trace-heading:hover .aw-trace-fact,
 button.thought-trace-heading:focus-visible .aw-trace-fact {
-  color: var(--aw-text-subtle);
-}
-.thought-trace-disclosure-label .aw-trace-verb {
-  color: var(--aw-text-primary);
-}
-.thought-trace-disclosure-label .aw-trace-fact {
-  color: var(--aw-text-disabled);
+  color: var(--aw-text-secondary);
 }
 .thought-trace-disclosure-icon {
   display: inline-flex;
   flex: 0 0 14px;
+  opacity: 0;
+  transition: opacity 100ms ease-in-out;
+}
+.thought-trace-heading:hover .thought-trace-disclosure-icon,
+.thought-trace-heading:focus-visible .thought-trace-disclosure-icon,
+.thought-trace-open .thought-trace-disclosure-icon {
+  opacity: 1;
 }
 .thought-trace-disclosure-icon svg {
-  transition: transform 180ms ease;
+  transition: transform 150ms ease-in-out;
 }
 .thought-trace-open .thought-trace-disclosure-icon svg {
   transform: rotate(90deg);
@@ -60,10 +61,10 @@ button.thought-trace-heading:focus-visible .aw-trace-fact {
 }
 .thought-trace p {
   margin: 0;
-  padding: 4px 0 8px;
+  padding: var(--aw-execution-step-gap) 0 0;
   color: var(--aw-text-secondary);
-  font-size: 14px;
-  line-height: 1.65;
+  font-size: var(--aw-execution-font-size);
+  line-height: var(--aw-execution-line-height);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -79,43 +80,10 @@ button.thought-trace-heading:focus-visible .aw-trace-fact {
   font-size: 12px;
   cursor: pointer;
 }
-.aw-trace-dots {
-  display: inline-flex;
-  gap: 3px;
-  align-items: center;
-  flex: 0 0 auto;
-  height: 20px;
-}
-.aw-trace-dots i {
-  display: block;
-  width: 3px;
-  height: 3px;
-  border-radius: 50%;
-  background: currentColor;
-  animation: aw-trace-pulse 1.4s ease-in-out infinite;
-}
-.aw-trace-dots i:nth-child(2) {
-  animation-delay: 160ms;
-}
-.aw-trace-dots i:nth-child(3) {
-  animation-delay: 320ms;
-}
-@keyframes aw-trace-pulse {
-  0%,
-  70%,
-  100% {
-    opacity: 0.35;
-  }
-  35% {
-    opacity: 1;
-  }
-}
 @media (prefers-reduced-motion: reduce) {
   .thought-trace-body,
+  .thought-trace-disclosure-icon,
   .thought-trace-disclosure-icon svg {
     transition: none;
-  }
-  .aw-trace-dots i {
-    animation: none;
   }
 }

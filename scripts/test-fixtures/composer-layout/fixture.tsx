@@ -6,6 +6,10 @@ import { AwakenComposerBar } from "../../../Awaken Design System/src/components/
 import { AwakenUserPromptBlock } from "../../../Awaken Design System/src/components/AwakenUserPromptBlock/AwakenUserPromptBlock";
 import { AwakenTaskWelcome } from "../../../Awaken Design System/src/components/AwakenTaskWelcome/AwakenTaskWelcome";
 import { DesktopStartupStatus } from "../../../apps/desktop/src/renderer/DesktopStartupStatus";
+import { AwakenThoughtTrace } from "../../../Awaken Design System/src/components/AwakenThoughtTrace/AwakenThoughtTrace";
+import { AwakenToolTraceLine } from "../../../Awaken Design System/src/components/AwakenToolTraceLine/AwakenToolTraceLine";
+import { AwakenMarkdownRenderer } from "../../../Awaken Design System/src/components/AwakenMarkdownRenderer/AwakenMarkdownRenderer";
+import { AwakenDisclosure } from "../../../Awaken Design System/src/components/AwakenDisclosure/AwakenDisclosure";
 import "../../../apps/desktop/src/renderer/styles/workbench.css";
 
 const root = createRoot(document.getElementById("root")!);
@@ -122,8 +126,93 @@ window.runComposerLayoutRegression = async () => {
     assert(box.top >= bounds.top + 7.5 && box.bottom <= bounds.bottom - 7.5, "palette clipped vertically");
     return { palette: box.toJSON(), boundary: bounds.toJSON() };
   });
+  for (const theme of ["light", "dark"]) {
+    for (const width of [416, 760]) {
+      await check(`execution ${theme}/${width}: consistent live and history spacing`, async () => {
+        document.documentElement.dataset.awTheme = theme;
+        const flow = (history: boolean, active: boolean) => <div className={`aw-theme-${theme}`} style={{ width }}>
+          <div className={history ? "execution-process-disclosure-body" : "execution-turn-body"}>
+            <div className="execution-activity-list">
+              <AwakenThoughtTrace text="先核对文件" status={active ? "active" : "done"} />
+              <AwakenToolTraceLine title="读取 README.md" status="done" />
+            </div>
+            <div className="assistant-message-wrapper" data-final="false">
+              <AwakenMarkdownRenderer markdown="我会先读取文件，然后检查测试。" />
+            </div>
+            <div className="execution-activity-list">
+              <AwakenToolTraceLine title="运行 核对测试" status={active ? "active" : "done"} />
+              <AwakenToolTraceLine title={`读取 ${"很长的文件名".repeat(20)}.tsx`} status="done"
+                onOpenFile={noop} output="historical output" />
+            </div>
+          </div>
+        </div>;
+        const measured = [];
+        for (const history of [false, true]) {
+          await render(flow(history, true));
+          const container = document.querySelector(history ? ".execution-process-disclosure-body" : ".execution-turn-body")!;
+          const rows = [...container.children].map(e => e.getBoundingClientRect());
+          const before = rows[1].top - rows[0].bottom, after = rows[2].top - rows[1].bottom;
+          assert(before === 14 && after === 14, `commentary gaps ${before}/${after}, expected 14/14`);
+          const steps = [...container.querySelector(".execution-activity-list")!.children].map(e => e.getBoundingClientRect());
+          assert(steps[1].top - steps[0].bottom === 6, "steps must use a 6px gap");
+          const texts = [...container.querySelectorAll<HTMLElement>(".thought-trace-heading,.tool-trace-line,.assistant-message")];
+          for (const e of texts) {
+            const style = getComputedStyle(e);
+            assert(style.fontSize === "15px" && style.lineHeight === "24px", `${e.className}: ${style.fontSize}/${style.lineHeight}`);
+            assert(e.getBoundingClientRect().left === rows[0].left, "text rows must share their left edge");
+          }
+          const fileRow = container.querySelector(".tool-trace-file-row")!;
+          const toggle = fileRow.querySelector(".tool-trace-detail-toggle")!.getBoundingClientRect();
+          assert(toggle.width >= 24 && toggle.right <= container.getBoundingClientRect().right, "long file must preserve the detail target");
+          const shimmer = container.querySelector(".aw-trace-shimmer")!;
+          assert(getComputedStyle(shimmer).animationName === "aw-trace-shine", "active text must animate");
+          measured.push({ history, before, after, stepGap: steps[1].top - steps[0].bottom });
+          await render(flow(history, false));
+          assert(!document.querySelector(".aw-trace-shimmer"), "terminal rows must remove the animation");
+        }
+        return measured;
+      });
+    }
+  }
+  await check("execution elapsed disclosure shares the transcript row gap", async () => {
+    await render(<div className="execution-process-disclosure"><AwakenDisclosure open title={<span className="run-elapsed-time">执行时间 26 秒</span>}>
+      <div className="execution-process-disclosure-body"><AwakenThoughtTrace text="history" status="done" /></div>
+    </AwakenDisclosure></div>);
+    const title = document.querySelector(".aw-disclosure-trigger")!.getBoundingClientRect();
+    const first = document.querySelector(".thought-trace-heading")!.getBoundingClientRect();
+    assert(first.top - title.bottom === 14, `elapsed disclosure gap ${first.top - title.bottom}`);
+    return { gap: first.top - title.bottom };
+  });
   root.unmount();
   return results;
 };
 
-declare global { interface Window { runComposerLayoutRegression: () => Promise<unknown>; } }
+window.runExecutionReducedMotionRegression = async () => {
+  const reducedRoot = createRoot(document.getElementById("root")!);
+  const name = "execution reduced motion: readable active text and immediate disclosure";
+  try {
+    assert(matchMedia("(prefers-reduced-motion: reduce)").matches, "reduced motion must be enabled by Electron");
+    flushSync(() => reducedRoot.render(<AwakenThoughtTrace text="可读思考正文" status="active" />));
+    await settle();
+    const shimmer = document.querySelector(".aw-trace-shimmer")!;
+    const style = getComputedStyle(shimmer);
+    assert(style.animationName === "none", "reduced motion must stop the text animation");
+    assert(style.webkitTextFillColor !== "rgba(0, 0, 0, 0)", "text must remain visible without the gradient");
+    const heading = document.querySelector<HTMLButtonElement>(".thought-trace-heading")!;
+    flushSync(() => heading.click());
+    await settle();
+    assert(document.querySelector(".thought-trace-body p")?.textContent === "可读思考正文", "open must show the full text");
+    assert(getComputedStyle(document.querySelector(".thought-trace-body")!).transitionProperty === "none", "disclosure must not animate");
+    flushSync(() => heading.click());
+    await settle();
+    assert(!document.querySelector(".thought-trace-body p"), "close must unmount immediately");
+    return { name, passed: true };
+  } catch (error) {
+    return { name, passed: false, error: String(error) };
+  } finally { reducedRoot.unmount(); }
+};
+
+declare global { interface Window {
+  runComposerLayoutRegression: () => Promise<unknown>;
+  runExecutionReducedMotionRegression: () => Promise<unknown>;
+} }

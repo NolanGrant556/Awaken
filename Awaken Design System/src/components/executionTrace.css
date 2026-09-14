@@ -1,0 +1,36 @@
+@import "../tokens/base.css";
+
+/* Shared by thinking and tool rows, including standalone/subtask consumers. */
+.aw-trace-title {
+  min-width: 0;
+}
+.aw-trace-verb {
+  color: var(--aw-text-secondary);
+}
+.aw-trace-fact {
+  color: var(--aw-text-subtle);
+  transition: color 100ms ease-in-out;
+}
+.aw-trace-shimmer {
+  background-image: linear-gradient(90deg,
+    var(--aw-execution-shimmer-base) 0%, var(--aw-execution-shimmer-base) 34%,
+    var(--aw-execution-shimmer-peak) 44%, var(--aw-execution-shimmer-peak) 54%,
+    var(--aw-execution-shimmer-base) 64%, var(--aw-execution-shimmer-base) 100%);
+  background-size: 200% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: aw-trace-shine 2s linear infinite;
+}
+@keyframes aw-trace-shine {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .aw-trace-shimmer {
+    animation: none;
+    background: none;
+    -webkit-text-fill-color: currentColor;
+  }
+  .aw-trace-fact { transition: none; }
+}

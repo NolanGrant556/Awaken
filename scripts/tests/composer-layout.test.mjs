@@ -51,6 +51,9 @@ app.whenReady().then(async () => {
   win.webContents.on('console-message', (_event, details) => console.error(details.message));
   await win.loadFile(${JSON.stringify(join(temp, "index.html"))});
   const result = await win.webContents.executeJavaScript('window.runComposerLayoutRegression()');
+  await win.webContents.debugger.attach('1.3');
+  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  result.push(await win.webContents.executeJavaScript('window.runExecutionReducedMotionRegression()'));
   fs.writeFileSync(${JSON.stringify(join(temp, "results.json"))}, JSON.stringify(result, null, 2));
   app.exit(0);
 }).catch(error => { console.error(error); app.exit(1); });

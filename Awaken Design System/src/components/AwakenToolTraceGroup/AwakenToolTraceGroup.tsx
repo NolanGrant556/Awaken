@@ -137,12 +137,7 @@ export const AwakenToolTraceGroup = memo(function AwakenToolTraceGroup({
       </div>
       {!expanded && currentActivity ? (
         <div className="tool-trace-current" role="status">
-          <span>{currentActivity}</span>
-          <span className="aw-trace-dots" aria-hidden="true">
-            <i />
-            <i />
-            <i />
-          </span>
+          <span className={active ? "aw-trace-shimmer" : undefined}>{currentActivity}</span>
         </div>
       ) : null}
       {!expanded && attention ? (

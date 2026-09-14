@@ -727,7 +727,7 @@
 
 .execution-turn-body {
   display: grid;
-  gap: 8px;
+  gap: var(--aw-execution-row-gap);
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
@@ -743,12 +743,12 @@
 
 .run-elapsed-time {
   display: inline-block;
-  min-height: 18px;
+  min-height: var(--aw-execution-line-height);
   color: var(--aw-text-subtle);
-  font-size: var(--aw-font-size-sm);
-  font-weight: var(--aw-font-weight-medium);
+  font-size: var(--aw-execution-font-size);
+  font-weight: 400;
   font-variant-numeric: tabular-nums;
-  line-height: var(--aw-line-height-sm);
+  line-height: var(--aw-execution-line-height);
 }
 
 .execution-process-disclosure {
@@ -761,15 +761,29 @@
   box-shadow: none;
 }
 
-.execution-process-disclosure button {
-  min-height: 18px;
+.execution-process-disclosure > .aw-disclosure > .aw-disclosure-trigger {
+  min-height: var(--aw-execution-line-height);
+}
+
+.execution-process-disclosure > .aw-disclosure-open {
+  gap: var(--aw-execution-row-gap);
+}
+
+.execution-process-disclosure .aw-disclosure-chevron svg {
+  transition: transform 150ms ease-in-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .execution-process-disclosure .aw-disclosure-chevron svg {
+    transition: none;
+  }
 }
 
 .execution-process-disclosure-title {
   color: var(--aw-text-subtle);
-  font-size: var(--aw-font-size-sm);
+  font-size: var(--aw-execution-font-size);
   font-weight: 400;
-  line-height: var(--aw-line-height-sm);
+  line-height: var(--aw-execution-line-height);
 }
 
 .execution-process-diff {
@@ -794,27 +808,24 @@
 .execution-process-disclosure-body,
 .execution-activity-list {
   display: grid;
-  gap: 0;
+  gap: var(--aw-execution-step-gap);
   width: 100%;
   min-width: 0;
 }
 
 .execution-process-disclosure-body {
   padding-top: 0;
-  gap: 2px;
+  gap: var(--aw-execution-row-gap);
 }
 
-.execution-turn-body > .assistant-message-wrapper:not(:first-child),
-.execution-process-disclosure-body > .assistant-message-wrapper:not(:first-child) {
-  margin-top: 16px;
+/* Containers own spacing; commentary never adds a second margin layer. */
+.execution-turn-body > .assistant-message-wrapper,
+.execution-process-disclosure-body > .assistant-message-wrapper {
+  margin: 0;
 }
-.execution-turn-body > .assistant-message-wrapper + :not(.assistant-message-wrapper),
-.execution-process-disclosure-body > .assistant-message-wrapper + :not(.assistant-message-wrapper) {
-  margin-top: 16px;
-}
-.assistant-message-wrapper[data-final="false"] {
-  font-size: 14px;
-  line-height: 1.65;
+.assistant-message-wrapper[data-final="false"] .assistant-message {
+  font-size: var(--aw-execution-font-size);
+  line-height: var(--aw-execution-line-height);
 }
 
 /* Historical records remain complete and scrollable. Chromium may skip

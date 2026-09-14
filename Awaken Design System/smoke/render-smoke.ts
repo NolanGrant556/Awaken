@@ -167,12 +167,12 @@ const activeThoughtTraceHtml = renderToString(
 if (
   !activeThoughtTraceHtml.includes("思考") ||
   !activeThoughtTraceHtml.includes("中") ||
-  !activeThoughtTraceHtml.includes("aw-trace-dots") ||
+  !activeThoughtTraceHtml.includes("aw-trace-shimmer") ||
   !activeThoughtTraceHtml.includes('aria-expanded="false"') ||
   activeThoughtTraceHtml.includes("Inspecting the current implementation") ||
   activeThoughtTraceHtml.includes("<canvas")
 ) {
-  throw new Error("Active AwakenThoughtTrace must use a collapsed text-and-dots disclosure");
+  throw new Error("Active AwakenThoughtTrace must use a collapsed shimmering-text disclosure");
 }
 
 const completedThoughtTraceHtml = renderToString(

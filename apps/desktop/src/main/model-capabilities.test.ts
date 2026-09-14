@@ -25,6 +25,30 @@ function resolution(overrides: Partial<CapabilityResolution["scope"]> = {}): Cap
 }
 
 describe("model capabilities", () => {
+  it("exposes native effort only for documented Kimi models and narrows video by protocol", () => {
+    for (const [provider, model, defaultLevel] of [
+      ["kimi-cn", "kimi-k3", "max"],
+      ["kimi-coding-plan", "k3", "high"],
+      ["kimi-coding-plan", "k3-256k", "high"],
+      ["kimi-coding-plan", "kimi-for-coding", "max"],
+    ]) {
+      expect(capabilityForModel(provider, model)?.reasoning_effort).toEqual({
+        levels: ["low", "high", "max"], default_level: defaultLevel,
+      });
+      for (const effort of ["low", "high", "max"] as const) {
+        expect(resolveReasoningEffort(provider, model, effort, undefined)).toBe(effort);
+      }
+      for (const protocol of ["openai_responses", "anthropic_messages"]) {
+        expect(normalizeAdvancedWithModelCapability(undefined, provider, model, undefined, protocol).supportsVideo).toBe(false);
+      }
+    }
+    for (const model of ["kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6"]) {
+      expect(capabilityForModel("kimi-cn", model)?.supported_protocols).toEqual(["openai_chat"]);
+      expect(() => validateReasoningEffort("kimi-cn", model, "max")).toThrow();
+    }
+    expect(() => validateReasoningEffort("kimi-coding-plan", "kimi-for-coding-highspeed", "max")).toThrow();
+    expect(capabilityForModel("kimi-coding-plan", "k3-256k")?.supports_video).toBe(false);
+  });
   afterEach(() => {
     setCapabilityOverrides([]);
   });
@@ -80,7 +104,7 @@ describe("model capabilities", () => {
     expect(
       capabilityForModel("kimi-coding-plan", "kimi-for-coding"),
     ).toMatchObject({
-      context_window: 256 * 1024,
+      context_window: 1024 * 1024,
       max_output_tokens: 32 * 1024,
       default_max_tokens: 32 * 1024,
       default_temperature: 1,
@@ -316,7 +340,7 @@ describe("model capabilities", () => {
       ),
     ).toMatchObject({
       temperature: 1,
-      contextWindow: 256 * 1024,
+      contextWindow: 1024 * 1024,
       maxTokens: 32 * 1024,
       supportsVision: true,
       supportsVideo: true,

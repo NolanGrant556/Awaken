@@ -66,9 +66,10 @@ func nativeReasoningEffort(cfg Config, req Request) string {
 		if effort == "high" || effort == "max" {
 			return effort
 		}
-	case provider == "kimi-cn" && model == "kimi-k3":
-		return effort
-	case provider == "kimi-coding-plan" && (model == "k3" || model == "k3-256k"):
+	case isKimiEffortModel(provider, model):
+		if req.DisableReasoning {
+			return ""
+		}
 		return effort
 	case (provider == "glm" || provider == "glm-coding-plan") && (model == "glm-5.3" || model == "glm-5.3-flash"):
 		return effort
@@ -120,6 +121,10 @@ func isAgentExecutionPurpose(purpose RequestPurpose) bool {
 }
 
 func supportsAuxiliaryReasoningEffort(cfg Config, req Request) bool {
+	if isKimiEffortModel(cfg.ProviderID, capabilityModelID(cfg, req)) && isKimiAuxiliaryPurpose(req.Purpose) {
+		return true
+	}
+
 	if !isAuxiliaryReasoningBoundedPurpose(req.Purpose) {
 		return false
 	}
@@ -142,6 +147,21 @@ func capabilityModelID(cfg Config, req Request) string {
 
 func applyAuxiliaryRequestPolicy(cfg Config, req Request) Request {
 	model := strings.ToLower(resolveModel(cfg, req))
+	if isKimiEffortModel(cfg.ProviderID, model) {
+		// API K3 is reasoning-only. Coding Plan publishes an off switch;
+		// otherwise bound auxiliary work to the lowest native effort.
+		if _, ok := ResolveReasoningControlCapability(cfg, req); !req.DisableReasoning || !ok {
+			req.DisableReasoning = false
+			req.ReasoningPolicy = "low"
+		}
+		if req.DisableReasoning {
+			// Kimi Code routes off to K2.8 non-thinking; Chat requires 0.6.
+			setCompactTemperature(&req, 0.6)
+		} else {
+			setCompactTemperature(&req, 1.0)
+		}
+		return req
+	}
 	key := providerModelKey(cfg, req)
 
 	if ResolveReasoningOffDecision(cfg, req).Kind == ReasoningOffLowestEffort {
@@ -207,7 +227,6 @@ func isKimiK3(model string) bool {
 func isKimiK27Code(model string) bool {
 	return model == "kimi-k2.7-code" ||
 		model == "kimi-k2.7-code-highspeed" ||
-		model == "kimi-for-coding" ||
 		model == "kimi-for-coding-highspeed"
 }
 
@@ -271,4 +290,22 @@ func isArkProvider(key string) bool {
 		strings.Contains(key, "volcengine") ||
 		strings.Contains(key, "byteplus") ||
 		strings.Contains(key, "ark")
+}
+
+// kimi-for-coding is a rolling service alias: since 2026-09-11 it is K2.8,
+// while kimi-for-coding-highspeed remains K2.7. Do not infer one from the other.
+func isKimiEffortModel(provider, model string) bool {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	model = strings.ToLower(strings.TrimSpace(model))
+	return (provider == "kimi-cn" && model == "kimi-k3") ||
+		(provider == "kimi-coding-plan" && (model == "k3" || model == "k3-256k" || model == "kimi-for-coding"))
+}
+
+func isKimiAuxiliaryPurpose(purpose RequestPurpose) bool {
+	switch purpose {
+	case RequestPurposeThreadTitle, RequestPurposeCompactSummary, RequestPurposeMemoryRecall, RequestPurposeMemoryMaintenance, RequestPurposeHookPrompt, RequestPurposeConnectionTest:
+		return true
+	default:
+		return false
+	}
 }

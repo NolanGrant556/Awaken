@@ -307,7 +307,7 @@ func TestStreamInvokeOpenAIKimiK27AliasSuppressesDisableReasoning(t *testing.T) 
 	defer server.Close()
 
 	cfg := testConfig(server.URL)
-	cfg.Model = "kimi-for-coding"
+	cfg.Model = "kimi-for-coding-highspeed"
 	if _, err := StreamInvoke(context.Background(), cfg, Request{
 		UserPrompt:       "compact",
 		DisableReasoning: true,
@@ -340,7 +340,7 @@ func TestStreamInvokeOpenAICompactSummaryAppliesProviderTemperaturePolicy(t *tes
 		wantThinkingType string
 		wantNoThinking   bool
 	}{
-		{name: "kimi coding standard always thinking", model: "kimi-for-coding", wantTemperature: 1.0, wantNoThinking: true},
+		{name: "unidentified kimi alias uses conservative temperature", model: "kimi-for-coding", wantTemperature: 0.6, wantNoThinking: true},
 		{name: "kimi coding highspeed always thinking", model: "kimi-for-coding-highspeed", wantTemperature: 1.0, wantNoThinking: true},
 		{name: "kimi k2.6 instant", model: "kimi-k2.6", wantTemperature: 0.6, wantNoThinking: true},
 		{name: "kimi k2.7 always thinking", model: "kimi-k2.7-code", wantTemperature: 1.0, wantNoThinking: true},
@@ -400,7 +400,6 @@ func TestStreamInvokeOpenAIKimiK27DisableReasoningIsSuppressed(t *testing.T) {
 	models := []string{
 		"kimi-k2.7-code",
 		"kimi-k2.7-code-highspeed",
-		"kimi-for-coding",
 		"kimi-for-coding-highspeed",
 	}
 	for _, model := range models {

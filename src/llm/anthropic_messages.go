@@ -23,19 +23,24 @@ func newAnthropicTransport() *anthropicTransport {
 // --- 请求结构 ---
 
 type anthropicRequest struct {
-	Model       string             `json:"model"`
-	System      interface{}        `json:"system,omitempty"`
-	Messages    []anthropicMessage `json:"messages"`
-	Tools       []anthropicTool    `json:"tools,omitempty"`
-	MaxTokens   int                `json:"max_tokens"`
-	Temperature *float64           `json:"temperature,omitempty"`
-	Thinking    *anthropicThinking `json:"thinking,omitempty"`
-	Stream      bool               `json:"stream,omitempty"`
+	Model        string                 `json:"model"`
+	System       interface{}            `json:"system,omitempty"`
+	Messages     []anthropicMessage     `json:"messages"`
+	Tools        []anthropicTool        `json:"tools,omitempty"`
+	MaxTokens    int                    `json:"max_tokens"`
+	Temperature  *float64               `json:"temperature,omitempty"`
+	Thinking     *anthropicThinking     `json:"thinking,omitempty"`
+	Stream       bool                   `json:"stream,omitempty"`
+	OutputConfig *anthropicOutputConfig `json:"output_config,omitempty"`
+}
+
+type anthropicOutputConfig struct {
+	Effort string `json:"effort"`
 }
 
 type anthropicThinking struct {
 	Type         string `json:"type"`
-	BudgetTokens int    `json:"budget_tokens"`
+	BudgetTokens int    `json:"budget_tokens,omitempty"`
 }
 
 type anthropicTextBlock struct {
@@ -138,19 +143,32 @@ func prepareAnthropicRequest(cfg Config, req Request, stream bool) (PreparedRequ
 
 	maxTokens := resolveMaxTokens(cfg, req)
 	thinking := anthropicThinkingForRequest(req, maxTokens)
+	var outputConfig *anthropicOutputConfig
+	if cfg.ProviderID == "kimi-cn" || cfg.ProviderID == "kimi-coding-plan" {
+		// Kimi native effort is independent from Anthropic token budgets.
+		thinking = nil
+		if req.DisableReasoning {
+			if cap, ok := ResolveReasoningControlCapability(cfg, req); ok && cap.WireStrategy == ReasoningControlThinkingType {
+				thinking = &anthropicThinking{Type: "disabled"}
+			}
+		} else if effort := nativeReasoningEffort(cfg, req); effort != "" {
+			outputConfig = &anthropicOutputConfig{Effort: effort}
+		}
+	}
 	temperature := resolveTemperature(cfg, req)
 	if thinking != nil {
 		temperature = nil
 	}
 	anthropicReq := anthropicRequest{
-		Model:       resolveModel(cfg, req),
-		System:      anthropicSystemContent(req.SystemPrompt, cacheMetadata),
-		Messages:    messages,
-		Tools:       convertToolsToAnthropic(req.Tools),
-		MaxTokens:   maxTokens,
-		Temperature: temperature,
-		Thinking:    thinking,
-		Stream:      stream,
+		Model:        resolveModel(cfg, req),
+		System:       anthropicSystemContent(req.SystemPrompt, cacheMetadata),
+		Messages:     messages,
+		Tools:        convertToolsToAnthropic(req.Tools),
+		MaxTokens:    maxTokens,
+		Temperature:  temperature,
+		Thinking:     thinking,
+		OutputConfig: outputConfig,
+		Stream:       stream,
 	}
 
 	body, err := json.Marshal(anthropicReq)

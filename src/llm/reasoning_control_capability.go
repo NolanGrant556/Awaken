@@ -29,6 +29,19 @@ type ReasoningControlCapability struct {
 
 var reasoningControlCapabilities = []ReasoningControlCapability{
 	{
+		ID: "kimi_code_chat_thinking_v2", ProviderID: "kimi-coding-plan", BaseURL: "https://api.kimi.com/coding/v1",
+		ProtocolFamily: ProtocolOpenAIChat, Models: []string{"k3", "k3-256k", "kimi-for-coding"}, WireStrategy: ReasoningControlThinkingType,
+	},
+
+	{
+		ID: "kimi_code_messages_thinking_v2", ProviderID: "kimi-coding-plan", BaseURL: "https://api.kimi.com/coding",
+		ProtocolFamily: ProtocolAnthropicMessages, Models: []string{"k3", "k3-256k", "kimi-for-coding"}, WireStrategy: ReasoningControlThinkingType,
+	},
+	{
+		ID: "kimi_code_messages_v1_thinking_v2", ProviderID: "kimi-coding-plan", BaseURL: "https://api.kimi.com/coding/v1",
+		ProtocolFamily: ProtocolAnthropicMessages, Models: []string{"k3", "k3-256k", "kimi-for-coding"}, WireStrategy: ReasoningControlThinkingType,
+	},
+	{
 		ID: "deepseek_responses_effort_none_v1", ProviderID: "deepseek", BaseURL: "https://api.deepseek.com",
 		ProtocolFamily: ProtocolOpenAIResponses, Models: []string{"deepseek-flash", "deepseek-v4-flash", "deepseek-v4-pro"},
 		WireStrategy: ReasoningControlResponsesEffortNone,

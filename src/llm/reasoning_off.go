@@ -41,16 +41,19 @@ func ResolveReasoningOffDecision(cfg Config, req Request) ReasoningOffDecision {
 		}
 		return ReasoningOffDecision{}
 	}
+	if req.DisableReasoning {
+		if capability, ok := ResolveReasoningControlCapability(cfg, req); ok {
+			return ReasoningOffDecision{Kind: ReasoningOffWire, Capability: capability}
+		}
+	}
+	if isKimiEffortModel(cfg.ProviderID, model) && isKimiAuxiliaryPurpose(req.Purpose) {
+		return ReasoningOffDecision{Kind: ReasoningOffLowestEffort}
+	}
 	if protocol == ProtocolAnthropicMessages {
 		if req.DisableReasoning {
 			return ReasoningOffDecision{Kind: ReasoningOffProtocolOmit}
 		}
 		return ReasoningOffDecision{}
-	}
-	if req.DisableReasoning {
-		if capability, ok := ResolveReasoningControlCapability(cfg, req); ok {
-			return ReasoningOffDecision{Kind: ReasoningOffWire, Capability: capability}
-		}
 	}
 	if isAuxiliaryReasoningBoundedPurpose(req.Purpose) &&
 		(protocol == ProtocolOpenAIChat || protocol == ProtocolOpenAIResponses) &&
@@ -73,7 +76,7 @@ func supportsLowestEffortReasoningFallback(cfg Config, req Request) bool {
 	switch {
 	case provider == "kimi-cn" && model == "kimi-k3":
 		return true
-	case provider == "kimi-coding-plan" && (model == "k3" || model == "k3-256k"):
+	case provider == "kimi-coding-plan" && (model == "k3" || model == "k3-256k" || model == "kimi-for-coding"):
 		return true
 	case provider == "doubao" && (isDoubaoSeedReasoningEffortModel(model) || isDoubaoHostedDeepSeekGAModel(model)):
 		return true

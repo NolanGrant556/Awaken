@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import re
 import sys
 from pathlib import Path
@@ -58,6 +59,7 @@ REQUIRED_HEADINGS = (
 )
 DATE_RE = re.compile(r"官方资料复核日期：\d{4}-\d{2}-\d{2}")
 HTTPS_RE = re.compile(r"https://[^)\s>]+")
+MODEL_UPDATE_REFERENCE = "../../协议与能力判定.md#9-更新证据优先级"
 CATALOG_START = "export const BUILTIN_MODEL_PROVIDERS"
 PROVIDER_ID_RE = re.compile(r'^\s*id:\s*"([^"]+)"', re.MULTILINE)
 
@@ -101,6 +103,11 @@ def validate_provider(provider: str) -> list[str]:
         return errors + [f"{provider}: 缺少 供应商资料.md"]
 
     text = document.read_text(encoding="utf-8")
+    if f"]({MODEL_UPDATE_REFERENCE})" not in text:
+        errors.append(f"{provider}: 缺少模型资料更新规则引用")
+    policy_file, _ = MODEL_UPDATE_REFERENCE.split("#", 1)
+    if not (directory / policy_file).is_file():
+        errors.append(f"{provider}: 模型资料更新规则文件不存在")
     if not DATE_RE.search(text):
         errors.append(f"{provider}: 缺少 YYYY-MM-DD 官方资料复核日期")
     for heading in REQUIRED_HEADINGS:
@@ -123,7 +130,10 @@ def validate_provider(provider: str) -> list[str]:
     return errors
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="校验供应商资料结构；默认模型直接从代码读取，不要求在文档中重复列出。")
+    parser.add_argument("--list-defaults", action="store_true", help="校验后输出当前代码默认模型；不是官方最新模型查询")
+    args = parser.parse_args(argv)
     errors: list[str] = []
     if not PROVIDERS_ROOT.is_dir():
         errors.append(f"缺少目录：{PROVIDERS_ROOT}")
@@ -145,19 +155,6 @@ def main() -> int:
             errors.append(f"Desktop catalog provider ID 未映射到供应商资料：`{provider_id}`")
         for provider_id in sorted(documented_provider_ids - catalog_provider_ids):
             errors.append(f"供应商资料 provider ID 不在 Desktop catalog：`{provider_id}`")
-        provider_folder_by_id = {
-            provider_id: folder
-            for folder, provider_ids in EXPECTED_PROVIDER_IDS.items()
-            for provider_id in provider_ids
-        }
-        for provider_id, default_model in sorted(builtin_default_models().items()):
-            if not default_model or provider_id not in provider_folder_by_id:
-                continue
-            document = PROVIDERS_ROOT / provider_folder_by_id[provider_id] / "供应商资料.md"
-            if document.is_file() and f"`{default_model}`" not in document.read_text(encoding="utf-8"):
-                errors.append(
-                    f"{provider_folder_by_id[provider_id]}: 缺少 `{provider_id}` 当前默认模型 `{default_model}`"
-                )
 
     skill_file = SKILL_ROOT / "SKILL.md"
     skill_text = skill_file.read_text(encoding="utf-8")
@@ -198,6 +195,10 @@ def main() -> int:
             print(f"ERROR: {error}")
         return 1
     print(f"OK: {len(EXPECTED_PROVIDERS)} 个供应商目录和资料结构有效")
+    if args.list_defaults:
+        print("当前 checkout 的内置默认模型（官方可用性与能力须查对应官方文档）：")
+        for provider_id, default_model in sorted(builtin_default_models().items()):
+            print(f"- {provider_id}: {default_model or '由用户填写'}")
     return 0
 
 

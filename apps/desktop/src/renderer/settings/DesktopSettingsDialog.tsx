@@ -268,6 +268,7 @@ export function modelCandidatesForProtocol(
   protocol: string,
 ): string[] {
   return provider.models.filter((modelId) => {
+    if (provider.id === "kimi-cn" && protocol !== "openai_chat") return modelId === "kimi-k3";
     const confirmed = modelCapabilityFor(provider, modelId)?.supportedProtocols;
     // Sparse /models responses and manually entered future model IDs remain
     // admissible. Only an explicit per-model contract narrows suggestions.

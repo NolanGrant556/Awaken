@@ -683,11 +683,11 @@ func TestCompactConversationDefaultSummaryInvokerPreservesKimiK27Thinking(t *tes
 		Messages: messages,
 		Envelope: ContextEnvelope{
 			Messages: messages,
-			Model:    "kimi-for-coding",
+			Model:    "kimi-for-coding-highspeed",
 			CompactModelConfig: ModelConfig{
 				APIKey:   "test-key",
 				BaseURL:  server.URL,
-				Model:    "kimi-for-coding",
+				Model:    "kimi-for-coding-highspeed",
 				Protocol: string(llm.ProtocolOpenAIChat),
 			},
 		},

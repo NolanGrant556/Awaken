@@ -629,7 +629,7 @@ func TestGenerateThreadTitleWithProfileUsesProviderRequestPolicy(t *testing.T) {
 	title, err := generateThreadTitleWithProfile(context.Background(), &ModelProfileConfig{
 		APIKey:   "test-key",
 		BaseURL:  server.URL,
-		ModelID:  "kimi-for-coding",
+		ModelID:  "kimi-for-coding-highspeed",
 		Protocol: "openai_chat",
 	}, "prompt", agentcore.ModelCallAuthority{}, 0)
 	if err != nil {

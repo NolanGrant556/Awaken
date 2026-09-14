@@ -79,7 +79,7 @@ API、Coding Plan、Token Plan、Agent Plan 使用不同凭据、网关和计费
 - 不让同厂商的普通 API、Coding Plan、Token Plan 或 Agent Plan 互相试探用量端点；历史 profile 无法确定凭据类型时要求用户重新选择入口，不通过遍历 endpoint 猜测。
 - 不用推理 Key 试探组织/IAM 管理接口，也不用高权限管理凭据执行模型推理；管理凭据必须单独存储、最小授权且不得进入 Renderer 或日志。
 - 官方只提供控制台、IAM action 名或一方插件实现时，必须标明稳定性；没有公开请求合同就不能写成可直接接入的稳定 API。
-- 不把价格、额度或模型列表长期抄死；保留官方链接和复核日期，易变数字必须注明日期。
+- 模型会持续更新；型号、别名、协议、推理、窗口、价格与套餐以使用时对应入口的实际官方文档为准。遵守[模型资料更新规则](references/协议与能力判定.md#9-更新证据优先级)，默认模型从代码读取，不在各资料中重复抄写；官方变化不自动代表 Awaken 已支持。
 - 不用社区文章替代官方合同。官方未确认时写“未确认”，并保留测试证据和差异。
 - 修改供应商资料时，从仓库根运行 `python3 .codex/skills/llm-provider-management/scripts/check_provider_docs.py`。
 
@@ -99,7 +99,7 @@ API、Coding Plan、Token Plan、Agent Plan 使用不同凭据、网关和计费
 ## 更新供应商资料
 
 1. 只打开本次改动涉及的供应商官方页面；全面更新时才覆盖协议、模型、缓存、推理、计费／套餐、用量／余额与限流。
-2. 更新供应商文件顶部的“官方资料复核日期”。
+2. 仅为实际核对过的内容更新复核日期并注明范围；只调整链接或维护规则不把整份资料标为重新核验。
 3. 对用量查询记录凭据类别、endpoint、鉴权、区域、返回指标、权限、稳定性和 Awaken 当前接入状态；若只有控制台也要明确写出。
 4. 同时核对当前 `BUILTIN_MODEL_PROVIDERS`、能力表、adapter 和测试，不只改文档链接。
 5. 把官方新增能力写成“供应商官方支持”；只有 Awaken 落地并验证后才改成“Awaken 当前支持”。
@@ -116,4 +116,4 @@ python3 "${CODEX_HOME:-$HOME/.codex}/skills/skill-creator/scripts/quick_validate
 git diff --check
 ```
 
-第一条校验供应商目录、当前 builtin provider ID、顶层 reference 与 `agents/openai.yaml`；第二条校验 Skill frontmatter、命名和基础结构。代码或正式文档发生变化时，还要运行对应 Go/TypeScript 测试，不能用 Skill 结构校验代替产品验证。
+第一条校验供应商目录、当前 builtin provider ID、资料更新规则引用、顶层 reference 与 `agents/openai.yaml`，不要求复制默认模型名；附加 `--list-defaults` 可直接读取当前代码默认模型。第二条校验 Skill frontmatter、命名和基础结构。代码或正式文档发生变化时，还要运行对应 Go/TypeScript 测试，不能用 Skill 结构校验代替产品验证。

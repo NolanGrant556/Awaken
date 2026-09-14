@@ -323,6 +323,7 @@ const MODEL_CAPABILITIES: Record<string, Record<string, ModelCapabilityWire>> = 
   },
   "kimi-cn": {
     "kimi-k3": {
+      supported_protocols: ["openai_chat", "openai_responses", "anthropic_messages"],
       context_window: 1024 * 1024,
       max_output_tokens: 256 * 1024,
       default_max_tokens: 32 * 1024,
@@ -332,6 +333,7 @@ const MODEL_CAPABILITIES: Record<string, Record<string, ModelCapabilityWire>> = 
       reasoning_effort: { levels: ["low", "high", "max"], default_level: "max" },
     },
     "kimi-k2.7-code": {
+      supported_protocols: ["openai_chat"],
       context_window: 256 * 1024,
       max_output_tokens: 256 * 1024,
       default_max_tokens: 32 * 1024,
@@ -339,6 +341,7 @@ const MODEL_CAPABILITIES: Record<string, Record<string, ModelCapabilityWire>> = 
       supports_video: true,
     },
     "kimi-k2.7-code-highspeed": {
+      supported_protocols: ["openai_chat"],
       context_window: 256 * 1024,
       max_output_tokens: 256 * 1024,
       default_max_tokens: 32 * 1024,
@@ -346,6 +349,7 @@ const MODEL_CAPABILITIES: Record<string, Record<string, ModelCapabilityWire>> = 
       supports_video: true,
     },
     "kimi-k2.6": {
+      supported_protocols: ["openai_chat"],
       context_window: 256 * 1024,
       max_output_tokens: 256 * 1024,
       default_max_tokens: 32 * 1024,
@@ -353,6 +357,7 @@ const MODEL_CAPABILITIES: Record<string, Record<string, ModelCapabilityWire>> = 
       supports_video: true,
     },
     "kimi-k2.5": {
+      supported_protocols: ["openai_chat"],
       context_window: 256 * 1024,
       max_output_tokens: 256 * 1024,
       default_max_tokens: 32 * 1024,
@@ -360,6 +365,7 @@ const MODEL_CAPABILITIES: Record<string, Record<string, ModelCapabilityWire>> = 
       supports_video: true,
     },
     "moonshot-v1-128k": {
+      supported_protocols: ["openai_chat"],
       context_window: 128 * 1024,
       max_output_tokens: 128 * 1024,
       default_max_tokens: DEFAULT_MAX_TOKENS,
@@ -367,6 +373,7 @@ const MODEL_CAPABILITIES: Record<string, Record<string, ModelCapabilityWire>> = 
       supports_video: true,
     },
     "moonshot-v1-32k": {
+      supported_protocols: ["openai_chat"],
       context_window: 32 * 1024,
       max_output_tokens: 32 * 1024,
       default_max_tokens: DEFAULT_MAX_TOKENS,
@@ -374,6 +381,7 @@ const MODEL_CAPABILITIES: Record<string, Record<string, ModelCapabilityWire>> = 
       supports_video: true,
     },
     "moonshot-v1-8k": {
+      supported_protocols: ["openai_chat"],
       context_window: 8 * 1024,
       max_output_tokens: 8 * 1024,
       default_max_tokens: 4096,
@@ -398,12 +406,14 @@ const MODEL_CAPABILITIES: Record<string, Record<string, ModelCapabilityWire>> = 
       default_max_tokens: 32 * 1024,
       default_temperature: 1,
       supports_vision: true,
-      supports_video: true,
+      supports_video: false,
       supports_tools: "ready",
       reasoning_effort: { levels: ["low", "high", "max"], default_level: "high" },
     },
     "kimi-for-coding": {
-      context_window: 256 * 1024,
+      reasoning_effort: { levels: ["low", "high", "max"], default_level: "max" },
+      supports_tools: "ready",
+      context_window: 1024 * 1024,
       max_output_tokens: 32 * 1024,
       default_max_tokens: 32 * 1024,
       default_temperature: 1,
@@ -1183,7 +1193,11 @@ export function normalizeAdvancedWithModelCapability(
         : providerId === "openai" && protocol === "openai_responses"
           ? true
           : capability?.supports_native_pdf,
-    supportsVideo: capability?.supports_video,
+    supportsVideo:
+      (providerId === "kimi-cn" || providerId === "kimi-coding-plan") &&
+      protocol && protocol !== "openai_chat"
+        ? false
+        : capability?.supports_video,
     supportsTools: capability?.supports_tools,
     supportsPromptCache: capability?.supports_prompt_cache,
     defaultReasoningEffort: resolveReasoningEffort(

@@ -28,8 +28,8 @@ const EXPECTED_PROVIDER_PROTOCOLS: Record<string, string[]> = {
   google: ["openai_chat"],
   custom: ["openai_chat", "openai_responses", "anthropic_messages"],
   deepseek: ["openai_chat", "openai_responses", "anthropic_messages"],
-  "kimi-cn": ["openai_chat"],
-  "kimi-coding-plan": ["openai_chat", "anthropic_messages"],
+  "kimi-cn": ["openai_chat", "openai_responses", "anthropic_messages"],
+  "kimi-coding-plan": ["openai_chat", "openai_responses", "anthropic_messages"],
   "minimax-token-plan": [
     "openai_chat",
     "openai_responses",
@@ -69,6 +69,35 @@ afterEach(async () => {
 });
 
 describe("ModelProfileStore", () => {
+  it("persists both Kimi identities across all protocols and restores native effort", async () => {
+    for (const providerId of ["kimi-cn", "kimi-coding-plan"]) {
+      for (const protocol of THREE_LLM_PROTOCOLS) {
+        const store = new ModelProfileStore(configDir);
+        const modelId = providerId === "kimi-cn" ? "kimi-k3" : "kimi-for-coding";
+        const saved = await store.saveProfile({
+          providerId, modelId, protocol, displayName: `${providerId} ${protocol}`,
+          baseURL: providerId === "kimi-cn" ? "https://api.moonshot.cn/v1" : protocol === "anthropic_messages" ? "https://api.kimi.com/coding" : "https://api.kimi.com/coding/v1",
+          authScheme: "bearer", apiKey: "test-kimi", enabled: true, isDefault: false,
+        });
+        const reopened = new ModelProfileStore(configDir);
+        for (const effort of ["low", "high", "max"] as const) {
+          const run = await reopened.resolveRunProfile(saved.id, effort);
+          expect(run).toMatchObject({ providerId, modelId, protocol, reasoningEffort: effort });
+          if (providerId === "kimi-cn" && protocol === "anthropic_messages") {
+            expect(run?.baseURL).toBe("https://api.moonshot.cn/anthropic");
+          }
+          if (protocol !== "openai_chat") expect(run?.supportsVideo).toBe(false);
+        }
+      }
+    }
+    const store = new ModelProfileStore(configDir);
+    await expect(store.saveProfile({
+      providerId: "kimi-cn", modelId: "kimi-k2.6", protocol: "openai_responses",
+      displayName: "unsupported", baseURL: "https://api.moonshot.cn/v1",
+      authScheme: "bearer", apiKey: "test", enabled: true, isDefault: false,
+    })).rejects.toThrow("目前仅确认支持 kimi-k3");
+  });
+
   it("resolves one run snapshot, retains effective effort, and leaves inherited routes unexpanded", async () => {
     const store = new ModelProfileStore(configDir);
     const root = await store.saveProfile({ providerId: "deepseek", modelId: "deepseek-v4-pro", protocol: "openai_chat", apiKey: "test-only-key", advanced: { defaultReasoningEffort: "high" } });
@@ -1076,7 +1105,7 @@ describe("ModelProfileStore", () => {
         authScheme: "bearer",
         apiKey: "openai-key",
       }),
-    ).rejects.toThrow("OpenAI 不支持协议 anthropic_messages");
+    ).rejects.toThrow("Awaken 的 OpenAI 入口尚未接入协议 anthropic_messages");
 
     await expect(
       store.saveProfile({
@@ -1088,7 +1117,7 @@ describe("ModelProfileStore", () => {
         authScheme: "x-api-key",
         apiKey: "anthropic-key",
       }),
-    ).rejects.toThrow("Anthropic 不支持协议 openai_chat");
+    ).rejects.toThrow("Awaken 的 Anthropic 入口尚未接入协议 openai_chat");
 
     await expect(
       store.saveProfile({
@@ -1100,7 +1129,7 @@ describe("ModelProfileStore", () => {
         authScheme: "x-api-key",
         apiKey: "anthropic-key",
       }),
-    ).rejects.toThrow("Anthropic 不支持协议 openai_responses");
+    ).rejects.toThrow("Awaken 的 Anthropic 入口尚未接入协议 openai_responses");
 
     for (const protocol of THREE_LLM_PROTOCOLS) {
       await expect(
@@ -1477,7 +1506,7 @@ describe("ModelProfileStore", () => {
       baseURL: "https://api.kimi.com/coding/v1",
       temperature: 1,
       maxTokens: 32 * 1024,
-      contextWindow: 256 * 1024,
+      contextWindow: 1024 * 1024,
     });
   });
 

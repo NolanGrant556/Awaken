@@ -197,16 +197,18 @@ export const BUILTIN_MODEL_PROVIDERS: ModelProviderWire[] = [
     display_name: "Kimi Coding Plan",
     base_url: "https://api.kimi.com/coding/v1",
     protocol: "openai_chat",
-    supported_protocols: ["openai_chat", "anthropic_messages"],
-    official_protocols: ["openai_chat", "anthropic_messages"],
+    supported_protocols: [...THREE_LLM_PROTOCOLS],
+    official_protocols: [...THREE_LLM_PROTOCOLS],
     protocol_base_urls: {
       openai_chat: "https://api.kimi.com/coding/v1",
+      openai_responses: "https://api.kimi.com/coding/v1",
       anthropic_messages: "https://api.kimi.com/coding",
     },
     catalog_strategy: "none",
     auth_scheme: "bearer",
     protocol_auth_schemes: {
       openai_chat: "bearer",
+      openai_responses: "bearer",
       anthropic_messages: "bearer",
     },
     key_env_name: "KIMI_CODE_API_KEY",
@@ -350,9 +352,15 @@ export const BUILTIN_MODEL_PROVIDERS: ModelProviderWire[] = [
     display_name: "Kimi",
     base_url: "https://api.moonshot.cn/v1",
     protocol: "openai_chat",
-    supported_protocols: ["openai_chat"],
-    official_protocols: ["openai_chat"],
+    supported_protocols: [...THREE_LLM_PROTOCOLS],
+    official_protocols: [...THREE_LLM_PROTOCOLS],
+    protocol_base_urls: {
+      openai_chat: "https://api.moonshot.cn/v1",
+      openai_responses: "https://api.moonshot.cn/v1",
+      anthropic_messages: "https://api.moonshot.cn/anthropic",
+    },
     catalog_strategy: "openai",
+    catalog_url: "https://api.moonshot.cn/v1/models",
     auth_scheme: "bearer",
     key_env_name: "MOONSHOT_API_KEY",
     default_model: "kimi-k3",
@@ -604,9 +612,15 @@ function normalizeProtocol(provider: ModelProviderWire | undefined, value: strin
     return protocol;
   }
   if (allowed.length > 0 && !allowed.includes(protocol)) {
-    throw new Error(`${provider?.display_name ?? "该供应商"} 不支持协议 ${protocol}`);
+    throw new Error(`Awaken 的 ${provider?.display_name ?? "该供应商"} 入口尚未接入协议 ${protocol}`);
   }
   return protocol;
+}
+
+function validateKimiModelProtocol(providerId: string, modelId: string, protocol: string): void {
+  if (providerId === "kimi-cn" && protocol !== "openai_chat" && modelId !== "kimi-k3") {
+    throw new Error("Kimi API 的 Responses 和 Messages 目前仅确认支持 kimi-k3，请选择该模型或切回 Chat Completions。");
+  }
 }
 
 function normalizeAuthScheme(provider: ModelProviderWire | undefined, value: string | undefined): string {
@@ -656,6 +670,9 @@ function normalizeProviderBaseURL(
     protocol !== "anthropic_messages"
   ) {
     return "https://api.kimi.com/coding/v1";
+  }
+  if (provider?.id === "kimi-cn" && ["https://api.moonshot.cn/v1", "https://api.moonshot.cn/anthropic"].includes(normalized)) {
+    return provider.protocol_base_urls?.[protocol || provider.protocol] ?? normalized;
   }
   if (provider?.id === "volcengine" && normalized === "https://ark.cn-beijing.volces.com/api/v3") {
     return "https://ark.cn-beijing.volces.com/api/coding/v3";
@@ -1050,7 +1067,7 @@ function agentPlanReasoningCandidate(modelId: string): AgentPlanReasoningCandida
 
 function providerTestSuccessMessage(provider: ModelProviderWire, protocol: string): string {
   if (provider.id === "kimi-coding-plan") {
-    const endpoint = protocol === "anthropic_messages" ? "messages" : "chat/completions";
+    const endpoint = protocol === "anthropic_messages" ? "messages" : protocol === "openai_responses" ? "responses" : "chat/completions";
     return `连接测试通过：Kimi Code 已响应 ${endpoint}。`;
   }
   if (provider.id === "volcengine") {
@@ -1823,6 +1840,7 @@ export class ModelProfileStore {
       : -1;
     const modelId = normalizeProviderModelId(provider, request.modelId);
     const protocol = normalizeProtocol(provider, request.protocol);
+    validateKimiModelProtocol(provider.id, modelId, protocol);
     const baseURL = normalizeProviderBaseURL(provider, request.baseURL, protocol);
     const authScheme = normalizeAuthScheme(provider, request.authScheme);
     if (!baseURL) throw new Error("请填写 Base URL。");
@@ -2088,6 +2106,7 @@ export class ModelProfileStore {
   ): ModelProfileRunConfig {
     const provider = providerById(profile.providerId);
     const capabilityModelId = normalizeProviderModelId(provider, profile.modelId);
+    validateKimiModelProtocol(profile.providerId, capabilityModelId, profile.protocol || provider?.protocol || "openai_chat");
     const baseURL = normalizeProviderBaseURL(provider, profile.baseURL, profile.protocol);
     const apiKey = credential.apiKey;
     if (!apiKey && profile.authScheme !== "none") {
@@ -2249,6 +2268,7 @@ export class ModelProfileStore {
     const requestId = `connection_${randomUUID().replaceAll("-", "")}`;
     const requestBody = connectionTestBody(provider, protocol, modelId);
     try {
+      validateKimiModelProtocol(provider.id, modelId, protocol);
       validateProtocolEndpointContract(
         provider,
         protocol,

@@ -7,6 +7,42 @@ import (
 	"testing"
 )
 
+func TestKimiProtocolProfileResolution(t *testing.T) {
+	for _, providerID := range []string{"kimi-cn", "kimi-coding-plan"} {
+		provider, ok := ProviderByID(providerID)
+		if !ok {
+			t.Fatal(providerID)
+		}
+		model := "kimi-k3"
+		if providerID == "kimi-coding-plan" {
+			model = "kimi-for-coding"
+		}
+		for _, protocol := range allLLMProtocols() {
+			stored := storedProfile{ID: "kimi-test", ProviderID: providerID, ModelID: model, Protocol: protocol, Enabled: true}
+			profile := normalizeStoredProfile(stored, provider, nil)
+			if profile.ModelID != model || profile.Protocol != protocol || profile.ReasoningEffort != "max" || len(profile.ReasoningEffortLevels) != 3 {
+				t.Fatalf("%s/%s did not retain native effort", providerID, protocol)
+			}
+			if protocol != "openai_chat" && profile.SupportsVideo {
+				t.Fatal("video must not leak from Chat capability")
+			}
+			if providerID == "kimi-cn" && protocol == "anthropic_messages" && profile.BaseURL != "https://api.moonshot.cn/anthropic" {
+				t.Fatal("wrong API Messages base")
+			}
+			lowered := 256 * 1024
+			stored.Advanced.ContextWindow = &lowered
+			if normalizeStoredProfile(stored, provider, nil).ContextWindow != lowered {
+				t.Fatal("must preserve user's smaller context")
+			}
+		}
+	}
+	provider, _ := ProviderByID("kimi-cn")
+	profile := normalizeStoredProfile(storedProfile{ID: "old-model", ModelID: "kimi-k2.6", Protocol: "openai_responses", Enabled: true}, provider, nil)
+	if profile.ID != "" {
+		t.Fatal("K2.x must not silently gain Responses support")
+	}
+}
+
 func TestUserStoreResolveExplicitAndDefaultWithoutExposingKeys(t *testing.T) {
 	root := t.TempDir()
 	writeUserStoreFixture(t, root, `{

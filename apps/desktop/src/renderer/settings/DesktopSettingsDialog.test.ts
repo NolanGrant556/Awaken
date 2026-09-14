@@ -320,6 +320,10 @@ describe("model protocol recommendations", () => {
       "responses-ready",
       "future-model",
     ]);
+    const kimi = { ...provider, id: "kimi-cn", models: ["kimi-k3", "kimi-k2.6", "future-model"], modelCapabilities: {} };
+    expect(modelCandidatesForProtocol(kimi, "openai_chat")).toEqual(kimi.models);
+    expect(modelCandidatesForProtocol(kimi, "openai_responses")).toEqual(["kimi-k3"]);
+    expect(modelCandidatesForProtocol(kimi, "anthropic_messages")).toEqual(["kimi-k3"]);
   });
 
   it("keeps Ark hosted DeepSeek and GLM visible on both Chat and Responses", () => {

@@ -416,15 +416,26 @@ func normalizeStoredProfile(stored storedProfile, provider Provider, cached *cac
 	if baseURL == "" {
 		baseURL = provider.BaseURL
 	}
-	if provider.ID == "kimi-coding-plan" && baseURL == "https://api.kimi.com/coding" {
-		baseURL = provider.BaseURL
-	}
 	if provider.ID == "volcengine" && baseURL == "https://ark.cn-beijing.volces.com/api/v3" {
 		baseURL = provider.BaseURL
 	}
 	protocol := strings.ToLower(strings.TrimSpace(stored.Protocol))
 	if protocol == "" {
 		protocol = provider.Protocol
+	}
+	if provider.ID == "kimi-cn" && (baseURL == "https://api.moonshot.cn/v1" || baseURL == "https://api.moonshot.cn/anthropic") {
+		if protocol == "anthropic_messages" {
+			baseURL = "https://api.moonshot.cn/anthropic"
+		} else {
+			baseURL = provider.BaseURL
+		}
+	}
+	if provider.ID == "kimi-coding-plan" && (baseURL == "https://api.kimi.com/coding" || baseURL == "https://api.kimi.com/coding/v1") {
+		if protocol == "anthropic_messages" {
+			baseURL = "https://api.kimi.com/coding"
+		} else {
+			baseURL = provider.BaseURL
+		}
 	}
 	protocolWasRetired := false
 	if !validProtocolForProvider(protocol, provider) {
@@ -454,6 +465,9 @@ func normalizeStoredProfile(stored storedProfile, provider Provider, cached *cac
 	if cached != nil {
 		capability = mergeCachedCapability(capability, cached)
 		hasCapability = true
+	}
+	if provider.ID == "kimi-cn" && protocol != "openai_chat" && capabilityModelID != "kimi-k3" {
+		return ResolvedProfile{}
 	}
 	contextWindow := 0
 	maxTokens := 0
@@ -507,6 +521,9 @@ func normalizeStoredProfile(stored storedProfile, provider Provider, cached *cac
 			supportsVision = *stored.Advanced.SupportsVision
 		}
 		supportsNativePDF = false
+	}
+	if (provider.ID == "kimi-cn" || provider.ID == "kimi-coding-plan") && protocol != "openai_chat" {
+		supportsVideo = false
 	}
 	if stored.Advanced.ContextWindow != nil && *stored.Advanced.ContextWindow > 0 {
 		contextWindow = *stored.Advanced.ContextWindow

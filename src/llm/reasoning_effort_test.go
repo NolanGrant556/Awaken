@@ -103,8 +103,8 @@ func TestKimiK3AuxiliaryRequestUsesLowEffortInsteadOfInheritingThreadEffort(t *t
 
 func TestKimiK3CompactSummaryUsesLowEffortWhenDisableReasoningContractUnavailable(t *testing.T) {
 	prepared, err := PrepareRequest(Config{
-		APIKey: "test", BaseURL: "https://api.kimi.com/coding/v1", Protocol: ProtocolOpenAIChat,
-		ProviderID: "kimi-coding-plan", Model: "k3", ReasoningEffort: "max",
+		APIKey: "test", BaseURL: "https://api.moonshot.cn/v1", Protocol: ProtocolOpenAIChat,
+		ProviderID: "kimi-cn", Model: "kimi-k3", ReasoningEffort: "max",
 	}, Request{Purpose: RequestPurposeCompactSummary, DisableReasoning: true}, false)
 	if err != nil {
 		t.Fatal(err)
@@ -259,7 +259,7 @@ func TestDoubaoResponsesOpaqueEndpointDoesNotInventDisableOrEffort(t *testing.T)
 	}
 }
 
-func TestKimiK3MemoryAuxiliaryRequestDoesNotForceLowEffort(t *testing.T) {
+func TestKimiK3MemoryAuxiliaryRequestUsesLowEffort(t *testing.T) {
 	prepared, err := PrepareRequest(Config{
 		APIKey: "test", BaseURL: "https://api.moonshot.cn/v1", Protocol: ProtocolOpenAIChat,
 		ProviderID: "kimi-cn", Model: "kimi-k3", ReasoningEffort: "max",
@@ -271,8 +271,8 @@ func TestKimiK3MemoryAuxiliaryRequestDoesNotForceLowEffort(t *testing.T) {
 	if err := json.Unmarshal(prepared.Body, &body); err != nil {
 		t.Fatal(err)
 	}
-	if raw, exists := body["reasoning_effort"]; exists {
-		t.Fatalf("memory auxiliary request must not inherit compact/title low-effort policy: %s", raw)
+	if string(body["reasoning_effort"]) != `"low"` {
+		t.Fatalf("memory auxiliary request must use low effort: %s", body["reasoning_effort"])
 	}
 }
 
@@ -313,7 +313,7 @@ func TestDisableReasoningCapabilityIsIndependentFromPromptCache(t *testing.T) {
 		},
 		{
 			name:            "kimi k2.7 keeps cache but rejects disable reasoning",
-			cfg:             Config{ProviderID: "kimi-coding-plan", BaseURL: "https://api.kimi.com/coding/v1", Protocol: ProtocolOpenAIChat, Model: "kimi-for-coding"},
+			cfg:             Config{ProviderID: "kimi-coding-plan", BaseURL: "https://api.kimi.com/coding/v1", Protocol: ProtocolOpenAIChat, Model: "kimi-for-coding-highspeed"},
 			wantPromptCache: true,
 		},
 		{

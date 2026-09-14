@@ -1,0 +1,129 @@
+{
+  "date": "2026-09-14",
+  "provider": "kimi-coding-plan",
+  "model": "kimi-for-coding",
+  "method": "Current Go adapter, real official endpoints, existing Coding Plan credential; no tools or user files",
+  "main_streaming_requests": [
+    {
+      "content": "KIMI_OK",
+      "effort": "low",
+      "ok": true,
+      "protocol": "openai_chat",
+      "request_id": "",
+      "stop_reason": "stop"
+    },
+    {
+      "content": "KIMI_OK",
+      "effort": "high",
+      "ok": true,
+      "protocol": "openai_chat",
+      "request_id": "",
+      "stop_reason": "stop"
+    },
+    {
+      "content": "KIMI_OK",
+      "effort": "max",
+      "ok": true,
+      "protocol": "openai_chat",
+      "request_id": "",
+      "stop_reason": "stop"
+    },
+    {
+      "content": "KIMI_OK",
+      "effort": "low",
+      "ok": true,
+      "protocol": "openai_responses",
+      "request_id": "resp_O5gZUdDjBGs2RDGdOlTSWXTU",
+      "stop_reason": "completed"
+    },
+    {
+      "content": "KIMI_OK",
+      "effort": "high",
+      "ok": true,
+      "protocol": "openai_responses",
+      "request_id": "resp_n6ivUJe3Rd0Ftwb4xkdfOVMW",
+      "stop_reason": "completed"
+    },
+    {
+      "content": "KIMI_OK",
+      "effort": "max",
+      "ok": true,
+      "protocol": "openai_responses",
+      "request_id": "resp_6oD7Vsy3ktx58LPd7QUuBXDr",
+      "stop_reason": "completed"
+    },
+    {
+      "content": "KIMI_OK",
+      "effort": "low",
+      "ok": true,
+      "protocol": "anthropic_messages",
+      "request_id": "",
+      "stop_reason": "end_turn"
+    },
+    {
+      "content": "KIMI_OK",
+      "effort": "high",
+      "ok": true,
+      "protocol": "anthropic_messages",
+      "request_id": "",
+      "stop_reason": "end_turn"
+    },
+    {
+      "content": "KIMI_OK",
+      "effort": "max",
+      "ok": true,
+      "protocol": "anthropic_messages",
+      "request_id": "",
+      "stop_reason": "end_turn"
+    }
+  ],
+  "auxiliary_nonstreaming_requests": [
+    {
+      "content": "AUX_OK",
+      "ok": true,
+      "policy": "disabled",
+      "protocol": "openai_chat",
+      "purpose": "thread_title",
+      "request_id": "",
+      "stop_reason": "stop"
+    },
+    {
+      "content": "AUX_OK",
+      "ok": true,
+      "policy": "low",
+      "protocol": "openai_responses",
+      "purpose": "thread_title",
+      "request_id": "resp_TMBLuhg57wSZWx2EDDeJPn9P",
+      "stop_reason": "completed"
+    },
+    {
+      "content": "AUX_OK",
+      "ok": true,
+      "policy": "disabled",
+      "protocol": "anthropic_messages",
+      "purpose": "thread_title",
+      "request_id": "",
+      "stop_reason": "end_turn"
+    }
+  ],
+  "observed_contract_differences": [
+    {
+      "protocol": "openai_chat",
+      "status": 400,
+      "detail": "invalid temperature: only 0.6 is allowed for this model",
+      "resolution": "Thinking disabled uses temperature 0.6"
+    },
+    {
+      "protocol": "openai_responses",
+      "status": 400,
+      "detail": "reasoning.effort value none is not supported",
+      "resolution": "Auxiliary requests use low, not disabled"
+    }
+  ],
+  "limits": [
+    "No ordinary API credential configured",
+    "No real K3 / K3-256K full matrix",
+    "No real image/tool-call matrix",
+    "Windows and Linux not tested"
+  ]
+}

@@ -866,6 +866,8 @@ export type CliAuthSessionView = {
 };
 
 export type CliConnectorView = {
+  canUninstallManaged?: boolean;
+  uninstallMessage?: string;
   providerId: CliProviderId;
   displayName: string;
   readiness: CliConnectorReadiness;
@@ -2746,7 +2748,7 @@ export type AwakenBridge = {
     activation: CliActivation,
   ) => Promise<CliConnectorView>;
   logoutCliConnector: (providerId: CliProviderId) => Promise<CliConnectorView>;
-  uninstallManagedCli: (providerId: CliProviderId) => Promise<CliConnectorView>;
+  uninstallManagedCli: (providerId: CliProviderId, removeOfficialSkills?: boolean) => Promise<CliConnectorView>;
   subscribeCliConnectorState: (handler: CliConnectorStateHandler) => () => void;
   subscribeComposerCatalogEvents: (handler: (event: ComposerCatalogEvent) => void) => () => void;
   listMcpServers: () => Promise<RuntimeMcpServer[]>;

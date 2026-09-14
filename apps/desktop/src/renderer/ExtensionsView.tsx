@@ -750,6 +750,7 @@ export function ExtensionsView({
   const [cliDetailConnectorId, setCliDetailConnectorId] = useState<CliProviderId | null>(null);
   const [cliDetailLoading, setCliDetailLoading] = useState(false);
   const [cliDetailError, setCliDetailError] = useState<string | null>(null);
+  const [cliUninstallMessage, setCliUninstallMessage] = useState<string | null>(null);
   const cliDetailGenerationRef = useRef(0);
   const cliSnapshotVersionsRef = useRef<Partial<Record<CliProviderId, number>>>({});
 
@@ -1819,7 +1820,31 @@ export function ExtensionsView({
     });
   }
 
+  async function handleCliUninstall(providerId: CliProviderId, removeSkills: boolean): Promise<boolean> {
+    const detailGeneration = cliDetailGenerationRef.current;
+    const version = beginCliSnapshot(providerId);
+    setBusyConnectorId(providerId);
+    setCliDetailError(null);
+    setCliUninstallMessage(null);
+    try {
+      const next = await runtimeClient.uninstallManagedCli(providerId, removeSkills);
+      applyCliSnapshot(next, version);
+      if (detailGeneration === cliDetailGenerationRef.current) setCliUninstallMessage(next.uninstallMessage ?? "已卸载");
+      onNotice(next.uninstallMessage ?? "已卸载");
+      void refresh(false);
+      return true;
+    } catch (error) {
+      if (detailGeneration === cliDetailGenerationRef.current) {
+        setCliDetailError(cliConnectorUserMessage(error instanceof Error ? error.message : "卸载失败，请重试") ?? null);
+      }
+      return false;
+    } finally {
+      setBusyConnectorId((current) => current === providerId ? null : current);
+    }
+  }
+
   function handleCliDialogAction(providerId: CliProviderId, action: AwakenCliConnectorAction): void {
+    setCliUninstallMessage(null);
     if (action === "install") {
       startCliInstall(providerId);
       return;
@@ -2291,6 +2316,9 @@ export function ExtensionsView({
           } : undefined}
           brandLogoSrc={cliDetailConnectorId ? connectorBrandLogo(cliDetailConnectorId) : undefined}
           brandTone={connectorBrandTone(cliDetailConnectorId ?? "")}
+          canUninstallManaged={selectedCliView?.canUninstallManaged}
+          uninstallMessage={cliUninstallMessage}
+          onUninstall={(removeSkills) => cliDetailConnectorId ? handleCliUninstall(cliDetailConnectorId, removeSkills) : Promise.resolve(false)}
           errorMessage={cliDetailError}
           loadingProfile={cliDetailLoading}
           busy={cliDetailConnectorId !== null && busyConnectorId === cliDetailConnectorId}
@@ -2298,6 +2326,7 @@ export function ExtensionsView({
             if (!open) {
               cliDetailGenerationRef.current += 1;
               setCliDetailConnectorId(null);
+              setCliUninstallMessage(null);
               setCliDetailError(null);
               setCliDetailLoading(false);
             }

@@ -656,8 +656,8 @@ const bridge: AwakenBridge = {
     ) as Promise<CliConnectorView>,
   logoutCliConnector: (providerId: CliProviderId) =>
     ipcRenderer.invoke("awaken:logout-cli-connector", providerId) as Promise<CliConnectorView>,
-  uninstallManagedCli: (providerId: CliProviderId) =>
-    ipcRenderer.invoke("awaken:uninstall-managed-cli", providerId) as Promise<CliConnectorView>,
+  uninstallManagedCli: (providerId: CliProviderId, removeOfficialSkills?: boolean) =>
+    ipcRenderer.invoke("awaken:uninstall-managed-cli", providerId, removeOfficialSkills) as Promise<CliConnectorView>,
   subscribeCliConnectorState: (handler) => {
     cliConnectorStateHandlers.add(handler);
     return () => cliConnectorStateHandlers.delete(handler);

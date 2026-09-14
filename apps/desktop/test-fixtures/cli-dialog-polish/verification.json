@@ -1,0 +1,26 @@
+{
+  "date": "2026-09-14",
+  "surface": "Awaken Desktop, managed development entry at 127.0.0.1:5174",
+  "theme": "light",
+  "method": "Read-only native UI interaction through cua_repl and screenshot inspection",
+  "observed": [
+    "Opened DingTalk connected dialog before and after CSS update",
+    "Opened Feishu connected dialog after CSS update",
+    "Provider icons now use 34px boxes in equal 40px layout slots beside Awaken's padded icon",
+    "Connected label aligns with the uninstall label; leading check no longer shifts the text",
+    "Both account connections remained visible; no logout or uninstall was clicked"
+  ],
+  "screenshots": "Screenshots were inspected in the task's computer-use outputs; account screenshots are not copied into the repository",
+  "not_verified": [
+    "Dark theme in real Desktop",
+    "Minimum window size in real Desktop",
+    "Native keyboard Tab did not move focus during this observation"
+  ],
+  "asset_provenance": "Existing PNGs preserved; original official download URLs were not recorded in the repository",
+  "user_acceptance": {
+    "source": "用户在本任务中的明确反馈",
+    "uninstall": "测试了没问题",
+    "visual_polish": "可以了，推送吧",
+    "scope_note": "User-reported acceptance; no per-step account or filesystem readback was collected by the agent."
+  }
+}

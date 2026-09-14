@@ -8,6 +8,7 @@ import { ExtensionsView, type ExtensionSection } from "./ExtensionsView";
 
 function view(providerId: CliProviderId, overrides: Partial<CliConnectorView["readiness"]> = {}): CliConnectorView {
   return {
+    canUninstallManaged: true,
     providerId, displayName: providerId === "lark-cli" ? "飞书" : "钉钉",
     readiness: {
       providerId, activation: "enabled", install: "installed", executable: "available",
@@ -48,6 +49,11 @@ describe("built-in DingTalk and Feishu entry migration", () => {
       retryCliAuth: vi.fn(async (providerId: CliProviderId): Promise<CliConnectorView> => ({ ...view(providerId, { authentication: "in_progress", overall: "working" }), authSession: { id: "fixture-auth", provider: providerId, phase: "waiting_user" } })),
       cancelCliAuth: vi.fn(async (providerId: CliProviderId) => view(providerId, { authentication: "required", overall: "action_required", account: undefined })),
       logoutCliConnector: vi.fn(async (providerId: CliProviderId) => view(providerId, { authentication: "required", overall: "action_required", account: undefined })),
+      uninstallManagedCli: vi.fn(async (providerId: CliProviderId, _removeSkills?: boolean) => {
+        const next = { ...view(providerId, { install: "missing", executable: "missing", authentication: "unknown", account: undefined }), canUninstallManaged: false, uninstallMessage: "Awaken 管理的运行组件已卸载。账号已退出登录。" };
+        views = views.map(v => v.providerId === providerId ? next : v);
+        return next;
+      }),
       getPlugin: vi.fn(), enablePlugin: vi.fn(), disablePlugin: vi.fn(),
     };
   }
@@ -82,6 +88,41 @@ describe("built-in DingTalk and Feishu entry migration", () => {
     expect(client.logoutCliConnector).not.toHaveBeenCalled();
     await click("关闭"); await click("已安装插件");
     expect(container.querySelectorAll(".aw-plugin-card")).toHaveLength(0);
+  });
+
+  it.each(["dingtalk-workspace", "lark-cli"] as const)("uninstalls %s after logout with explicit skill selection", async (providerId) => {
+    await render(); await click(`查看插件 ${view(providerId).displayName}`);
+    await click(`取消登录 ${view(providerId).displayName}`);
+    await click("卸载");
+    expect(document.body.textContent).toContain("先退出当前账号");
+    expect(document.activeElement).toBe(button("取消"));
+    await click("取消");
+    expect(document.activeElement).toBe(button("卸载"));
+    expect(client.uninstallManagedCli).not.toHaveBeenCalled();
+    await click("卸载");
+    await act(async () => document.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click());
+    await click("确认卸载");
+    expect(client.uninstallManagedCli).toHaveBeenCalledWith(providerId, true);
+    expect(button("安装")).toBeTruthy();
+    expect(document.body.textContent).toContain("运行组件已卸载");
+    expect([...document.querySelectorAll("button")].some(el => el.textContent === "卸载")).toBe(false);
+    expect(client.listSkills).toHaveBeenCalled();
+  });
+
+  it("keeps uninstall failures in confirmation and allows retry without deleting skills by default", async () => {
+    client.uninstallManagedCli.mockRejectedValueOnce(new Error("目录权限不足"));
+    await render(); await click("查看插件 钉钉"); await click("卸载"); await click("确认卸载");
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain("目录权限不足");
+    expect(button("确认卸载")).toBeTruthy();
+    await click("确认卸载");
+    expect(client.uninstallManagedCli).toHaveBeenLastCalledWith("dingtalk-workspace", false);
+    expect(button("安装")).toBeTruthy();
+  });
+
+  it("does not offer uninstall for another product's installation", async () => {
+    views = views.map(v => ({ ...v, canUninstallManaged: false }));
+    await render(); await click("查看插件 钉钉");
+    expect([...document.querySelectorAll("button")].some(el => el.textContent === "卸载")).toBe(false);
   });
 
   it("removes the old CLI tab and cards from Connectors", async () => {

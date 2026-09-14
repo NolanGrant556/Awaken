@@ -56,6 +56,8 @@ type InstallationRecord = {
   lastVerifiedAt: string;
   officialSkillVersion?: string;
   officialSkillNames?: string[];
+  officialSkillDigests?: Record<string, string>;
+  pendingUninstall?: { directory: string; removedSkills: number; retainedSkills: string[]; removeOfficialSkills: boolean };
 };
 
 type StoredInstallations = { version: 1; records: Partial<Record<CliProviderId, InstallationRecord>> };
@@ -129,6 +131,7 @@ export class CliConnectorManager {
   private readonly authSessions = new Map<CliProviderId, AuthSessionInternal>();
   private readonly authEpochs = new Map<CliProviderId, number>();
   private disposed = false;
+  private readonly uninstalling = new Set<CliProviderId>();
 
   constructor(private readonly options: ManagerOptions) {
     this.root = path.join(options.homeDir, ".awaken", "runtime", "cli");
@@ -172,7 +175,10 @@ export class CliConnectorManager {
   async install(providerId: CliProviderId): Promise<CliConnectorView> {
     this.assertProvider(providerId);
     if (this.installControllers.has(providerId)) return this.view(providerId);
+    this.assertNotUninstalling(providerId);
+    if (this.installations.records[providerId]?.pendingUninstall) throw new CliConnectorError("CLI_UNINSTALL_PENDING", "请先重试完成卸载，再重新安装");
     await this.prepareNetworkOperation("cli-install");
+    this.assertNotUninstalling(providerId);
     const asset = this.assetFor(providerId);
     if (!asset) throw new CliConnectorError("CLI_UNSUPPORTED", "当前平台或架构没有受支持的安装资产");
     const controller = new AbortController();
@@ -239,7 +245,7 @@ export class CliConnectorManager {
       } else {
         this.setInstallProgress(providerId, "installing_cli", 58, "已验证本机 CLI");
       }
-      const officialSkillNames = await this.installOfficialSkills(providerId, controller.signal);
+      const officialSkills = await this.installOfficialSkills(providerId, controller.signal);
       this.setInstallProgress(providerId, "finishing", 97, "正在完成安装");
       await this.activateManagedExecutable(asset, executablePath);
       this.installations.records[providerId] = {
@@ -255,7 +261,8 @@ export class CliConnectorManager {
         activation: "enabled",
         lastVerifiedAt: new Date().toISOString(),
         officialSkillVersion: this.skillBundleFor(providerId)?.version,
-        officialSkillNames,
+        officialSkillNames: officialSkills.names,
+        officialSkillDigests: officialSkills.digests,
       };
       await this.saveInstallations();
       this.installProgress.delete(providerId);
@@ -290,6 +297,7 @@ export class CliConnectorManager {
 
   async startAuth(providerId: CliProviderId): Promise<CliConnectorView> {
     this.assertProvider(providerId);
+    this.assertNotUninstalling(providerId);
     if (this.disposed) throw new CliConnectorError("CLI_MANAGER_CLOSED", "连接器管理器已关闭");
     if (this.authSessions.has(providerId)) return this.view(providerId);
     const executable = this.requireExecutable(providerId);
@@ -363,6 +371,7 @@ export class CliConnectorManager {
   }
 
   async logout(providerId: CliProviderId): Promise<CliConnectorView> {
+    this.assertNotUninstalling(providerId);
     const executable = this.requireExecutable(providerId);
     await this.ensureAuthRoot();
     const args = providerId === "dingtalk-workspace"
@@ -373,20 +382,157 @@ export class CliConnectorManager {
     return this.refresh(providerId);
   }
 
-  async uninstallManaged(providerId: CliProviderId): Promise<CliConnectorView> {
+  private async logoutBeforeUninstall(providerId: CliProviderId, record: InstallationRecord): Promise<void> {
+    const candidates = [record.executablePath, path.join(this.managedBinPath(), path.basename(record.executablePath))];
+    const canonicalRoot = await fs.realpath(this.root);
+    let executable: string | undefined;
+    for (const candidate of candidates) {
+      if (!(await isExecutableFile(candidate))) continue;
+      const relative = path.relative(canonicalRoot, await fs.realpath(candidate));
+      if (relative.startsWith("..") || path.isAbsolute(relative)) continue;
+      try {
+        if (await this.probeVersion(providerId, candidate) === record.version) { executable = candidate; break; }
+      } catch { /* Try the other managed copy, never another product's executable. */ }
+    }
+    if (!executable) throw new CliConnectorError("CLI_UNINSTALL_LOGOUT_UNAVAILABLE", "运行组件缺失或损坏，无法退出登录；请先重新安装修复，再卸载", "retry");
+    await this.ensureAuthRoot();
+    try {
+      const args = providerId === "dingtalk-workspace"
+        ? ["auth", "logout", "--format", "json"] : ["auth", "logout", "--json"];
+      const result = await this.runCommand(executable, args, this.authRoot, 60_000);
+      if (result.exitCode !== 0) throw new Error("logout failed");
+      const reply = parseJSONObject(result.stdout);
+      if (reply?.ok === false || reply?.success === false || reply?.error) throw new Error("logout failed");
+      // Lark explicitly reports these successful no-op cases before config loading.
+      const alreadyAbsent = providerId === "lark-cli" && reply?.ok === true && reply.loggedOut === false &&
+        (reply.reason === "not_configured" || reply.reason === "not_logged_in");
+      if (!alreadyAbsent) {
+        const statusArgs = providerId === "dingtalk-workspace"
+          ? ["auth", "status", "--format", "json"] : ["auth", "status", "--json"];
+        const status = await this.runCommand(executable, statusArgs, this.authRoot, 30_000);
+        const envelope = parseJSONObject(status.stdout);
+        // A failed probe or an unavailable verification service is not evidence of logout.
+        if (status.exitCode !== 0 || !isUserLoggedOut(providerId, envelope)) throw new Error("logout not confirmed");
+      }
+    } catch {
+      throw new CliConnectorError("CLI_UNINSTALL_LOGOUT_FAILED", "退出登录未完成，卸载已停止，运行组件和技能未删除，请重试", "retry");
+    }
+    this.setReadiness(providerId, {
+      ...this.readiness(providerId), authentication: "required", account: undefined,
+      overall: "action_required", safeError: undefined, updatedAt: new Date().toISOString(),
+    });
+  }
+
+  private assertNotUninstalling(providerId: CliProviderId): void {
+    if (this.uninstalling.has(providerId)) throw new CliConnectorError("CLI_UNINSTALL_BUSY", "正在卸载，请稍后重试");
+  }
+
+  async uninstallManaged(providerId: CliProviderId, removeOfficialSkills = false): Promise<CliConnectorView> {
+    this.assertProvider(providerId);
+    this.assertNotUninstalling(providerId);
+    const authPhase = this.authSessions.get(providerId)?.view.phase;
+    if (this.installControllers.has(providerId) || (authPhase && !["failed", "cancelled", "authorized"].includes(authPhase))) {
+      throw new CliConnectorError("CLI_UNINSTALL_BUSY", "请先完成或取消安装、授权，再卸载");
+    }
     const record = this.installations.records[providerId];
     if (!record || record.ownership !== "awaken-managed") {
-      throw new CliConnectorError("CLI_UNINSTALL_NOT_MANAGED", "只能卸载 Awaken 管理的 CLI");
+      throw new CliConnectorError("CLI_UNINSTALL_NOT_MANAGED", "只能卸载 Awaken 管理的运行组件");
     }
-    await this.cancelAuth(providerId);
-    const providerRoot = path.join(this.root, providerId);
-    const relative = path.relative(providerRoot, record.executablePath);
-    if (relative.startsWith("..") || path.isAbsolute(relative)) throw new CliConnectorError("CLI_UNINSTALL_PATH_INVALID", "受管安装路径无效");
-    await fs.rm(path.dirname(record.executablePath), { recursive: true, force: true });
-    await fs.rm(path.join(this.managedBinPath(), path.basename(record.executablePath)), { force: true });
-    delete this.installations.records[providerId];
-    await this.saveInstallations();
-    return this.refresh(providerId);
+    this.uninstalling.add(providerId);
+    // Invalidate probes started before removal, so they cannot publish an old installed state.
+    this.authEpochs.set(providerId, (this.authEpochs.get(providerId) ?? 0) + 1);
+    const originalRecord = structuredClone(record);
+    const staging = record.pendingUninstall?.directory ?? path.join(this.root, ".uninstall", randomUUID());
+    if (path.dirname(staging) !== path.join(this.root, ".uninstall")) {
+      this.uninstalling.delete(providerId);
+      throw new CliConnectorError("CLI_UNINSTALL_PATH_INVALID", "卸载记录路径无效，请检查安装记录");
+    }
+    const moved: Array<{ source: string; backup: string }> = [];
+    const retained: string[] = record.pendingUninstall?.retainedSkills ?? [];
+    let removedSkills = record.pendingUninstall?.removedSkills ?? 0;
+    removeOfficialSkills = record.pendingUninstall?.removeOfficialSkills ?? removeOfficialSkills;
+    let committed = Boolean(record.pendingUninstall);
+    let loggedOut = Boolean(record.pendingUninstall);
+    try {
+      if (!record.pendingUninstall) {
+        await this.cancelAuth(providerId);
+        const providerRoot = path.join(this.root, providerId);
+        const executableDirectory = path.dirname(record.executablePath);
+        const relative = path.relative(providerRoot, executableDirectory);
+        if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+          throw new CliConnectorError("CLI_UNINSTALL_PATH_INVALID", "受管安装路径无效");
+        }
+        const move = async (source: string): Promise<void> => {
+          if (!(await pathExists(source))) return;
+          // Never traverse a parent redirected by another installer.
+          if (await fs.realpath(path.dirname(source)) !== path.join(await fs.realpath(this.options.homeDir), path.relative(this.options.homeDir, path.dirname(source)))) {
+            throw new CliConnectorError("CLI_UNINSTALL_PATH_INVALID", "安装目录已被重定向，未删除，请检查后重试");
+          }
+          await fs.mkdir(staging, { recursive: true, mode: 0o700 });
+          const backup = path.join(staging, String(moved.length));
+          await fs.rename(source, backup);
+          moved.push({ source, backup });
+        };
+        await this.logoutBeforeUninstall(providerId, record);
+        loggedOut = true;
+        if (removeOfficialSkills) {
+          for (const name of record.officialSkillNames ?? []) {
+            if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(name)) continue;
+            const source = path.join(this.options.homeDir, ".agents", "skills", name);
+            if (!(await pathExists(source))) continue;
+            const expected = record.officialSkillDigests?.[name];
+            if (!expected || await skillDirectoryDigest(source) !== expected) {
+              retained.push(name);
+              continue;
+            }
+            await move(source);
+            removedSkills += 1;
+            // Recheck after moving: an external change during comparison is preserved.
+            if (await skillDirectoryDigest(moved[moved.length - 1].backup) !== expected) {
+              throw new CliConnectorError("CLI_UNINSTALL_SKILL_CHANGED", "技能在卸载期间发生变化，已停止，请重试");
+            }
+          }
+        }
+        await move(executableDirectory);
+        await move(path.join(this.managedBinPath(), path.basename(record.executablePath)));
+        record.pendingUninstall = { directory: staging, removedSkills, retainedSkills: retained, removeOfficialSkills };
+        await this.saveInstallations();
+        committed = true;
+      }
+      // Keep a durable retry record until both file cleanup and registry removal succeed.
+      await fs.rm(staging, { recursive: true, force: true });
+      delete this.installations.records[providerId];
+      try { await this.saveInstallations(); }
+      catch (error) { this.installations.records[providerId] = record; throw error; }
+    } catch (error) {
+      if (!committed) {
+        this.installations.records[providerId] = originalRecord;
+        let restoreFailed = false;
+        for (const entry of [...moved].reverse()) {
+          try {
+            if (await pathExists(entry.source)) { restoreFailed = true; continue; }
+            await fs.rename(entry.backup, entry.source);
+          } catch { restoreFailed = true; }
+        }
+        if (restoreFailed) throw new CliConnectorError("CLI_UNINSTALL_RECOVERY_FAILED", `卸载未完成，部分文件保留在 ${staging}，请勿重新安装覆盖`);
+      }
+      const failure = error instanceof CliConnectorError ? error : new CliConnectorError("CLI_UNINSTALL_FAILED", committed ? "卸载清理未完成，请重试卸载" : "卸载失败，已恢复安装文件，请检查目录权限后重试");
+      if (loggedOut) throw new CliConnectorError(failure.code, `账号已退出登录。${failure.message}`, failure.recovery);
+      throw failure;
+    } finally {
+      this.uninstalling.delete(providerId);
+    }
+    const next = await this.refresh(providerId);
+    return {
+      ...next,
+      uninstallMessage: [
+        "已退出登录并卸载 Awaken 管理的运行组件。",
+        next.readiness.install === "installed" ? "检测到本机其他安装，已按实际状态显示。" : "",
+        removeOfficialSkills ? `已移除 ${removedSkills} 项可确认归属的官方技能。` : "已保留官方技能。",
+        retained.length ? `以下技能因缺少归属记录或内容已变化而保留：${retained.join("、")}。` : "",
+        "其他产品的安装文件保持不变。",
+      ].filter(Boolean).join(""),
+    };
   }
 
   async dispose(): Promise<void> {
@@ -400,6 +546,13 @@ export class CliConnectorManager {
   }
 
   private async refresh(providerId: CliProviderId): Promise<CliConnectorView> {
+    if (this.uninstalling.has(providerId)) return this.view(providerId);
+    if (this.installations.records[providerId]?.pendingUninstall) {
+      return this.setReadiness(providerId, { ...this.defaultView(providerId).readiness,
+        authentication: "required", overall: "action_required",
+        safeError: { code: "CLI_UNINSTALL_PENDING", message: "账号已退出，卸载尚未完成，请重试卸载", recovery: "retry" },
+      });
+    }
     const epoch = this.authEpochs.get(providerId);
     const commit = (readiness: CliConnectorReadiness) =>
       this.disposed || this.authEpochs.get(providerId) !== epoch ? this.view(providerId) : this.setReadiness(providerId, readiness);
@@ -461,6 +614,7 @@ export class CliConnectorManager {
         safeError: status.safeError,
         updatedAt: new Date().toISOString(),
       };
+      if (this.authEpochs.get(providerId) !== epoch) return this.view(providerId);
       if (!record) {
         this.installations.records[providerId] = {
           providerId,
@@ -768,7 +922,7 @@ export class CliConnectorManager {
     providerId: CliProviderId,
     signal: AbortSignal,
     reportProgress = true,
-  ): Promise<string[]> {
+  ): Promise<{ names: string[]; digests: Record<string, string> }> {
     const bundle = this.skillBundleFor(providerId);
     if (!bundle) throw new CliConnectorError("CLI_SKILL_BUNDLE_MISSING", "官方 Skill 安装资产缺失");
     const staging = path.join(this.root, ".staging", `${providerId}-skills-${randomUUID()}`);
@@ -790,8 +944,13 @@ export class CliConnectorManager {
       const payload = path.join(staging, "payload");
       await extractSkillBundle(archivePath, bundle.archiveType, bundle, payload);
       if (reportProgress) this.setInstallProgress(providerId, "installing_skills", 93, "正在安装官方 Skills");
+      const digests: Record<string, string> = {};
+      for (const name of bundle.skillNames) {
+        const digest = await skillDirectoryDigest(path.join(payload, name));
+        if (digest) digests[name] = digest;
+      }
       await replaceSkillDirectoriesAtomically(payload, path.join(this.options.homeDir, ".agents", "skills"), bundle.skillNames);
-      return [...bundle.skillNames];
+      return { names: [...bundle.skillNames], digests };
     } catch (error) {
       if (error instanceof CliConnectorError) throw error;
       throw new CliConnectorError("CLI_SKILL_INSTALL_FAILED", "官方 Skill 安装失败", "retry");
@@ -805,13 +964,15 @@ export class CliConnectorManager {
     for (const providerId of providers) {
       const record = this.installations.records[providerId];
       const bundle = this.skillBundleFor(providerId);
-      if (!record || record.ownership !== "awaken-managed" || !bundle) continue;
+      if (!record || record.ownership !== "awaken-managed" || record.pendingUninstall || !bundle) continue;
       const skillFiles = bundle.skillNames.map((name) => path.join(this.options.homeDir, ".agents", "skills", name, "SKILL.md"));
       const presence = await Promise.all(skillFiles.map((file) => isRegularFile(file)));
       if (presence.every(Boolean)) continue;
       if (presence.some(Boolean)) continue; // Preserve a partial set owned by another installer or the user.
       try {
-        record.officialSkillNames = await this.installOfficialSkills(providerId, new AbortController().signal, false);
+        const installed = await this.installOfficialSkills(providerId, new AbortController().signal, false);
+        record.officialSkillNames = installed.names;
+        record.officialSkillDigests = installed.digests;
         record.officialSkillVersion = bundle.version;
         changed = true;
       } catch {
@@ -891,6 +1052,7 @@ export class CliConnectorManager {
   private setReadiness(providerId: CliProviderId, readiness: CliConnectorReadiness): CliConnectorView {
     const view: CliConnectorView = {
       providerId,
+      canUninstallManaged: this.installations.records[providerId]?.ownership === "awaken-managed",
       displayName: providerId === "dingtalk-workspace" ? "钉钉" : "飞书",
       readiness,
       authSession: this.authSessions.get(providerId)?.view,
@@ -1284,4 +1446,38 @@ function mapError(error: unknown, fallbackCode: string): CliConnectorError {
   if (error instanceof CliConnectorError) return error;
   if ((error as NodeJS.ErrnoException)?.name === "AbortError") return new CliConnectorError("CLI_INSTALL_CANCELLED", "安装已取消", "retry");
   return new CliConnectorError(fallbackCode, "CLI 操作失败", "retry");
+}
+
+/** Fingerprint a complete regular-file skill tree; redirected or oversized trees are never owned for removal. */
+async function skillDirectoryDigest(root: string): Promise<string | undefined> {
+  try {
+    if (!(await fs.lstat(root)).isDirectory()) return undefined;
+    const hash = createHash("sha256");
+    let bytes = 0;
+    let entries = 0;
+    const walk = async (directory: string): Promise<void> => {
+      for (const name of (await fs.readdir(directory)).sort()) {
+        if (++entries > 10000) throw new Error("too many entries");
+        const file = path.join(directory, name);
+        const stat = await fs.lstat(file);
+        hash.update(JSON.stringify([path.relative(root, file), stat.mode & 0o777]));
+        if (stat.isDirectory()) { hash.update("directory"); await walk(file); }
+        else if (stat.isFile()) {
+          bytes += stat.size;
+          if (bytes > 64 * 1024 * 1024) throw new Error("too large");
+          hash.update("file"); hash.update(createHash("sha256").update(await fs.readFile(file)).digest());
+        } else throw new Error("not a regular file");
+      }
+    };
+    await walk(root);
+    return hash.digest("hex");
+  } catch { return undefined; }
+}
+
+function isUserLoggedOut(providerId: CliProviderId, envelope: Record<string, unknown> | undefined): boolean {
+  if (!envelope || envelope.ok === false || envelope.success === false || envelope.error) return false;
+  if (providerId === "dingtalk-workspace") return envelope.authenticated === false;
+  if (!envelope.identities || typeof envelope.identities !== "object") return false;
+  const user = (envelope.identities as Record<string, unknown>).user;
+  return !!user && typeof user === "object" && (user as Record<string, unknown>).available === false;
 }

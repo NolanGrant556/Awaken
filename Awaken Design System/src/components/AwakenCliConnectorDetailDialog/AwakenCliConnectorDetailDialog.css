@@ -17,9 +17,25 @@
 }
 
 .aw-cli-connector-detail__brands {
-  display: inline-flex;
+  display: grid;
+  grid-template-columns: 40px 22px 40px;
   align-items: center;
+  justify-items: center;
   gap: 10px;
+}
+
+/* The Desktop icon has transparent padding: its visible silhouette is about 33px at 40px. */
+.aw-cli-connector-detail__brands .aw-connector-brand-icon[data-size="sm"] {
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: var(--aw-radius-app-icon);
+  background: transparent;
+}
+
+.aw-cli-connector-detail__brands .aw-connector-brand-icon[data-tone="lark"] {
+  border: 1px solid #e5e7eb;
+  background: #fff;
 }
 
 .aw-cli-connector-detail__link {
@@ -139,7 +155,21 @@
 }
 .aw-cli-connector-detail__progress p { margin: 0; color: var(--aw-text-tertiary); font-size: 11px; }
 
-.aw-cli-connector-detail__action { width: 100%; }
+.aw-cli-connector-detail__action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+}
+
+/* Center the label itself; the leading check must not push it away from the footer axis. */
+.aw-cli-connector-detail__connected-label { position: relative; }
+.aw-cli-connector-detail__connected-label > svg {
+  position: absolute;
+  right: calc(100% + 6px);
+  top: 50%;
+  transform: translateY(-50%);
+}
 .aw-cli-connector-detail__action[data-action="cancel_install"],
 .aw-cli-connector-detail__action[data-action="cancel_authorization"] {
   color: var(--aw-error) !important;
@@ -168,3 +198,9 @@
 @media (prefers-reduced-motion: reduce) {
   .aw-cli-connector-detail__progress-track > span { transition: none; }
 }
+
+.aw-cli-connector-detail__actions { display: grid; gap: 4px; width: 100%; }
+.aw-cli-connector-detail__uninstall-buttons { display: flex; gap: 8px; justify-content: flex-end; width: 100%; }
+.aw-cli-connector-detail__uninstall-copy { color: var(--aw-text-secondary); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.aw-cli-connector-detail__uninstall-copy p { margin: 0 0 12px; }
+.aw-cli-connector-detail__uninstall-copy label { display: flex; gap: 8px; align-items: center; color: var(--aw-text-primary); margin-bottom: 8px; }

@@ -254,7 +254,7 @@ export type RuntimeClient = {
     activation: CliActivation,
   ) => Promise<CliConnectorView>;
   logoutCliConnector: (providerId: CliProviderId) => Promise<CliConnectorView>;
-  uninstallManagedCli: (providerId: CliProviderId) => Promise<CliConnectorView>;
+  uninstallManagedCli: (providerId: CliProviderId, removeOfficialSkills?: boolean) => Promise<CliConnectorView>;
   subscribeCliConnectorState: (handler: CliConnectorStateHandler) => () => void;
   subscribeComposerCatalogEvents: (handler: (event: ComposerCatalogEvent) => void) => () => void;
   listMcpServers: () => Promise<RuntimeMcpServer[]>;
@@ -605,7 +605,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     setCliConnectorActivation: (providerId, activation) =>
       bridge.setCliConnectorActivation(providerId, activation),
     logoutCliConnector: (providerId) => bridge.logoutCliConnector(providerId),
-    uninstallManagedCli: (providerId) => bridge.uninstallManagedCli(providerId),
+    uninstallManagedCli: (providerId, removeOfficialSkills) => bridge.uninstallManagedCli(providerId, removeOfficialSkills),
     subscribeCliConnectorState: (handler) => bridge.subscribeCliConnectorState(handler),
     subscribeComposerCatalogEvents: (handler) => bridge.subscribeComposerCatalogEvents(handler),
     listMcpServers: () => bridge.listMcpServers(),

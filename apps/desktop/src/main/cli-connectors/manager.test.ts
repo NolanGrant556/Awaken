@@ -90,16 +90,24 @@ describe("CliConnectorManager", () => {
     await expect(readResponseBody(response, 4)).rejects.toMatchObject({ code: "CLI_ARCHIVE_TOO_LARGE" });
   });
 
-  it("installs a pinned verified archive and reports auth-required readiness", async () => {
+  it.each(["remove", "keep", "modified", "legacy", "rollback", "external", "missing", "failed-auth", "symlink", "logout-failed", "logout-still-authorized", "logout-status-error", "both-missing", "cleanup-failed"])("installs pinned assets and safely uninstalls: %s", async (scenario) => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "awaken-cli-manager-"));
     const source = path.join(root, "source");
     await fs.mkdir(source);
     const executable = path.join(source, "dws");
     await fs.writeFile(executable, `#!/bin/sh
+state_dir="${root}"
 if [ "$1" = "version" ]; then
   printf '{"version":"v1.0.32"}\n'
+elif [ "$1" = "auth" ] && [ "$2" = "logout" ]; then
+  echo logout >> "$state_dir/operations"
+  if [ -f "$state_dir/logout-failed" ]; then exit 1; fi
+  if [ ! -f "$state_dir/logout-still-authorized" ]; then /bin/rm -f "$state_dir/authorized"; fi
+  printf '{"ok":true}\n'
 elif [ "$1" = "auth" ] && [ "$2" = "status" ]; then
-  printf '{"success":true,"authenticated":false}\n'
+  if [ -f "$state_dir/logout-status-error" ]; then printf '{}\n'; exit 1; fi
+  if [ -f "$state_dir/authorized" ]; then printf '{"success":true,"authenticated":true}\n';
+  else printf '{"success":true,"authenticated":false}\n'; fi
 else
   printf '{"ok":true}\n'
 fi
@@ -194,7 +202,7 @@ fi
     await expect(fs.stat(authRoot)).resolves.toMatchObject({ mode: expect.any(Number) });
 
     await fs.rm(path.join(root, ".agents", "skills", "dws"), { recursive: true, force: true });
-    const restarted = new CliConnectorManager({
+    const makeRestarted = () => new CliConnectorManager({
       homeDir: root,
       platform: "darwin",
       architecture: "arm64",
@@ -203,10 +211,99 @@ fi
       publishReadiness: vi.fn(async () => undefined),
       onStateChanged: vi.fn(),
     });
+    let restarted = makeRestarted();
     await restarted.initialize();
-    await expect(fs.readFile(path.join(root, ".agents", "skills", "dws", "SKILL.md"), "utf8"))
-      .resolves.toContain("name: dws");
+    const skillFile = path.join(root, ".agents", "skills", "dws", "SKILL.md");
+    await expect(fs.readFile(skillFile, "utf8")).resolves.toContain("name: dws");
+    expect(restarted.list()[0].canUninstallManaged).toBe(true);
+    const registryPath = path.join(root, ".awaken", "runtime", "cli", "installations.json");
+    if (scenario === "modified") await fs.appendFile(skillFile, "user edits");
+    if (scenario === "symlink") {
+      const outside = path.join(root, "external-skill");
+      await fs.rename(path.dirname(skillFile), outside);
+      await fs.symlink(outside, path.dirname(skillFile));
+    }
+    if (scenario === "failed-auth") {
+      await restarted.startAuth("dingtalk-workspace");
+      await vi.waitFor(() => expect(restarted.list()[0].authSession?.phase).toBe("failed"));
+    }
+    if (scenario === "legacy") {
+      const registry = JSON.parse(await fs.readFile(registryPath, "utf8"));
+      delete registry.records["dingtalk-workspace"].officialSkillDigests;
+      await fs.writeFile(registryPath, JSON.stringify(registry));
+      await restarted.dispose(); restarted = makeRestarted(); await restarted.initialize();
+    }
+    if (scenario === "external") {
+      await fs.mkdir(path.join(root, ".local", "bin"), { recursive: true });
+      await fs.copyFile(executable, path.join(root, ".local", "bin", "dws"));
+      await fs.chmod(path.join(root, ".local", "bin", "dws"), 0o700);
+    }
+    if (scenario === "missing") {
+      await fs.rm(installed.readiness.executablePath!);
+      await restarted.refreshProvider("dingtalk-workspace");
+      expect(restarted.list()[0].canUninstallManaged).toBe(true);
+    }
+    await fs.writeFile(path.join(root, "authorized"), "yes");
+    if (scenario.startsWith("logout-")) {
+      await fs.writeFile(path.join(root, scenario), "yes");
+      await expect(restarted.uninstallManaged("dingtalk-workspace", true)).rejects.toMatchObject({ code: "CLI_UNINSTALL_LOGOUT_FAILED" });
+      await expect(fs.stat(installed.readiness.executablePath!)).resolves.toBeDefined();
+      await expect(fs.readFile(skillFile, "utf8")).resolves.toContain("name: dws");
+      expect(JSON.parse(await fs.readFile(registryPath, "utf8")).records["dingtalk-workspace"]).toBeDefined();
+      await fs.rm(path.join(root, scenario));
+    }
+    if (scenario === "both-missing") {
+      await fs.rm(installed.readiness.executablePath!);
+      await fs.rm(path.join(root, ".awaken", "runtime", "cli", "bin", "dws"));
+      await expect(restarted.uninstallManaged("dingtalk-workspace", true)).rejects.toMatchObject({ code: "CLI_UNINSTALL_LOGOUT_UNAVAILABLE" });
+      await expect(fs.stat(skillFile)).resolves.toBeDefined();
+      await restarted.dispose(); await fs.rm(root, { recursive: true, force: true }); return;
+    }
+    if (scenario === "rollback") {
+      const rename = fs.rename.bind(fs);
+      const failure = vi.spyOn(fs, "rename").mockImplementation(async (from, to) => {
+        if (String(to) === registryPath) throw new Error("registry write failed");
+        return rename(from, to);
+      });
+      await expect(restarted.uninstallManaged("dingtalk-workspace", true)).rejects.toMatchObject({ code: "CLI_UNINSTALL_FAILED" });
+      failure.mockRestore();
+      await expect(fs.readFile(skillFile, "utf8")).resolves.toContain("name: dws");
+      await expect(fs.stat(installed.readiness.executablePath!)).resolves.toBeDefined();
+      expect(JSON.parse(await fs.readFile(registryPath, "utf8")).records["dingtalk-workspace"]).toBeDefined();
+    }
+    if (scenario === "cleanup-failed") {
+      const remove = fs.rm.bind(fs);
+      const failure = vi.spyOn(fs, "rm").mockImplementation(async (target, options) => {
+        if (String(target).includes(`${path.sep}.uninstall${path.sep}`)) throw new Error("cleanup denied");
+        return remove(target, options);
+      });
+      await expect(restarted.uninstallManaged("dingtalk-workspace", true)).rejects.toThrow("账号已退出登录。卸载清理未完成");
+      failure.mockRestore();
+      await restarted.dispose(); restarted = makeRestarted(); await restarted.initialize();
+      expect(restarted.list()[0].readiness.safeError?.code).toBe("CLI_UNINSTALL_PENDING");
+      expect(restarted.list()[0].canUninstallManaged).toBe(true);
+    }
+    const removed = await restarted.uninstallManaged("dingtalk-workspace", scenario !== "keep");
+    expect(removed.canUninstallManaged).toBe(false);
+    await expect(fs.stat(path.join(root, "authorized"))).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await fs.readFile(path.join(root, "operations"), "utf8")).toContain("logout");
+    await expect(fs.stat(path.join(root, ".awaken", "runtime", "cli", "bin", "dws"))).rejects.toMatchObject({ code: "ENOENT" });
+    if (["keep", "modified", "legacy", "symlink"].includes(scenario)) {
+      await expect(fs.readFile(skillFile, "utf8")).resolves.toContain("name: dws");
+      expect(removed.uninstallMessage).toContain("保留");
+    } else await expect(fs.stat(skillFile)).rejects.toMatchObject({ code: "ENOENT" });
+    if (scenario === "external") {
+      expect(removed.readiness).toMatchObject({ install: "installed", ownership: "user-managed" });
+      expect(removed.uninstallMessage).toContain("本机其他安装");
+      await expect(restarted.uninstallManaged("dingtalk-workspace", true)).rejects.toMatchObject({ code: "CLI_UNINSTALL_NOT_MANAGED" });
+    } else {
+      expect(removed.readiness.install).toBe("missing");
+      expect(JSON.parse(await fs.readFile(registryPath, "utf8")).records["dingtalk-workspace"]).toBeUndefined();
+      await restarted.dispose(); restarted = makeRestarted(); await restarted.initialize();
+      expect(restarted.list()[0].readiness.install).toBe("missing");
+    }
     await restarted.dispose();
+    await fs.rm(root, { recursive: true, force: true });
   });
 
   it("cancels an in-flight install without leaving a failed or activated connector", async () => {
@@ -364,7 +461,7 @@ if (args[0] === "version") {
     await manager.dispose();
   });
 
-  it("keeps Lark onboarding in Main, opens official pages, and chains config into login", async () => {
+  it.each(["signed-in", "already-out", "logout-failed", "still-user", "bad-status"])("keeps Lark onboarding and verifies logout before uninstall: %s", async (scenario) => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "awaken-cli-lark-onboarding-"));
     const source = path.join(root, "source");
     await fs.mkdir(source);
@@ -380,6 +477,7 @@ elif [ "$1" = "config" ] && [ "$2" = "init" ]; then
   while [ ! -f "$state_dir/config-approved" ]; do sleep 0.05; done
   touch "$state_dir/configured"
 elif [ "$1" = "auth" ] && [ "$2" = "status" ]; then
+  if [ -f "$state_dir/bad-status" ]; then printf '{}'; exit 1; fi
   if [ ! -f "$state_dir/configured" ]; then
     printf '{"ok":false,"type":"config"}\\n' >&2
     exit 1
@@ -400,7 +498,9 @@ elif [ "$1" = "auth" ] && [ "$2" = "login" ]; then
       ;;
   esac
 elif [ "$1" = "auth" ] && [ "$2" = "logout" ]; then
-  rm -f "$state_dir/authorized"
+  if [ -f "$state_dir/logout-failed" ]; then exit 1; fi
+  if [ ! -f "$state_dir/authorized" ]; then printf '{"ok":true,"loggedOut":false,"reason":"not_logged_in"}\\n'; exit 0; fi
+  if [ ! -f "$state_dir/still-user" ]; then rm -f "$state_dir/authorized"; fi
   printf '{"loggedOut":true}\\n'
 else
   printf '{"ok":true}\\n'
@@ -505,6 +605,29 @@ fi
       overall: "action_required",
     });
     expect(loggedOut.readiness.account).toBeUndefined();
+    if (scenario !== "already-out") await fs.writeFile(path.join(stateDir, "authorized"), "yes");
+    await manager.refreshProvider("lark-cli");
+    if (["logout-failed", "still-user", "bad-status"].includes(scenario)) {
+      await fs.writeFile(path.join(stateDir, scenario), "yes");
+      await expect(manager.uninstallManaged("lark-cli", true)).rejects.toMatchObject({ code: "CLI_UNINSTALL_LOGOUT_FAILED" });
+      await expect(fs.stat(installed.readiness.executablePath!)).resolves.toBeDefined();
+      await expect(fs.stat(path.join(root, ".agents", "skills", "lark-im", "SKILL.md"))).resolves.toBeDefined();
+      await fs.rm(path.join(stateDir, scenario));
+    }
+    const rename = fs.rename.bind(fs);
+    let userRemovedBeforeFiles = false;
+    const observe = vi.spyOn(fs, "rename").mockImplementation(async (from, to) => {
+      if (String(from) === path.dirname(installed.readiness.executablePath!)) {
+        await expect(fs.stat(path.join(stateDir, "authorized"))).rejects.toMatchObject({ code: "ENOENT" });
+        userRemovedBeforeFiles = true;
+      }
+      return rename(from, to);
+    });
+    const uninstalled = await manager.uninstallManaged("lark-cli");
+    observe.mockRestore();
+    expect(userRemovedBeforeFiles).toBe(true);
+    expect(uninstalled.uninstallMessage).toContain("已退出登录并卸载");
+    expect(uninstalled.readiness.install).toBe("missing");
     await manager.dispose();
   });
 

@@ -1955,9 +1955,10 @@ ipcMain.handle("awaken:cancel-memory-dream", async (_event, taskId: string) => {
   });
   activeDreamTaskIds.delete(taskId);
 });
-ipcMain.handle("awaken:uninstall-managed-cli", async (_event, providerId: CliProviderId) => {
+ipcMain.handle("awaken:uninstall-managed-cli", async (_event, providerId: CliProviderId, removeOfficialSkills?: boolean) => {
   if (!cliConnectorManager) throw new Error("CLI connector manager unavailable");
-  return cliConnectorManager.uninstallManaged(providerId);
+  await ensureNoActiveRunsForSettingsChange();
+  return cliConnectorManager.uninstallManaged(providerId, removeOfficialSkills === true);
 });
 
 async function ensureNoActiveRunsForSettingsChange(): Promise<void> {

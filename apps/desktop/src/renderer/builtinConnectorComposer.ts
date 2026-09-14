@@ -71,7 +71,7 @@ export function useBuiltinConnectorComposer(runtimeClient: RuntimeClient, deskto
       updatedProviders.add(connector.providerId);
       setConnectionError(null);
       setViews(current => [...current.filter(view => view.providerId !== connector.providerId), connector]);
-      if (isBuiltinConnectorReady(connector)) void loadSkills();
+      void loadSkills();
     });
     void runtimeClient.listCliConnectors().then(next => {
       if (!disposed) setViews(current => [

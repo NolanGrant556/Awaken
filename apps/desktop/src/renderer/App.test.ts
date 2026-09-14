@@ -3890,7 +3890,7 @@ describe("AwakenUserPromptBlock layout contract", () => {
     expect(html).not.toContain("aw-icon--package");
   });
 
-  it("renders Plugin prompt tokens with the shared inline puzzle icon", () => {
+  it("renders Plugin prompt tokens with the shared inline at-sign icon", () => {
     const html = renderToString(
       React.createElement(AwakenUserPromptBlock, {
         text: "nimen 123",
@@ -3906,7 +3906,7 @@ describe("AwakenUserPromptBlock layout contract", () => {
     );
 
     expect(html).toContain("execution-prompt-bubble-token-plugin");
-    expect(html).toContain("aw-icon--puzzle");
+    expect(html).toContain("aw-icon--at-sign");
     expect(html).not.toContain("aw-icon--package");
     expect(html).not.toContain("aw-icon--agent-plugins-mark");
   });

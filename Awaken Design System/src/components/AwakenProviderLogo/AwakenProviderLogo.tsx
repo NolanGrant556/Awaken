@@ -36,7 +36,7 @@ const PROVIDER_LOGOS: Record<AwakenProviderBrand, string> = {
 };
 
 export type AwakenProviderLogoProps = {
-  brand: AwakenProviderBrand;
+  brand?: AwakenProviderBrand;
   name: string;
   className?: string;
 };
@@ -53,7 +53,8 @@ export function AwakenProviderLogo({
       role="img"
       aria-label={`${name} Logo`}
     >
-      <img src={PROVIDER_LOGOS[brand]} alt="" draggable={false} />
+      {brand ? <img src={PROVIDER_LOGOS[brand]} alt="" draggable={false} />
+        : <span className="aw-provider-logo__initial">{name.trim().slice(0, 1) || "M"}</span>}
     </span>
   );
 }

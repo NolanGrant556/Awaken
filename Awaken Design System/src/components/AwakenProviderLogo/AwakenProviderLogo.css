@@ -7,10 +7,10 @@
   width: 100%;
   height: 100%;
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--aw-border-main) 74%, transparent);
+  border: 1px solid var(--aw-provider-logo-border);
   border-radius: inherit;
-  background: color-mix(in srgb, var(--aw-surface-raised) 94%, white 6%);
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--aw-text-primary) 8%, transparent);
+  background: var(--aw-provider-logo-surface);
+  box-shadow: 0 1px 2px var(--aw-provider-logo-shadow);
 }
 
 .aw-provider-logo img {
@@ -18,6 +18,13 @@
   width: 72%;
   height: 72%;
   object-fit: contain;
+}
+
+.aw-provider-logo__initial {
+  color: var(--aw-provider-logo-foreground);
+  font-size: 13px;
+  font-weight: var(--aw-font-weight-heavy);
+  line-height: 1;
 }
 
 .aw-provider-logo[data-provider-brand="kimi"] img {
@@ -30,9 +37,4 @@
 .aw-provider-logo[data-provider-brand="volcengine"] img {
   width: 78%;
   height: 78%;
-}
-
-:where([data-theme="dark"], [data-aw-theme="dark"], .dark)
-  .aw-provider-logo[data-provider-brand="glm"] img {
-  filter: invert(1);
 }

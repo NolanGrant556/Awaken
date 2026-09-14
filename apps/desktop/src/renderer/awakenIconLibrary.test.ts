@@ -238,8 +238,8 @@ describe("概念表", () => {
     expect(AWAKEN_ICON_CONCEPTS.skill).toBe("book-open");
     expect(AWAKEN_ICON_CONCEPTS["skill-active"]).toBe("book-open");
     expect(AWAKEN_ICON_CONCEPTS["tool-terminal"]).toBe("terminal");
-    expect(AWAKEN_ICON_CONCEPTS.plugin).toBe("agent-plugins-mark");
-    expect(AWAKEN_ICON_CONCEPTS["plugin-default"]).toBe("puzzle");
+    expect(AWAKEN_ICON_CONCEPTS.plugin).toBe("at-sign");
+    expect(AWAKEN_ICON_CONCEPTS["plugin-default"]).toBe("at-sign");
     expect(AWAKEN_ICON_CONCEPTS["mcp-brand"]).toBe("mcp-mark");
     expect(AWAKEN_ICON_CONCEPTS["mcp-source"]).toBe("mcp-mark");
   });
@@ -252,7 +252,7 @@ describe("概念表", () => {
     expect(brain.authored?.license).toBe("ISC");
   });
 
-  it("插件默认图标使用 Heroicons 拼图块，并由 Design System 持有来源", () => {
+  it("保留 Heroicons 拼图块的命名字形与来源", () => {
     const puzzle = ICON_DEFINITIONS.puzzle;
     expect(puzzle.build).toBeUndefined();
     expect(puzzle.authored?.source).toContain("heroicons v2 solid");

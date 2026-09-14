@@ -262,16 +262,9 @@ function BalanceProviderMark({
     detail ? "aw-profile-balance-panel__provider-mark--detail" : "",
   ].filter(Boolean).join(" ");
 
-  return balance.providerBrand ? (
+  return (
     <span className={className} aria-hidden="true">
       <AwakenProviderLogo brand={balance.providerBrand} name={name} />
-    </span>
-  ) : (
-    <span
-      className={`${className} aw-profile-balance-panel__provider-mark--fallback`}
-      aria-hidden="true"
-    >
-      {name.trim().slice(0, 1).toUpperCase() || "M"}
     </span>
   );
 }

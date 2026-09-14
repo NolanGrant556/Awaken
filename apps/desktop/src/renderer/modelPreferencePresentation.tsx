@@ -56,9 +56,5 @@ export function consumeModelPreferenceRecoveryNotice(
 
 export function modelProfileIcon(profile: RuntimeModelProfileSummary) {
   const brand = providerBrandForId(profile.providerId);
-  return brand ? (
-    <AwakenProviderLogo brand={brand} name={profile.displayName} />
-  ) : (
-    profile.displayName.trim().slice(0, 1) || "M"
-  );
+  return <AwakenProviderLogo brand={brand} name={profile.displayName} />;
 }

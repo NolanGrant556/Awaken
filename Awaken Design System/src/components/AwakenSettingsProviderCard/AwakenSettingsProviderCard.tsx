@@ -42,11 +42,7 @@ export function AwakenSettingsProviderCard({
       onClick={onSelect}
     >
       <span className="model-provider-card__logo">
-        {brand ? (
-          <AwakenProviderLogo brand={brand} name={name} />
-        ) : (
-          <span className="model-provider-logo-fallback">{name.trim().slice(0, 1) || "M"}</span>
-        )}
+        <AwakenProviderLogo brand={brand} name={name} />
       </span>
       <span className="model-provider-card__copy">
         <strong>{name}</strong>
@@ -124,11 +120,7 @@ export function AwakenSettingsProviderModal({
         <header className="model-provider-modal__header">
           <span className="model-provider-modal__wash" aria-hidden="true" />
           <span className="model-provider-modal__logo">
-            {brand ? (
-              <AwakenProviderLogo brand={brand} name={name} />
-            ) : (
-              <span className="model-provider-logo-fallback">{name.trim().slice(0, 1) || "M"}</span>
-            )}
+            <AwakenProviderLogo brand={brand} name={name} />
           </span>
           <span className="model-provider-modal__heading">
             <strong>{name}</strong>

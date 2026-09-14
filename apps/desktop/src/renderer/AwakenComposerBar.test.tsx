@@ -207,7 +207,7 @@ describe("AwakenComposerBar unified token editing", () => {
     });
     const icon = editor.querySelector('[data-composer-token-id="plugin:business-review:digest"] svg');
 
-    expect(icon?.classList.contains("aw-icon--puzzle")).toBe(true);
+    expect(icon?.classList.contains("aw-icon--at-sign")).toBe(true);
     expect(icon?.getAttribute("width")).toBe("16");
     expect(icon?.getAttribute("height")).toBe("16");
   });
@@ -228,7 +228,7 @@ describe("AwakenComposerBar unified token editing", () => {
     );
 
     expect(token?.querySelector(".composer-bar-token-brand-icon")).not.toBeNull();
-    expect(token?.querySelector(".aw-icon--puzzle")).toBeNull();
+    expect(token?.querySelector(".aw-icon--at-sign")).toBeNull();
   });
 
   it("groups mention actions under the visible built-in and plugin section labels", () => {
@@ -555,7 +555,7 @@ describe("AwakenComposerBar unified token editing", () => {
     expect(icons[1]?.classList).toContain("aw-icon--book-open");
     expect(host.querySelector(".execution-prompt-bubble-token-brand-icon")).not.toBeNull();
     expect(
-      host.querySelector(".execution-prompt-bubble-token-plugin .aw-icon--puzzle"),
+      host.querySelector(".execution-prompt-bubble-token-plugin .aw-icon--at-sign"),
     ).toBeNull();
   });
 
@@ -992,9 +992,9 @@ describe("AwakenComposerBar unified token editing", () => {
     const trigger = host.querySelector<HTMLButtonElement>(".composer-bar-plugin-trigger");
     expect(trigger?.getAttribute("aria-label")).toBe("插件，4 个可用");
     expect(trigger?.querySelectorAll(".composer-bar-plugin-badge")).toHaveLength(3);
-    expect(trigger?.querySelectorAll(".aw-icon--puzzle")).toHaveLength(3);
+    expect(trigger?.querySelectorAll(".aw-icon--at-sign")).toHaveLength(3);
     expect(
-      Array.from(trigger?.querySelectorAll<SVGElement>(".aw-icon--puzzle") ?? []).every(
+      Array.from(trigger?.querySelectorAll<SVGElement>(".aw-icon--at-sign") ?? []).every(
         (icon) => icon.getAttribute("width") === "12",
       ),
     ).toBe(true);
@@ -1004,12 +1004,12 @@ describe("AwakenComposerBar unified token editing", () => {
     });
     expect(document.querySelectorAll(".composer-bar-plugin-option")).toHaveLength(4);
     expect(document.querySelector(".composer-bar-plugin-search")).toBeNull();
-    expect(document.querySelectorAll(".composer-bar-plugin-option .aw-icon--puzzle")).toHaveLength(
+    expect(document.querySelectorAll(".composer-bar-plugin-option .aw-icon--at-sign")).toHaveLength(
       4,
     );
     expect(
       Array.from(
-        document.querySelectorAll<SVGElement>(".composer-bar-plugin-option .aw-icon--puzzle"),
+        document.querySelectorAll<SVGElement>(".composer-bar-plugin-option .aw-icon--at-sign"),
       ).every((icon) => icon.getAttribute("width") === "12"),
     ).toBe(true);
     const sitesOption = Array.from(
@@ -1034,7 +1034,7 @@ describe("AwakenComposerBar unified token editing", () => {
 
     const trigger = host.querySelector<HTMLButtonElement>(".composer-bar-plugin-trigger");
     expect(trigger?.getAttribute("aria-label")).toBe("插件，暂无可用插件");
-    expect(trigger?.querySelectorAll(".aw-icon--puzzle")).toHaveLength(1);
+    expect(trigger?.querySelectorAll(".aw-icon--at-sign")).toHaveLength(1);
     act(() => {
       trigger?.click();
     });

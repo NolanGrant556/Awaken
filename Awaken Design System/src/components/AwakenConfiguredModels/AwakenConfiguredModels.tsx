@@ -98,9 +98,7 @@ export function AwakenConfiguredModels({
               <header className="configured-model-card__header">
                 <div className="configured-model-name">
                 <span className="configured-model-icon">
-                  {model.brand ? (
-                    <AwakenProviderLogo brand={model.brand} name={model.displayName} />
-                  ) : model.displayName.slice(0, 1)}
+                  <AwakenProviderLogo brand={model.brand} name={model.displayName} />
                 </span>
                 <span className="configured-model-copy">
                   <strong title={`${model.displayName}：${model.modelId}`}>

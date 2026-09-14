@@ -114,6 +114,10 @@
   --aw-terminal-bg: #1c1917;
   --aw-terminal-text: #ffffff;
   /* Third-party brand identity stays fixed across Awaken themes. */
+  --aw-provider-logo-surface: #ffffff;
+  --aw-provider-logo-foreground: #575757;
+  --aw-provider-logo-border: rgba(82, 82, 88, 0.12);
+  --aw-provider-logo-shadow: rgba(47, 47, 47, 0.08);
   --aw-brand-dingtalk: #007fff;
   /* Product-specific informational accents; not third-party brand colors. */
   --aw-context-meter-fill: #9fdbf6;

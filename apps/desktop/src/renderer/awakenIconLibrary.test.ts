@@ -234,7 +234,7 @@ describe("概念表", () => {
   });
 
   it("连接器、Skill、Plugin、CLI 与 MCP 使用当前确定的图形", () => {
-    expect(AWAKEN_ICON_CONCEPTS.connector).toBe("connector");
+    expect(AWAKEN_ICON_CONCEPTS.connector).toBe("mcp-mark");
     expect(AWAKEN_ICON_CONCEPTS.skill).toBe("book-open");
     expect(AWAKEN_ICON_CONCEPTS["skill-active"]).toBe("book-open");
     expect(AWAKEN_ICON_CONCEPTS["tool-terminal"]).toBe("terminal");

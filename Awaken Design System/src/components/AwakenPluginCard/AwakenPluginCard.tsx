@@ -14,6 +14,9 @@ export type AwakenPluginCardItem = {
   dialect?: string;
   builtin?: boolean;
   brandIcon?: string;
+  brandLogoSrc?: string;
+  /** Host-managed integrations expose connection settings instead of a package switch. */
+  connectionStatus?: { label: string; connected: boolean };
   builtinOrder?: number;
   enabled: boolean;
   busy?: boolean;
@@ -46,7 +49,9 @@ export function AwakenPluginCard({
   const body = (
     <>
       <span className="aw-plugin-card__icon" aria-hidden="true">
-        {isAwakenPluginBrand(plugin.brandIcon) ? (
+        {plugin.brandLogoSrc ? (
+          <img className="aw-plugin-card__brand-image" src={plugin.brandLogoSrc} alt="" />
+        ) : isAwakenPluginBrand(plugin.brandIcon) ? (
           <AwakenPluginBrandIcon brand={plugin.brandIcon} size="card" />
         ) : (
           <AwakenIcon concept="plugin-default" size={20} />
@@ -88,15 +93,27 @@ export function AwakenPluginCard({
       ) : (
         <div className="aw-plugin-card__main aw-plugin-card__main--static">{body}</div>
       )}
-      <div className="aw-plugin-card__actions">
-        <AwakenSwitch
+      <div className="aw-plugin-card__actions" data-connection={plugin.connectionStatus ? "true" : undefined}>
+        {plugin.connectionStatus ? (
+          <button
+            type="button"
+            className="aw-plugin-card__connection"
+            data-connected={plugin.connectionStatus.connected ? "true" : "false"}
+            aria-label={`打开 ${visibleName} 连接设置`}
+            onClick={onOpen}
+            disabled={!onOpen}
+          >
+            {plugin.connectionStatus.connected ? <AwakenIcon concept="step-done" size={14} /> : null}
+            {plugin.connectionStatus.label}
+          </button>
+        ) : <AwakenSwitch
           checked={plugin.enabled}
           label={visibleName}
           busy={plugin.busy}
           size="compact"
           disabled={!onEnabledChange}
           onCheckedChange={onEnabledChange}
-        />
+        />}
       </div>
     </article>
   );

@@ -531,7 +531,7 @@ describe("ExtensionsView behavior", () => {
         .map((item) => item.textContent),
     ).toEqual(["acme.tools", "Cursor"]);
     expect(
-      document.querySelector(".aw-plugin-card__icon .aw-icon--puzzle"),
+      document.querySelector(".aw-plugin-card__icon .aw-icon--at-sign"),
     ).not.toBeNull();
     expect(buttonByText("Marketplace")).toBeUndefined();
 

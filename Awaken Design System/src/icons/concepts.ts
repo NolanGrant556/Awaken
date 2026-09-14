@@ -157,7 +157,7 @@ export const AWAKEN_ICON_CONCEPTS = {
   plugin: "at-sign",
   "plugin-default": "at-sign",
   hook: "hook",
-  connector: "connector",
+  connector: "mcp-mark",
   subagent: "subagent",
   "scheduled-task": "clock",
 

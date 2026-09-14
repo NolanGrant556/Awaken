@@ -36,6 +36,7 @@ export type AwakenCliConnectorDetailDialogProps = {
   brandTone?: "dingtalk" | "lark" | "neutral";
   loadingProfile?: boolean;
   busy?: boolean;
+  errorMessage?: string | null;
   onOpenChange: (open: boolean) => void;
   onAction: (action: Exclude<AwakenCliConnectorAction, "unsupported">) => void;
 };
@@ -62,10 +63,15 @@ export function AwakenCliConnectorDetailDialog({
   brandTone = "neutral",
   loadingProfile = false,
   busy = false,
+  errorMessage,
   onOpenChange,
   onAction,
 }: AwakenCliConnectorDetailDialogProps) {
-  if (!readiness) return null;
+  if (!readiness) return (
+    <AwakenDialog open={open} title={`连接到 ${displayName}`} onOpenChange={onOpenChange}>
+      <p role={errorMessage ? "alert" : "status"}>{errorMessage || (loadingProfile ? "正在读取连接状态…" : "连接状态暂不可用，请关闭后重试。")}</p>
+    </AwakenDialog>
+  );
 
   const action = awakenCliConnectorDialogAction(readiness, authSession);
   const connected = action === "logout";
@@ -87,7 +93,7 @@ export function AwakenCliConnectorDetailDialog({
       : waiting
         ? "请在已打开的官方网页完成授权"
         : readiness.install === "installed"
-          ? readiness.safeErrorMessage || "CLI 与官方 Skills 已安装，当前未授权"
+          ? readiness.safeErrorMessage || "运行组件与官方技能已安装，当前未授权"
           : readiness.safeErrorMessage || "尚未安装";
   const progress = Math.max(0, Math.min(100, installProgress?.percent ?? 0));
   const actionable = action !== "unsupported";
@@ -129,7 +135,7 @@ export function AwakenCliConnectorDetailDialog({
     >
       <div className="aw-cli-connector-detail">
         <div className="aw-cli-connector-detail__brands" aria-hidden="true">
-          <AwakenProductLogo size="md" decorative />
+          <AwakenProductLogo size="md" variant="icon" decorative />
           <span className="aw-cli-connector-detail__link" data-connected={connected ? "true" : "false"}>
             {connected ? <AwakenIcon concept="step-done" size={14} /> : <span>·</span>}
           </span>
@@ -143,6 +149,7 @@ export function AwakenCliConnectorDetailDialog({
         </div>
         <h2 className="aw-cli-connector-detail__title">{title}</h2>
         <p className="aw-cli-connector-detail__description">{description}</p>
+        {errorMessage ? <p role="alert">{errorMessage}</p> : null}
 
         {installing ? (
           <div className="aw-cli-connector-detail__progress" aria-live="polite">
@@ -160,7 +167,7 @@ export function AwakenCliConnectorDetailDialog({
             >
               <span style={{ width: `${progress}%` }} />
             </div>
-            <p>将同步安装官方 CLI 与官方 Skills</p>
+            <p>将同步安装所需组件与官方技能</p>
           </div>
         ) : connected ? (
           <div className="aw-cli-connector-detail__account">

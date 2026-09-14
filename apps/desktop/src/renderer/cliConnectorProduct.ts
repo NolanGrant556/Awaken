@@ -12,7 +12,7 @@ const catalog: Record<CliProviderId, CliConnectorProductCopy> = {
   },
   "lark-cli": {
     displayName: "飞书",
-    description: "连接飞书，通过官方 CLI 授权调用日历、云文档与消息能力。",
+    description: "连接飞书，管理日历、云文档与消息。",
   },
 };
 
@@ -21,4 +21,19 @@ export function cliConnectorProductCopy(providerId: string): CliConnectorProduct
     return catalog[providerId];
   }
   return null;
+}
+
+/** Product wording only. State and diagnostics codes remain owned by Main. */
+export function cliConnectorUserMessage(message: string | undefined): string | undefined {
+  return message?.replace(/\bCLI\b/g, "运行组件").replace(/\bSkills?\b/g, "技能");
+}
+
+export const builtinConnectorProviders: readonly CliProviderId[] = ["dingtalk-workspace", "lark-cli"];
+
+export function builtinConnectorCardId(providerId: CliProviderId): string {
+  return `builtin-connector:${providerId}`;
+}
+
+export function builtinConnectorProvider(cardId: string): CliProviderId | undefined {
+  return builtinConnectorProviders.find((providerId) => builtinConnectorCardId(providerId) === cardId);
 }

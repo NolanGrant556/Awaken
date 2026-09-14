@@ -6,6 +6,7 @@ import type { AwakenConnectorCardItem, AwakenConnectorKind } from "./AwakenConne
 
 export type AwakenConnectorsProps = {
   activeKind: AwakenConnectorKind;
+  availableKinds?: readonly AwakenConnectorKind[];
   searchValue: string;
   builtInMcpConnectors: AwakenConnectorCardItem[];
   userMcpConnectors: AwakenConnectorCardItem[];
@@ -55,6 +56,7 @@ function ConnectorGrid({
 
 export function AwakenConnectors({
   activeKind,
+  availableKinds = ["mcp", "cli"],
   searchValue,
   builtInMcpConnectors,
   userMcpConnectors,
@@ -70,13 +72,21 @@ export function AwakenConnectors({
   onMcpServerEnabledChange,
   onMcpServerSettings,
 }: AwakenConnectorsProps) {
+  const inlineSearch = activeKind === "mcp" && availableKinds.length === 1;
+  const search = (
+    <label className="aw-connectors__search">
+      <span>搜索连接器</span>
+      <input value={searchValue} placeholder="搜索..." onChange={(event) => onSearchChange(event.target.value)} />
+    </label>
+  );
+
   return (
     <section className="aw-connectors" aria-label="连接器">
       <div className="aw-connectors__inner">
         <header className="aw-connectors__header">
           <div>
             <h1>连接器</h1>
-            <p>管理 MCP servers 与 CLI 连接器，连接外部系统和工具。</p>
+            <p>{availableKinds.includes("cli") ? "管理 MCP servers 与 CLI 连接器，连接外部系统和工具。" : "管理 MCP 服务，连接外部系统和工具。"}</p>
           </div>
           <div className="aw-connectors__header-actions">
             <button type="button" className="aw-connectors__refresh" aria-label="刷新" disabled={loading} onClick={onRefresh}>
@@ -90,9 +100,9 @@ export function AwakenConnectors({
           </div>
         </header>
 
-        <div className="aw-connectors__toolbar">
-          <div className="aw-connectors__tabs" role="tablist" aria-label="连接器分类">
-            {(["mcp", "cli"] as const).map((kind) => (
+        {!inlineSearch ? <div className="aw-connectors__toolbar">
+          {availableKinds.length > 1 ? <div className="aw-connectors__tabs" role="tablist" aria-label="连接器分类">
+            {availableKinds.map((kind) => (
               <button
                 key={kind}
                 type="button"
@@ -108,12 +118,9 @@ export function AwakenConnectors({
                 <span>{kind.toUpperCase()}</span>
               </button>
             ))}
-          </div>
-          <label className="aw-connectors__search">
-            <span>搜索连接器</span>
-            <input value={searchValue} placeholder="搜索..." onChange={(event) => onSearchChange(event.target.value)} />
-          </label>
-        </div>
+          </div> : null}
+          {search}
+        </div> : null}
 
         {errorMessage ? <div className="aw-connectors__message" role="alert">{errorMessage}</div> : null}
 
@@ -121,7 +128,10 @@ export function AwakenConnectors({
           {activeKind === "mcp" ? (
             <>
               <section>
-                <h2>Awaken 内置</h2>
+                <div className="aw-connectors__section-header">
+                  <h2>Awaken 内置</h2>
+                  {inlineSearch ? search : null}
+                </div>
                 <ConnectorGrid
                   items={builtInMcpConnectors}
                   emptyMessage="暂无内置 MCP"

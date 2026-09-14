@@ -16,6 +16,7 @@ import {
   type AwakenConnectorCardItem,
   type AwakenMcpConfigMode,
   type AwakenPluginsView,
+  type AwakenPluginCardItem,
   type AwakenSkillItem,
   type AwakenSkillProject,
 } from "@awaken/design-system";
@@ -42,7 +43,13 @@ import {
   type SkillPreviewPresentation,
   type SkillPreviewTarget,
 } from "./SkillPreviewDialog";
-import { cliConnectorProductCopy } from "./cliConnectorProduct";
+import {
+  builtinConnectorCardId,
+  builtinConnectorProvider,
+  builtinConnectorProviders,
+  cliConnectorProductCopy,
+  cliConnectorUserMessage,
+} from "./cliConnectorProduct";
 import { PluginConsole } from "./plugins/PluginConsole";
 import { pluginErrorCode, pluginErrorMessage } from "./plugins/pluginErrors";
 import dingtalkLogo from "./assets/brands/dingtalk.png";
@@ -402,35 +409,6 @@ export function mcpServerCardItem(
   };
 }
 
-function cliConnectorCardItem(
-  connector: RuntimeConnector,
-  cliConnectors: CliConnectorView[],
-  busyConnectorId: string | null,
-): AwakenConnectorCardItem | null {
-  const view = cliConnectors.find((entry) => entry.providerId === connector.id);
-  const readiness = view?.readiness ?? connector.cliReadiness;
-  if (!readiness) return null;
-  const ready = readiness.overall === "ready" && readiness.authentication === "authorized";
-  const product = cliConnectorProductCopy(connector.id);
-  const errors = [
-    readiness.safeError && !ready ? readiness.safeError.message : "",
-    connector.legacyMcpReviewRequired
-      ? "检测到同名旧 MCP 配置，因内容已被修改而保留。请在 MCP servers 中复核后手动处理。"
-      : "",
-  ].filter(Boolean);
-  return {
-    id: connector.id,
-    variant: "cli",
-    displayName: product?.displayName || connector.displayName,
-    description: product?.description || connector.description?.trim() || "官方 CLI 连接器",
-    brandLogoSrc: connectorBrandLogo(connector.id),
-    brandTone: connectorBrandTone(connector.id),
-    connected: ready,
-    busy: busyConnectorId === connector.id,
-    errors,
-  };
-}
-
 export function pluginOwnerFromSkillId(id: string): string | undefined {
   if (!id.startsWith("plugin__")) {
     return undefined;
@@ -760,8 +738,6 @@ export function ExtensionsView({
   const [skills, setSkills] = useState<RuntimeSkill[]>([]);
   const [skillProjectGroups, setSkillProjectGroups] = useState<SkillProjectGroup[]>([]);
   const [query, setQuery] = useState("");
-  const [activeConnectorKind, setActiveConnectorKind] =
-    useState<ConnectorKind>("mcp");
   const [activeSkillView, setActiveSkillView] = useState<SkillView>(
     DEFAULT_SKILL_VIEW,
   );
@@ -772,6 +748,22 @@ export function ExtensionsView({
   const [connectorAuthSessions, setConnectorAuthSessions] = useState<Record<string, string>>({});
   const [cliDetailConnectorId, setCliDetailConnectorId] = useState<CliProviderId | null>(null);
   const [cliDetailLoading, setCliDetailLoading] = useState(false);
+  const [cliDetailError, setCliDetailError] = useState<string | null>(null);
+  const cliDetailGenerationRef = useRef(0);
+  const cliSnapshotVersionsRef = useRef<Partial<Record<CliProviderId, number>>>({});
+
+  function beginCliSnapshot(providerId: CliProviderId): number {
+    const version = (cliSnapshotVersionsRef.current[providerId] ?? 0) + 1;
+    cliSnapshotVersionsRef.current[providerId] = version;
+    return version;
+  }
+
+  function applyCliSnapshot(connector: CliConnectorView, version: number): void {
+    if ((cliSnapshotVersionsRef.current[connector.providerId] ?? 0) !== version) return;
+    setCliConnectors((current) => [
+      ...current.filter((entry) => entry.providerId !== connector.providerId), connector,
+    ].sort((a, b) => a.providerId.localeCompare(b.providerId)));
+  }
   const [busyMcpServerName, setBusyMcpServerName] = useState<string | null>(null);
   const [mcpDialogOpen, setMcpDialogOpen] = useState(false);
   const [mcpConfigMode, setMcpConfigMode] = useState<AwakenMcpConfigMode>("stdio");
@@ -856,6 +848,7 @@ export function ExtensionsView({
       return;
     }
     const generation = ++refreshGenerationRef.current;
+    const cliSnapshotVersions = { ...cliSnapshotVersionsRef.current };
     const visibleGeneration = showLoading
       ? ++visibleRefreshGenerationRef.current
       : null;
@@ -916,7 +909,10 @@ export function ExtensionsView({
         setSkillInstallProjectRoot(nextProjectRoot);
       }
       setConnectors(nextConnectors);
-      setCliConnectors(nextCliConnectors);
+      // A list request started before a state event or user action cannot roll it back.
+      for (const connector of nextCliConnectors) {
+        applyCliSnapshot(connector, cliSnapshotVersions[connector.providerId] ?? 0);
+      }
       setPlugins(nextPlugins);
       setSelectedPlugin((current) =>
         current
@@ -967,10 +963,7 @@ export function ExtensionsView({
   useEffect(() => {
     if (!desktopReady) return;
     return runtimeClient.subscribeCliConnectorState(({ connector }) => {
-      setCliConnectors((current) => [
-        ...current.filter((entry) => entry.providerId !== connector.providerId),
-        connector,
-      ].sort((a, b) => a.providerId.localeCompare(b.providerId)));
+      applyCliSnapshot(connector, beginCliSnapshot(connector.providerId));
       setConnectors((current) => current.map((entry) =>
         entry.id === connector.providerId ? { ...entry, cliReadiness: connector.readiness } : entry,
       ));
@@ -1107,14 +1100,6 @@ export function ExtensionsView({
     () =>
       visibleConnectors.filter(
         (connector) => connectorKind(connector) === "mcp",
-      ),
-    [visibleConnectors],
-  );
-
-  const visibleCliConnectors = useMemo(
-    () =>
-      visibleConnectors.filter(
-        (connector) => connectorKind(connector) === "cli",
       ),
     [visibleConnectors],
   );
@@ -1409,18 +1394,19 @@ export function ExtensionsView({
   }
 
   async function handleCliAction(providerId: CliProviderId, action: () => Promise<CliConnectorView>): Promise<void> {
+    const version = beginCliSnapshot(providerId);
+    const detailGeneration = cliDetailGenerationRef.current;
     setBusyConnectorId(providerId);
-    setErrorMessage(null);
+    setCliDetailError(null);
     try {
       const next = await action();
-      setCliConnectors((current) => [
-        ...current.filter((entry) => entry.providerId !== providerId),
-        next,
-      ].sort((a, b) => a.providerId.localeCompare(b.providerId)));
+      applyCliSnapshot(next, version);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "CLI 操作失败");
+      if (detailGeneration === cliDetailGenerationRef.current) {
+        setCliDetailError(cliConnectorUserMessage(error instanceof Error ? error.message : "连接操作失败") ?? null);
+      }
     } finally {
-      setBusyConnectorId(null);
+      setBusyConnectorId((current) => current === providerId ? null : current);
     }
   }
 
@@ -1802,31 +1788,33 @@ export function ExtensionsView({
   }
 
   async function openCliConnectorDetail(providerId: CliProviderId): Promise<void> {
+    const generation = ++cliDetailGenerationRef.current;
+    const version = beginCliSnapshot(providerId);
     setCliDetailConnectorId(providerId);
+    setCliDetailError(null);
     setCliDetailLoading(true);
     try {
       const next = await runtimeClient.refreshCliConnector(providerId);
-      setCliConnectors((current) =>
-        [...current.filter((entry) => entry.providerId !== providerId), next].sort((a, b) =>
-          a.providerId.localeCompare(b.providerId),
-        ),
-      );
+      applyCliSnapshot(next, version);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "无法刷新 CLI 连接状态");
+      if (generation === cliDetailGenerationRef.current) {
+        setCliDetailError(cliConnectorUserMessage(error instanceof Error ? error.message : "无法刷新连接状态") ?? null);
+      }
     } finally {
-      setCliDetailLoading(false);
+      if (generation === cliDetailGenerationRef.current) setCliDetailLoading(false);
     }
   }
 
   function startCliInstall(providerId: CliProviderId): void {
-    setErrorMessage(null);
+    const version = beginCliSnapshot(providerId);
+    const detailGeneration = cliDetailGenerationRef.current;
+    setCliDetailError(null);
     void runtimeClient.installCliConnector(providerId).then((next) => {
-      setCliConnectors((current) => [
-        ...current.filter((entry) => entry.providerId !== providerId),
-        next,
-      ].sort((a, b) => a.providerId.localeCompare(b.providerId)));
+      applyCliSnapshot(next, version);
     }).catch((error) => {
-      setErrorMessage(error instanceof Error ? error.message : "CLI 安装失败");
+      if (detailGeneration === cliDetailGenerationRef.current) {
+        setCliDetailError(cliConnectorUserMessage(error instanceof Error ? error.message : "安装失败") ?? null);
+      }
     });
   }
 
@@ -2029,15 +2017,36 @@ export function ExtensionsView({
     ),
     ...visibleMcpServers.map((server) => mcpServerCardItem(server, busyMcpServerName)),
   ];
-  const cliConnectorItems = visibleCliConnectors
-    .map((connector) => cliConnectorCardItem(connector, cliConnectors, busyConnectorId))
-    .filter((item): item is AwakenConnectorCardItem => item !== null);
+  const builtinConnectorItems: AwakenPluginCardItem[] = builtinConnectorProviders.map((providerId, index) => {
+    const connector = connectors.find((entry) => entry.id === providerId);
+    const view = cliConnectors.find((entry) => entry.providerId === providerId);
+    const readiness = view?.readiness ?? connector?.cliReadiness;
+    const ready = readiness?.overall === "ready" && readiness.authentication === "authorized";
+    const waiting = view?.authSession && ["starting", "waiting_user", "confirming"].includes(view.authSession.phase);
+    const label = !readiness ? "查看状态"
+      : readiness.install === "unsupported" ? "暂不支持"
+      : readiness.install === "installing" ? "安装中…"
+      : readiness.install !== "installed" || readiness.executable !== "available" ? "安装"
+      : waiting ? "授权中…" : ready ? "已连接" : "授权";
+    const product = cliConnectorProductCopy(providerId)!;
+    return {
+      name: builtinConnectorCardId(providerId),
+      ...product,
+      builtin: true,
+      builtinOrder: index + 1,
+      enabled: true,
+      brandLogoSrc: connectorBrandLogo(providerId),
+      connectionStatus: { label, connected: ready },
+      diagnostic: [
+        !ready ? cliConnectorUserMessage(readiness?.safeError?.message) : undefined,
+        connector?.legacyMcpReviewRequired ? "检测到已修改的同名旧 MCP 配置，请到连接器中复核。" : undefined,
+      ].filter(Boolean).join(" ") || undefined,
+    };
+  });
   const selectedCliConnector = connectors.find((entry) => entry.id === cliDetailConnectorId) ?? null;
   const selectedCliView = cliConnectors.find((entry) => entry.providerId === cliDetailConnectorId);
   const selectedCliReadiness = selectedCliView?.readiness ?? selectedCliConnector?.cliReadiness ?? null;
-  const selectedCliProduct = selectedCliConnector
-    ? cliConnectorProductCopy(selectedCliConnector.id)
-    : null;
+  const selectedCliProduct = cliConnectorProductCopy(cliDetailConnectorId ?? "");
 
   function pluginInstallSource(path: string): RuntimePluginSource {
     return { kind: "local_path", path: path.trim() };
@@ -2227,7 +2236,7 @@ export function ExtensionsView({
         <AwakenPlugins
           activeView={activePluginView}
           searchValue={query}
-          plugins={plugins.map((plugin) => ({
+          plugins={[...builtinConnectorItems, ...plugins.map((plugin) => ({
             name: plugin.name,
             displayName: plugin.displayName,
             description: plugin.description,
@@ -2238,7 +2247,7 @@ export function ExtensionsView({
             enabled: plugin.enabled,
             busy: busyPluginName === plugin.name,
             diagnostic: plugin.diagnostics?.[0]?.message,
-          }))}
+          }))]}
           loading={loading}
           errorMessage={pluginDialogOpen ? null : errorMessage}
           onSearchChange={setQuery}
@@ -2252,10 +2261,48 @@ export function ExtensionsView({
             setPluginLocalPath("");
             setPluginDialogOpen(true);
           }}
-          onPluginOpen={(plugin) => { void openPluginDetail(plugin.name); }}
+          onPluginOpen={(plugin) => {
+            const providerId = builtinConnectorProvider(plugin.name);
+            if (providerId) void openCliConnectorDetail(providerId);
+            else void openPluginDetail(plugin.name);
+          }}
           onPluginEnabledChange={(plugin, enabled) => {
             const runtimePlugin = plugins.find((item) => item.name === plugin.name);
             if (runtimePlugin) void handleTogglePlugin(runtimePlugin, enabled);
+          }}
+        />
+        <AwakenCliConnectorDetailDialog
+          open={cliDetailConnectorId !== null}
+          providerId={cliDetailConnectorId ?? ""}
+          displayName={selectedCliProduct?.displayName || selectedCliConnector?.displayName || "插件"}
+          description={selectedCliProduct?.description || selectedCliConnector?.description?.trim() || "连接外部服务"}
+          readiness={selectedCliReadiness ? {
+            install: selectedCliReadiness.install,
+            executable: selectedCliReadiness.executable,
+            authentication: selectedCliReadiness.authentication,
+            account: selectedCliReadiness.account,
+            safeErrorMessage: cliConnectorUserMessage(selectedCliReadiness.safeError?.message),
+          } : null}
+          authSession={selectedCliView?.authSession ? { phase: selectedCliView.authSession.phase } : undefined}
+          installProgress={selectedCliView?.installProgress ? {
+            percent: selectedCliView.installProgress.percent,
+            label: cliConnectorUserMessage(selectedCliView.installProgress.label) ?? "正在安装",
+          } : undefined}
+          brandLogoSrc={cliDetailConnectorId ? connectorBrandLogo(cliDetailConnectorId) : undefined}
+          brandTone={connectorBrandTone(cliDetailConnectorId ?? "")}
+          errorMessage={cliDetailError}
+          loadingProfile={cliDetailLoading}
+          busy={cliDetailConnectorId !== null && busyConnectorId === cliDetailConnectorId}
+          onOpenChange={(open) => {
+            if (!open) {
+              cliDetailGenerationRef.current += 1;
+              setCliDetailConnectorId(null);
+              setCliDetailError(null);
+              setCliDetailLoading(false);
+            }
+          }}
+          onAction={(action) => {
+            if (cliDetailConnectorId) handleCliDialogAction(cliDetailConnectorId, action);
           }}
         />
         <AwakenPluginInstallDialog
@@ -2281,14 +2328,15 @@ export function ExtensionsView({
     return (
       <>
         <AwakenConnectors
-          activeKind={activeConnectorKind}
+          activeKind="mcp"
+          availableKinds={["mcp"]}
           searchValue={query}
           builtInMcpConnectors={builtInMcpConnectorItems}
           userMcpConnectors={userMcpConnectorItems}
-          cliConnectors={cliConnectorItems}
+          cliConnectors={[]}
           loading={loading}
           errorMessage={errorMessage}
-          onKindChange={setActiveConnectorKind}
+          onKindChange={() => {}}
           onSearchChange={setQuery}
           onRefresh={() => { void refresh(); }}
           onConfigureMcp={() => {
@@ -2296,10 +2344,6 @@ export function ExtensionsView({
             setMcpDialogOpen(true);
           }}
           onConnectorAction={(item) => {
-            if (item.variant === "cli") {
-              void openCliConnectorDetail(item.id as CliProviderId);
-              return;
-            }
             const connector = connectors.find((entry) => entry.id === item.id);
             if (connector) void handleConnectorAction(connector);
           }}
@@ -2316,38 +2360,6 @@ export function ExtensionsView({
             const serverName = item.mcpServerName ?? item.id;
             const server = mcpServers.find((entry) => entry.name === serverName);
             if (server) void loadMcpSettings(server);
-          }}
-        />
-
-        <AwakenCliConnectorDetailDialog
-          open={cliDetailConnectorId !== null}
-          providerId={selectedCliConnector?.id ?? cliDetailConnectorId ?? ""}
-          displayName={selectedCliProduct?.displayName || selectedCliConnector?.displayName || "CLI"}
-          description={selectedCliProduct?.description || selectedCliConnector?.description?.trim() || "官方 CLI 连接器"}
-          readiness={selectedCliReadiness ? {
-            install: selectedCliReadiness.install,
-            executable: selectedCliReadiness.executable,
-            authentication: selectedCliReadiness.authentication,
-            account: selectedCliReadiness.account,
-            safeErrorMessage: selectedCliReadiness.safeError?.message,
-          } : null}
-          authSession={selectedCliView?.authSession ? { phase: selectedCliView.authSession.phase } : undefined}
-          installProgress={selectedCliView?.installProgress ? {
-            percent: selectedCliView.installProgress.percent,
-            label: selectedCliView.installProgress.label,
-          } : undefined}
-          brandLogoSrc={selectedCliConnector ? connectorBrandLogo(selectedCliConnector.id) : undefined}
-          brandTone={connectorBrandTone(selectedCliConnector?.id ?? "")}
-          loadingProfile={cliDetailLoading}
-          busy={cliDetailConnectorId !== null && busyConnectorId === cliDetailConnectorId}
-          onOpenChange={(open) => {
-            if (!open) {
-              setCliDetailConnectorId(null);
-              setCliDetailLoading(false);
-            }
-          }}
-          onAction={(action) => {
-            if (cliDetailConnectorId) handleCliDialogAction(cliDetailConnectorId, action);
           }}
         />
 

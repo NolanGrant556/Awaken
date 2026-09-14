@@ -203,7 +203,7 @@ describe("CliConnectorDetailDialog", () => {
       );
     });
 
-    expect(document.body.textContent).toContain("CLI 与官方 Skills 已安装，当前未授权");
+    expect(document.body.textContent).toContain("运行组件与官方技能已安装，当前未授权");
     expect(document.body.textContent).not.toContain("CLI 操作失败");
     expect(document.querySelector(".aw-product-logo")).not.toBeNull();
     const reauthorize = Array.from(document.querySelectorAll("button"))
@@ -229,7 +229,7 @@ describe("CliConnectorDetailDialog", () => {
     });
     const progress = document.querySelector<HTMLElement>("[role='progressbar']");
     expect(progress?.getAttribute("aria-valuenow")).toBe("72");
-    expect(document.body.textContent).toContain("正在下载官方 Skills");
+    expect(document.body.textContent).toContain("正在下载官方 技能");
     const cancel = Array.from(document.querySelectorAll("button")).find((button) => button.textContent === "取消安装");
     await act(async () => cancel?.click());
     expect(onAction).toHaveBeenCalledWith("cancel_install");

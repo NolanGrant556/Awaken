@@ -1,0 +1,138 @@
+{
+  "captured_at": "2026-09-14T03:22:36.152683+00:00",
+  "base_commit": "602f6dfe30507af255f649265adf4a8d74699311",
+  "implementation": "Working tree on main; Renderer/Design System entry migration, no Main/Core or credential modifications.",
+  "desktop": {
+    "entry": "npm run open:desktop",
+    "renderer": "http://127.0.0.1:5174/",
+    "window": "Awaken Desktop",
+    "window_size": "1440x903",
+    "electron_pid_at_entry_check": 37570,
+    "core_pid_at_entry_check": 37841,
+    "live_account_checks": [
+      "Before migration: DingTalk and Feishu connected in original details.",
+      "After migration: the same account display values remain connected through built-in plugin details. Account values deliberately omitted from evidence."
+    ],
+    "ui_checks": [
+      "Built-in list contains Outlook, DingTalk and Feishu.",
+      "DingTalk/Feishu show connection settings buttons, without a package enable switch.",
+      "Connections page retains MCP and its controls; no CLI tab or built-in DingTalk/Feishu cards. Existing independently configured MCP entries retained.",
+      "Built-in search for 飞书 returns only Feishu; clearing restores the list.",
+      "Details open through card/settings button; Escape closes and restores focus.",
+      "Light and dark themes checked; original light theme restored.",
+      "Follow-up: removed the single MCP category chip; connector navigation uses the official MCP mark; search remains right aligned. Verified in real Desktop.",
+      "Brand follow-up: opened DingTalk and Feishu details in real Desktop; both now show the full Awaken App Icon. Brand images use normal proportional sampling. Accounts stayed connected. Account details not saved in screenshots."
+    ],
+    "screenshots": [
+      "before-connectors.png",
+      "after-connectors.png",
+      "after-builtin-plugins.png",
+      "after-builtin-plugins-dark.png",
+      "search-feishu.png",
+      "readonly-calendar-result.png",
+      "readonly-feishu-result.png",
+      "after-connectors-mcp-navigation.png"
+    ]
+  },
+  "live_agent": {
+    "thread_id": "thread_1789355512977570000_2",
+    "thread_title": "钉钉飞书日历只读验收",
+    "terminals": [
+      {
+        "run_id": "run_1789355512977567000_1",
+        "record_id": "rec_run_terminal_1789355651628237000_167",
+        "status": "finished",
+        "terminal_reason": "completed"
+      },
+      {
+        "run_id": "run_1789355719310496000_3",
+        "record_id": "rec_run_terminal_1789355804171075000_251",
+        "status": "finished",
+        "terminal_reason": "completed"
+      }
+    ],
+    "results": [
+      {
+        "provider": "dingtalk-workspace",
+        "operation": "auth status + read-only calendar list",
+        "status": "passed",
+        "tool_call_id": "call_z3b7116sq3pam995am1pi5u1",
+        "observed_output": {
+          "top_level_success": true,
+          "has_error": false,
+          "result_keys": [
+            "events",
+            "hasMore"
+          ]
+        }
+      },
+      {
+        "provider": "lark-cli",
+        "operation": "auth status + read-only calendar list",
+        "status": "permission_gap",
+        "tool_call_id": "call_grhf7ekpm84jo5sadkxt3tvl",
+        "reason": "missing_scope: calendar:calendar:read. Existing login valid; this change does not modify scopes. No additional authorization initiated."
+      },
+      {
+        "provider": "lark-cli",
+        "operation": "read-only wiki space list using existing wiki:space:read",
+        "status": "passed",
+        "tool_call_id": "call_d503t0cuoqmedo0bk8dmdw19",
+        "observed_output": {
+          "ok": true
+        }
+      }
+    ],
+    "boundary": "Read-only checks through the actual Desktop Agent and existing Skills/Bash. Journal result readback checked separately from model final text. Bash exit code alone was not treated as provider success. No business writes, logout, credential reinstall, or permission expansion performed."
+  },
+  "automation": {
+    "focused_tests": {
+      "files": [
+        "BuiltinConnectorPlugins.test.tsx",
+        "CliConnectorDetailDialog.test.tsx",
+        "ExtensionsView.behavior.test.tsx",
+        "main/cli-connectors/manager.test.ts",
+        "main/cli-connectors/auth-ownership.test.ts"
+      ],
+      "passed": 53
+    },
+    "additional_tests": {
+      "files": [
+        "IconConsumption.test.tsx",
+        "ExtensionsView.test.ts",
+        "BuiltinConnectorPlugins.test.tsx"
+      ],
+      "passed": 33,
+      "overlap": "Includes the same 10 BuiltinConnectorPlugins tests."
+    },
+    "design_system": [
+      "typecheck passed",
+      "build passed",
+      "smoke:render passed: 73 components"
+    ],
+    "desktop": [
+      "typecheck passed",
+      "build passed (existing large-chunk warning)"
+    ],
+    "checks": [
+      "check-docs.mjs",
+      "check-doc-links.mjs",
+      "git diff --check"
+    ],
+    "navigation_followup": {
+      "design_system": "typecheck and build passed",
+      "focused_tests": "IconConsumption, BuiltinConnectorPlugins and awakenIconLibrary: 36 tests passed",
+      "docs": "structure, links and diff checks passed"
+    },
+    "brand_followup": {
+      "design_system": "typecheck and build passed",
+      "tests": "CliConnectorDetailDialog and BuiltinConnectorPlugins: 18 tests passed",
+      "image_sources": "Existing 256x256 original PNGs, no image upscaling or redrawing."
+    }
+  },
+  "not_verified_live": [
+    "New downloads/install and cancellation, new external login/authorization cancellation/logout: covered with isolated Renderer/Main tests, not exercised against existing user accounts.",
+    "Windows/Linux and minimum-size window not exercised.",
+    "Business write actions and additional Feishu scopes not exercised."
+  ]
+}

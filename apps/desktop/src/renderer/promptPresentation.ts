@@ -1,3 +1,4 @@
+import { builtinConnectorTokenBrand } from "./builtinConnectorComposer";
 import type { ComposerToken, RuntimeRun } from "../shared/runtime";
 import type { PromptNarrativeToken } from "./run-narrative";
 import { type ThreadComposerDraft } from "./useThreadComposerDraft";
@@ -40,14 +41,14 @@ export function promptTokenViews(
     type: token.type,
     label: token.label,
     leadingText: token.leadingText || undefined,
-    title:
+    title: builtinConnectorTokenBrand(token) ? token.label :
       typeof token.payload?.skillFilePath === "string"
         ? token.payload.skillFilePath
         : token.label,
-    brandIcon:
+    brandIcon: builtinConnectorTokenBrand(token) ?? (
       token.type === "plugin" && typeof token.payload?.pluginName === "string"
         ? pluginBrandByName?.get(token.payload.pluginName)
-        : undefined,
+        : undefined),
   }));
 }
 

@@ -191,6 +191,7 @@
   --aw-icon-size-24: 24px;
 
   /* Radius */
+  --aw-radius-app-icon: 22.5%;
   --aw-radius-compact: 6px;
   --aw-radius-sm: 8px;
   --aw-radius-md: 12px;

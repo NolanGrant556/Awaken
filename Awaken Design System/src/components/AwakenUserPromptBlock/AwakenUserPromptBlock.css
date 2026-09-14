@@ -103,6 +103,7 @@
 
 .execution-prompt-bubble-token-brand-icon {
   object-fit: contain;
+  border-radius: var(--aw-radius-app-icon);
 }
 
 .execution-prompt-bubble-token[data-prompt-token-selected] {

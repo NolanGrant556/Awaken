@@ -3,8 +3,9 @@ import {
   type AwakenConnectorBrandIconProps,
 } from "@awaken/design-system";
 import type { CliProviderId } from "../shared/runtime";
-import dingtalkLogo from "./assets/brands/dingtalk.png";
-import feishuLogo from "./assets/brands/feishu.png";
+import { awakenPluginBrandAsset } from "@awaken/design-system";
+const dingtalkLogo = awakenPluginBrandAsset("dingtalk");
+const feishuLogo = awakenPluginBrandAsset("feishu");
 
 type ConnectorBrandIconProps = Pick<AwakenConnectorBrandIconProps, "providerId">;
 

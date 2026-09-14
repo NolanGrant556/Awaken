@@ -1,14 +1,18 @@
 import "./AwakenPluginBrandIcon.css";
+import dingtalkLogo from "../../assets/plugin-brands/dingtalk.png";
+import feishuLogo from "../../assets/plugin-brands/feishu.png";
 import outlookLogo from "../../assets/plugin-brands/outlook.svg";
 
 // Outlook asset source: Microsoft Fluent product icon CDN,
 // fabric-cdn-prod_20251008.001/assets/brand-icons/product/svg/outlook_48x1.svg.
 
-export type AwakenPluginBrand = "outlook";
+export type AwakenPluginBrand = "outlook" | "dingtalk" | "feishu";
 export type AwakenPluginBrandIconSize = "menu" | "card" | "detail";
 
 const BRAND_ASSETS: Record<AwakenPluginBrand, string> = {
   outlook: outlookLogo,
+  dingtalk: dingtalkLogo,
+  feishu: feishuLogo,
 };
 
 export function awakenPluginBrandAsset(brand: AwakenPluginBrand): string {

@@ -3,6 +3,8 @@
   place-items: center;
   flex: 0 0 auto;
   line-height: 0;
+  border-radius: var(--aw-radius-app-icon);
+  overflow: hidden;
 }
 
 .aw-plugin-brand-icon[data-size="menu"] {
@@ -25,4 +27,5 @@
   width: 100%;
   height: 100%;
   object-fit: contain;
+  border-radius: inherit;
 }

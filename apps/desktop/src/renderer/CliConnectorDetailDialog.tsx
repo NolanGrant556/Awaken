@@ -9,8 +9,9 @@ import type {
   CliInstallProgress,
   RuntimeConnector,
 } from "../shared/runtime";
-import dingtalkLogo from "./assets/brands/dingtalk.png";
-import feishuLogo from "./assets/brands/feishu.png";
+import { awakenPluginBrandAsset } from "@awaken/design-system";
+const dingtalkLogo = awakenPluginBrandAsset("dingtalk");
+const feishuLogo = awakenPluginBrandAsset("feishu");
 import { cliConnectorProductCopy, cliConnectorUserMessage } from "./cliConnectorProduct";
 
 export type CliConnectorDialogAction = AwakenCliConnectorAction;

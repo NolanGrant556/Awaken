@@ -1,0 +1,80 @@
+{
+  "captured_at": "2026-09-14T04:10:23.611057+00:00",
+  "base_commit": "852ab512e7d2a8c1b011e5cc619e19da1a93028e",
+  "scope": "Workbench @ built-in list and plugin shortcut; connected DingTalk/Feishu bind existing global Skill identities. No new Core token kind, plugin package, authorization scope or credential migration.",
+  "automated": {
+    "renderer": "302 tests passed across App, AwakenComposerBar, builtinConnectorComposer, BuiltinConnectorPlugins and CliConnectorDetailDialog; final ordering adjustment rechecked with 284 tests in App/AwakenComposerBar/builtinConnectorComposer.",
+    "core": "go test ./src/runtime -run TestComposerSkill -count=1 passed",
+    "design_system": "typecheck, build and 73-component smoke passed",
+    "desktop": "typecheck and build passed; existing large-chunk build warning only",
+    "docs": "check-docs, check-doc-links and diff checks passed"
+  },
+  "desktop": {
+    "entry": "existing managed Awaken Desktop at http://127.0.0.1:5174/",
+    "screenshots": [
+      "dock-plugin-menu.png",
+      "center-at-menu.png",
+      "selected-both.png",
+      "replayed-tokens.png",
+      "readonly-result.png",
+      "rounded-plugin-icons.png"
+    ],
+    "observations": [
+      "Both entries visible in the @ built-in group and plugin shortcut.",
+      "DingTalk selected through @ and Feishu through plugin picker in the same draft.",
+      "Submitted once with a read-only authorization-status request.",
+      "Both Skill activations appeared before model output.",
+      "Reloaded/reopened the same history; original token labels and brand icons restored.",
+      "Radius follow-up: plugin brand images and shortcut badges share the 22.5% app-icon corner radius; checked actual Desktop plugin menu and capsule preview. Inline and historical token images consume the same radius."
+    ],
+    "thread_id": "thread_1789358635266266000_8",
+    "run_id": "run_1789358635266262000_7",
+    "terminal_record": "rec_run_terminal_1789358716272176000_395",
+    "terminal_status": "finished",
+    "terminal_reason": "completed"
+  },
+  "journal_readback": {
+    "user_message_record": "rec_user_message_1789358635780630000_325",
+    "tokens": [
+      {
+        "id": "builtin-connector:dingtalk-workspace",
+        "type": "skill",
+        "label": "钉钉",
+        "skillId": "dws",
+        "sourceOrigin": "agents"
+      },
+      {
+        "id": "builtin-connector:lark-cli",
+        "type": "skill",
+        "label": "飞书",
+        "skillId": "lark-shared",
+        "sourceOrigin": "agents"
+      }
+    ],
+    "skill_activations": [
+      "rec_skill_activated_1789358635781680000_326",
+      "rec_skill_activated_1789358635781685000_327"
+    ],
+    "dingtalk_status": {
+      "tool_call_id": "call_1lkhntejblguzg7njjutika1",
+      "exit_code": 0,
+      "success": true,
+      "authenticated": true
+    },
+    "feishu_status": {
+      "tool_call_id": "call_xlhnywt2pw6v8tjtfqle330a",
+      "exit_code": 0,
+      "user_available": true,
+      "user_verified": true,
+      "user_status": "ready"
+    },
+    "privacy": "Account values, credential values and raw command outputs are deliberately excluded."
+  },
+  "limits": [
+    "Logout/reconnect and late-snapshot handling verified in isolated tests, not by logging out live user accounts.",
+    "No business writes or new authorization scopes exercised.",
+    "Scheduled task editor did not gain these entries.",
+    "Menus reflect current Main readiness; selected draft tokens remain intact on logout and tool execution retains existing auth gates."
+  ],
+  "assets": "DingTalk and Feishu PNGs moved unchanged into shared Design System brand assets; byte hashes verified."
+}

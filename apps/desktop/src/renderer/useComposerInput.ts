@@ -1,3 +1,4 @@
+import { builtinConnectorTokenBrand, useBuiltinConnectorComposer } from "./builtinConnectorComposer";
 import { type ComposerBarStructuredInputValue } from "@awaken/design-system";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -101,9 +102,16 @@ export function useComposerInput(options: Options) {
 
   const composerPluginCatalogRef = useRef<RuntimePlugin[]>([]);
 
+  const [composerCatalogRevision, setComposerCatalogRevision] = useState(0);
+  const builtinConnectors = useBuiltinConnectorComposer(runtimeClient, desktopReady, composerCatalogRevision);
+
   const composerPluginActions = useMemo(
-    () => pluginMentionActionsFromPlugins(composerPluginCatalog),
-    [composerPluginCatalog],
+    () => [
+      ...pluginMentionActionsFromPlugins(composerPluginCatalog.filter(plugin => plugin.builtin)),
+      ...builtinConnectors.actions,
+      ...pluginMentionActionsFromPlugins(composerPluginCatalog.filter(plugin => !plugin.builtin)),
+    ],
+    [composerPluginCatalog, builtinConnectors.actions],
   );
 
   const composerPluginBrandByName = useMemo(
@@ -126,8 +134,6 @@ export function useComposerInput(options: Options) {
   const [composerPluginsError, setComposerPluginsError] = useState<
     string | null
   >(null);
-
-  const [composerCatalogRevision, setComposerCatalogRevision] = useState(0);
 
   useEffect(
     () =>
@@ -189,17 +195,17 @@ export function useComposerInput(options: Options) {
         label: token.label,
         placement: composerTokenPlacements[token.id] ?? "before",
         leadingText: token.leadingText ?? composerTokenLeadingTexts[token.id],
-        title:
+        title: builtinConnectorTokenBrand(token) ? token.label :
           typeof token.payload?.skillFilePath === "string"
             ? token.payload.skillFilePath
             : typeof token.payload?.pluginName === "string"
               ? token.payload.pluginName
               : token.label,
-        brandIcon:
+        brandIcon: builtinConnectorTokenBrand(token) ?? (
           token.type === "plugin" &&
           typeof token.payload?.pluginName === "string"
             ? composerPluginBrandByName.get(token.payload.pluginName)
-            : undefined,
+            : undefined),
       })),
     [
       composerPluginBrandByName,
@@ -241,8 +247,8 @@ export function useComposerInput(options: Options) {
     open: slashPaletteOpen,
     actions: composerBarSlashActions,
     activeActionId: slashActiveActionId,
-    loading: slashLoading,
-    error: slashError,
+    loading: composerActionTrigger?.marker === "@" ? composerPluginsLoading : slashLoading,
+    error: composerActionTrigger?.marker === "@" ? composerPluginsError ?? builtinConnectors.error : slashError,
     emptyLabel: "没有匹配项",
     onSelectAction: handleSlashActionSelect,
     onActiveActionChange: setSlashActiveActionId,
@@ -252,7 +258,7 @@ export function useComposerInput(options: Options) {
     label: "插件",
     emptyLabel: "没有可用插件",
     loading: composerPluginsLoading,
-    error: composerPluginsError,
+    error: composerPluginsError ?? builtinConnectors.error,
     disabled: composerBarState.disabled,
     options: composerPluginActions.map((action) => ({
       id: action.id,

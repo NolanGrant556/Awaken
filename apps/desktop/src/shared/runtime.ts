@@ -2278,8 +2278,7 @@ export type SearchSettingsSaveRequest = {
 
 export type SearchSettingsSaveResult = {
   settings: SearchSettings;
-  restartStatus: "restarted" | "restart_failed";
-  message?: string;
+  effectiveFrom: "next_run";
 };
 
 export type SearchProviderTestRequest = {

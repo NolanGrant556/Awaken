@@ -1,6 +1,7 @@
 package webfetch
 
 import (
+	"awaken/src/searchsettings"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -12,7 +13,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -26,7 +26,6 @@ const (
 	maxCompressedBytes = 4 * 1024 * 1024
 	maxRedirects       = 5
 	totalTimeout       = 30 * time.Second
-	searchProvidersEnv = "AWAKEN_WEB_SEARCH_PROVIDERS"
 )
 
 // Tool opens a public HTTPS page as bounded UTF-8 text. Tests may inject a
@@ -36,6 +35,7 @@ type Tool struct {
 	ResolveHost   func(context.Context, string) ([]net.IP, error)
 	AllowTestHTTP bool
 	Now           func() time.Time
+	searchEnabled *bool
 }
 
 type fetchParams struct {
@@ -103,8 +103,27 @@ func (t *Tool) Definition() tool.ToolDefinition {
 	})
 }
 
-func (t *Tool) IncludeInRunSnapshot(tool.ExecutionEnvironmentSnapshot) bool {
+func (t *Tool) BindRunSnapshot(environment tool.ExecutionEnvironmentSnapshot) (tool.Tool, string) {
+	copy := *t
+	settings := environment.SearchSettings
+	if settings == nil {
+		loaded := searchsettings.Load()
+		settings = &loaded
+	}
+	enabled := settings.Error == "" && settings.Providers() != ""
+	copy.searchEnabled = &enabled
+	return &copy, settings.Providers() + settings.Error
+}
+
+func (t *Tool) enabled() bool {
+	if t.searchEnabled != nil {
+		return *t.searchEnabled
+	}
 	return searchChannelsEnabled()
+}
+
+func (t *Tool) IncludeInRunSnapshot(tool.ExecutionEnvironmentSnapshot) bool {
+	return t.enabled()
 }
 
 func (t *Tool) Execute(ctx context.Context, input string) (string, error) {
@@ -120,7 +139,7 @@ func (t *Tool) Execute(ctx context.Context, input string) (string, error) {
 
 func (t *Tool) ExecuteOutcome(ctx context.Context, input string, _ tool.ToolObserver) (tool.ExecutionOutcome, error) {
 	started := time.Now().UTC()
-	if !searchChannelsEnabled() && !t.AllowTestHTTP {
+	if !t.enabled() && !t.AllowTestHTTP {
 		outcome := tool.FailedOutcome("WebFetch is unavailable because search is disabled.", "web_fetch_disabled", tool.ErrorCategoryPolicy, false)
 		outcome.Status = tool.OutcomeUnsupported
 		outcome.RecoveryOptions = []string{"enable_web_search_in_settings"}
@@ -366,11 +385,8 @@ func utf8ValidString(text string) bool {
 }
 
 func searchChannelsEnabled() bool {
-	configured, configuredByHost := os.LookupEnv(searchProvidersEnv)
-	if !configuredByHost {
-		return true
-	}
-	return strings.TrimSpace(configured) != ""
+	settings := searchsettings.Load()
+	return settings.Error == "" && settings.Providers() != ""
 }
 
 func init() {

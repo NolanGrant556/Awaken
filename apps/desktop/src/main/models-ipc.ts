@@ -17,7 +17,6 @@ import {
   type ModelProviderWire,
   type ModelPurposeRouting,
   type RuntimeModelProfileSummaryWire,
-  type RuntimeThreadWire,
   type SearchProviderTestRequest,
   type SearchProviderTestResult,
   type SearchSettings,
@@ -27,7 +26,6 @@ import {
 import { runDesktopOperation } from "./desktop-operation.js";
 import { ModelProfileStore } from "./model-profile-store.js";
 import type { RuntimeRequester } from "./runtime-http.js";
-import { RuntimeSupervisor } from "./runtime-supervisor.js";
 import { SearchSettingsStore } from "./search-settings-store.js";
 
 type Dependencies = {
@@ -39,7 +37,6 @@ type Dependencies = {
   readonly mutateAgentPlanMediaTools: (capability: AgentPlanMediaCapability, operation: () => Promise<AgentPlanMediaToolsWire>) => Promise<AgentPlanMediaToolsSaveResult>;
   readonly prepareNetworkRoute: (surface: string) => Promise<void>;
   readonly searchSettingsStore: SearchSettingsStore;
-  readonly supervisor: RuntimeSupervisor;
 };
 
 export function registerModelsIpc(dependencies: Dependencies): void {
@@ -230,28 +227,8 @@ export function registerModelsIpc(dependencies: Dependencies): void {
     "awaken:save-search-settings",
     async (_event, request: SearchSettingsSaveRequest): Promise<SearchSettingsSaveResult> => {
 
-      const threads = await dependencies.requestRuntime<RuntimeThreadWire[]>("/v1/threads");
-      if (threads.some((thread) => Boolean(thread.active_run_id))) {
-        throw new Error("当前有任务正在运行，请结束任务后重试。");
-      }
       const settings = await dependencies.searchSettingsStore.save(request);
-      try {
-        const status = await dependencies.supervisor.restart();
-        if (status.status !== "running" || !status.runtimeBaseUrl) {
-          return {
-            settings,
-            restartStatus: "restart_failed",
-            message: "搜索设置已保存，但 Core 重启失败。请稍后重试重启。",
-          };
-        }
-        return { settings, restartStatus: "restarted" };
-      } catch {
-        return {
-          settings,
-          restartStatus: "restart_failed",
-          message: "搜索设置已保存，但 Core 重启失败。请稍后重试重启。",
-        };
-      }
+      return { settings, effectiveFrom: "next_run" };
     },
   );
 }

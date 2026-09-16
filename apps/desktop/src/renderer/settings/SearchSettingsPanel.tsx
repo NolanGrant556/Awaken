@@ -70,9 +70,9 @@ export function SearchSettingsPanel({
       });
       setSettings(result.settings);
       setMessage(
-        result.restartStatus === "restarted"
-          ? `${PROVIDERS.find((item) => item.id === provider)?.name} 已${enabled ? "开启" : "关闭"}。`
-          : result.message ?? "设置已保存，但 Core 重启失败。",
+        result.effectiveFrom === "next_run"
+          ? `${PROVIDERS.find((item) => item.id === provider)?.name} 已${enabled ? "开启" : "关闭"}，从下一次任务开始生效。`
+          : "搜索设置已保存。",
       );
     } catch (error) {
       setMessage(

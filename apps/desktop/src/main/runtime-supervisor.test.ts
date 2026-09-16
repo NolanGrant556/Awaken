@@ -143,7 +143,7 @@ describe("RuntimeSupervisor", () => {
         "builtin-plugins",
       ),
     });
-    expect(spawnOptions?.env?.AWAKEN_WEB_SEARCH_PROVIDERS).toBe("exa,tavily");
+    expect(spawnOptions?.env).not.toHaveProperty("AWAKEN_WEB_SEARCH_PROVIDERS");
     expect(spawnOptions?.env).not.toHaveProperty("AWAKEN_CONFIG_DIR");
     expect(spawnOptions?.env).not.toHaveProperty("AWAKEN_RUNTIME_MANIFEST");
     expect(spawnOptions?.env).not.toHaveProperty("LLM_API_KEY");
@@ -843,6 +843,61 @@ describe("bounded owned Core shutdown", () => {
    expect(supervisor.getStatus().status).toBe("stopping");
    child.exitCode=0;child.emit("exit",0,null);await supervisor.stop();
    expect(supervisor.getStatus().status).toBe("stopped");
+  } finally {vi.useRealTimers();vi.unstubAllGlobals();}
+ });
+ it("stop() still fails after a confirmed unclean exit so update installation cannot proceed", async () => {
+  const child=new FakeChild();
+  const supervisor=new RuntimeSupervisor({}, {allocatePort:async()=>19224,resolveBinaryPath:()=>"/fake/core",spawnProcess:()=>asChild(child),waitForHealth:async()=>{},resolveLoginUserEnvironment:async()=>({})});
+  await supervisor.start();
+  vi.stubGlobal("fetch",vi.fn(async()=>new Response("{}",{status:200})));
+  try {
+   const stopping=supervisor.stop();
+   await tick();
+   child.exitCode=1;
+   child.emit("exit",1,null);
+   await expect(stopping).rejects.toThrow("did not shut down cleanly");
+   expect(supervisor.getStatus().status).toBe("stopped");
+  } finally {vi.unstubAllGlobals();}
+ });
+ it("restart() starts a new Core after a confirmed unclean exit", async () => {
+  const children: FakeChild[] = [];
+  const supervisor=new RuntimeSupervisor({}, {
+   allocatePort: vi.fn<() => Promise<number>>().mockResolvedValueOnce(19225).mockResolvedValueOnce(19226),
+   resolveBinaryPath:()=>"/fake/core",
+   spawnProcess:()=>{ const child=new FakeChild(); children.push(child); return asChild(child); },
+   waitForHealth:vi.fn(async()=>{}),
+   resolveLoginUserEnvironment:async()=>({}),
+  });
+  await supervisor.start();
+  vi.stubGlobal("fetch",vi.fn(async()=>new Response("{}",{status:200})));
+  try {
+   const restarting=supervisor.restart();
+   await tick();
+   children[0].exitCode=1;
+   children[0].emit("exit",1,null);
+   await expect(restarting).resolves.toEqual({
+    status:"running",
+    runtimeBaseUrl:"http://127.0.0.1:19226",
+   });
+   expect(children).toHaveLength(2);
+   expect(supervisor.getLogs().some((entry)=>entry.line.includes("exited incompletely"))).toBe(true);
+  } finally {vi.unstubAllGlobals();}
+ });
+ it("restart() does not spawn while the previous Core is still alive", async () => {
+  const child=new FakeChild();child.kill=vi.fn(()=>true);
+  const spawnProcess=vi.fn(()=>asChild(child));
+  const supervisor=new RuntimeSupervisor({}, {allocatePort:async()=>19227,resolveBinaryPath:()=>"/fake/core",spawnProcess,waitForHealth:async()=>{},resolveLoginUserEnvironment:async()=>({})});
+  await supervisor.start();
+  vi.useFakeTimers();
+  vi.stubGlobal("fetch",vi.fn(async()=>new Response("{}",{status:200})));
+  try {
+   const restarting=supervisor.restart();
+   const rejection=expect(restarting).rejects.toThrow("has not exited");
+   await vi.advanceTimersByTimeAsync(12000);
+   await rejection;
+   expect(spawnProcess).toHaveBeenCalledTimes(1);
+   expect(supervisor.getStatus().status).toBe("stopping");
+   child.exitCode=0;child.emit("exit",0,null);await supervisor.stop();
   } finally {vi.useRealTimers();vi.unstubAllGlobals();}
  });
 });

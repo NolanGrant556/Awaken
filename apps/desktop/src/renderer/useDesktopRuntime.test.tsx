@@ -57,6 +57,26 @@ describe("runtime metadata refresh", () => {
     expect(client.getRuntimeInfo).not.toHaveBeenCalled();
   });
 
+  it("treats initial stopped as startup, then a later stopped Core as restart", async () => {
+    await render("stopped");
+    expect(result.desktopStarting).toBe(true);
+    expect(result.desktopNeedsRestart).toBe(false);
+    await render("running");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(result.desktopReady).toBe(true);
+    await render("stopped");
+    expect(result.desktopNeedsRestart).toBe(true);
+    expect(result.desktopStarting).toBe(false);
+  });
+
+  it("shows a restart prompt when Core crashes before becoming ready", async () => {
+    await render("crashed");
+    expect(result.desktopNeedsRestart).toBe(true);
+    expect(result.desktopStarting).toBe(false);
+  });
+
   it("preserves the last model list on failure and distinguishes a successful empty list", async () => {
     await render();
     vi.mocked(client.listModelProfiles).mockRejectedValueOnce(new Error("offline"));

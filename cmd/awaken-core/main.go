@@ -604,22 +604,21 @@ func main() {
 		}
 	}
 
-	srv := &http.Server{
-		Handler: server.NewRouterWithScheduledTasks(
-			runService,
-			infoProvider,
-			manager,
-			connRegistry,
-			skillRegistry,
-			acpManager,
-			defaultWorkspace,
-			syncSkillsForWorkspace,
-			control,
-			schedSvc,
-			pluginStore,
-			shutdownOnce,
-		),
-	}
+	srv := newCoreHTTPServer(server.NewRouterWithScheduledTasks(
+		runService,
+		infoProvider,
+		manager,
+		connRegistry,
+		skillRegistry,
+		acpManager,
+		defaultWorkspace,
+		syncSkillsForWorkspace,
+		control,
+		schedSvc,
+		pluginStore,
+		shutdownOnce,
+	))
+	defer srv.cancel()
 
 	// Start the scheduler after the event listener is wired into the router so
 	// startup recovery events can be buffered and replayed instead of dropped.
@@ -657,24 +656,24 @@ func main() {
 	manager.BeginShutdown()
 	cancelCleanup()
 	bashtool.CancelAllTasks()
-	cleanup := []func(context.Context) error{manager.Shutdown, runService.Drain}
+	cleanup := []cleanupOwner{{"mcp", manager.Shutdown}, {"runs", runService.Drain}}
 	if environmentManager != nil {
-		cleanup = append(cleanup, func(context.Context) error { return environmentManager.Close() })
+		cleanup = append(cleanup, cleanupOwner{"environments", func(context.Context) error { return environmentManager.Close() }})
 	}
 	if acpManager != nil {
-		cleanup = append(cleanup, acpManager.CloseAll)
+		cleanup = append(cleanup, cleanupOwner{"acp", acpManager.CloseAll})
 	}
 	if sched != nil {
-		cleanup = append(cleanup, func(context.Context) error { sched.Stop(); return nil })
+		cleanup = append(cleanup, cleanupOwner{"scheduler", func(context.Context) error { sched.Stop(); return nil }})
 	}
 	if schedSvc != nil {
-		cleanup = append(cleanup, func(context.Context) error { return schedSvc.Close() })
+		cleanup = append(cleanup, cleanupOwner{"scheduled-task-store", func(context.Context) error { return schedSvc.Close() }})
 	}
-	shutdownErr := joinCoreCleanup(shutdownCtx, cleanup...)
+	shutdownErr := joinNamedCoreCleanup(shutdownCtx, cleanup...)
 	if shutdownErr == nil {
-		shutdownErr = joinCoreCleanup(shutdownCtx, func(context.Context) error { return runService.FlushTranscripts() })
+		shutdownErr = joinNamedCoreCleanup(shutdownCtx, cleanupOwner{"transcripts", func(context.Context) error { return runService.FlushTranscripts() }})
 	}
-	if err := srv.Shutdown(shutdownCtx); err != nil {
+	if err := joinNamedCoreCleanup(shutdownCtx, cleanupOwner{"http", srv.Shutdown}); err != nil {
 		shutdownErr = errors.Join(shutdownErr, err)
 	}
 	if shutdownErr != nil {

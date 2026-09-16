@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"awaken/src/searchsettings"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -45,6 +46,12 @@ var (
 	ErrCandidateInstallPlanInvalid  = errors.New("candidate install plan is invalid for pinned run snapshot")
 )
 
+// RunSnapshotBinder freezes host configuration into a new executable instance.
+// The revision contributes to the run registration identity.
+type RunSnapshotBinder interface {
+	BindRunSnapshot(ExecutionEnvironmentSnapshot) (Tool, string)
+}
+
 // RunSnapshotFilter lets a builtin omit itself from a run availability
 // snapshot. WebFetch uses this when search channels are disabled. Embedded
 // browser tools use it when the Desktop host is not registered.
@@ -78,6 +85,10 @@ type CandidateInstallPlanResolution struct {
 // supported; providers with declared dependencies then remain needs_runtime
 // unless they implement ProviderReadinessProvider.
 func NewRunToolAvailabilitySnapshot(environment ExecutionEnvironmentSnapshot) RunToolAvailabilitySnapshot {
+	if environment.SearchSettings == nil {
+		settings := searchsettings.Load()
+		environment.SearchSettings = &settings
+	}
 	mu.RLock()
 	version := registryVersion
 	registered := make([]RegisteredTool, 0, len(toolRegistry))
@@ -98,6 +109,11 @@ func NewRunToolAvailabilitySnapshot(environment ExecutionEnvironmentSnapshot) Ru
 		order:                 make([]string, 0, len(registered)),
 	}
 	for _, registeredTool := range registered {
+		if binder, ok := registeredTool.Runtime.(RunSnapshotBinder); ok {
+			runtime, revision := binder.BindRunSnapshot(environment)
+			registeredTool.Runtime = runtime
+			registeredTool.RegistrationID += ":" + revision
+		}
 		if filter, ok := registeredTool.Runtime.(RunSnapshotFilter); ok && !filter.IncludeInRunSnapshot(environment) {
 			continue
 		}

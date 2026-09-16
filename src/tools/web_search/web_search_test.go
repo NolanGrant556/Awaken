@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"awaken/src/searchsettings"
 	"awaken/src/tool"
 )
 
@@ -328,5 +330,71 @@ func TestDisabledProviderReturnsStableUnsupportedOutcome(t *testing.T) {
 	outcome, err := New(disabledProvider{}).ExecuteOutcome(context.Background(), "query", nil)
 	if err != nil || outcome.Status != tool.OutcomeUnsupported || outcome.ErrorCode != "web_search_disabled" {
 		t.Fatalf("outcome=%+v err=%v", outcome, err)
+	}
+}
+
+func TestBindRunSnapshotPinsProviderAndKeepsInjectedProvider(t *testing.T) {
+	disabled, revision := New(nil).BindRunSnapshot(tool.ExecutionEnvironmentSnapshot{
+		SearchSettings: &searchsettings.Snapshot{},
+	})
+	if revision != "" {
+		t.Fatalf("disabled revision=%q", revision)
+	}
+	outcome, err := disabled.(*WebSearchTool).ExecuteOutcome(context.Background(), "query", nil)
+	if err != nil || outcome.ErrorCode != "web_search_disabled" {
+		t.Fatalf("disabled outcome=%+v err=%v", outcome, err)
+	}
+	tavily, revision := New(nil).BindRunSnapshot(tool.ExecutionEnvironmentSnapshot{
+		SearchSettings: &searchsettings.Snapshot{Tavily: true},
+	})
+	if revision != "tavily" {
+		t.Fatalf("tavily revision=%q", revision)
+	}
+	if _, ok := tavily.(*WebSearchTool).provider.(*TavilyProvider); !ok {
+		t.Fatalf("expected Tavily provider, got %#v", tavily.(*WebSearchTool).provider)
+	}
+	injected := &fakeSearchProvider{response: SearchResponse{Provider: "injected", Results: []SearchResult{
+		{Title: "Pinned", URL: "https://example.com/pinned"},
+	}}}
+	bound, revision := New(injected).BindRunSnapshot(tool.ExecutionEnvironmentSnapshot{
+		SearchSettings: &searchsettings.Snapshot{Tavily: true},
+	})
+	if revision != "injected" {
+		t.Fatalf("injected revision=%q", revision)
+	}
+	if bound.(*WebSearchTool).provider != injected {
+		t.Fatal("injected provider must not be replaced")
+	}
+}
+
+func TestRunSnapshotUsesPinnedSearchSettingsNotCurrentFile(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AWAKEN_USER_DATA_DIR", root)
+	config := filepath.Join(root, "config")
+	if err := os.MkdirAll(config, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(config, "search.json"), []byte(`{"version":1,"providers":{"exa":{"enabled":false},"tavily":{"enabled":true}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settings := searchsettings.Load()
+	snapshot := tool.NewRunToolAvailabilitySnapshot(tool.ExecutionEnvironmentSnapshot{SearchSettings: &settings})
+	if err := os.WriteFile(filepath.Join(config, "search.json"), []byte(`{"version":1,"providers":{"exa":{"enabled":true},"tavily":{"enabled":false}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	entry, err := snapshot.Lookup("WebSearch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := entry.Runtime.(*WebSearchTool).provider.(*TavilyProvider); !ok {
+		t.Fatalf("running snapshot must keep Tavily after later Exa-only write: %#v", entry.Runtime.(*WebSearchTool).provider)
+	}
+	next := tool.NewRunToolAvailabilitySnapshot(tool.ExecutionEnvironmentSnapshot{})
+	nextSearch, err := next.Lookup("WebSearch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := nextSearch.Runtime.(*WebSearchTool).provider.(*ExaProvider); !ok {
+		t.Fatalf("next run must observe the new Exa-only file: %#v", nextSearch.Runtime.(*WebSearchTool).provider)
 	}
 }

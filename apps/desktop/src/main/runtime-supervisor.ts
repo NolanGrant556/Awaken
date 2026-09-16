@@ -449,37 +449,41 @@ export class RuntimeSupervisor {
         }
         const binaryPath = this.deps.resolveBinaryPath();
         const baseUrl = `http://127.0.0.1:${port}`;
+        const childEnv: NodeJS.ProcessEnv = {
+          ...runtimeEnvironment,
+          ...productEnvironment,
+          ...acceptanceChildEnvironment({ root: process.env.AWAKEN_DESKTOP_ACCEPTANCE_ROOT, dev: process.argv.includes("--dev"), packaged: app.isPackaged }),
+          AWAKEN_CORE_ADDR: `127.0.0.1:${port}`,
+          AWAKEN_USER_DATA_DIR: app.getPath("userData"),
+          // Business data root shared by dev and packaged installs. Main
+          // resolves the user home itself; inherited shell values must not
+          // change the product identity.
+          AWAKEN_HOME: join(app.getPath("home"), ".awaken"),
+          // Only an explicit development acceptance root may select a fixture catalog.
+          AWAKEN_ENVIRONMENT_CATALOG: process.argv.includes("--dev") && !app.isPackaged && process.env.AWAKEN_DESKTOP_ACCEPTANCE_ROOT
+            ? join(process.env.AWAKEN_DESKTOP_ACCEPTANCE_ROOT, "catalog.json") : "",
+          // Bundled Skills are product-owned. Login shell configuration may
+          // not replace the synchronized Desktop source identity.
+          AWAKEN_BUNDLED_SKILL_DIRS: resolveSystemSkillsTargetRoot(
+            app.getPath("home"),
+          ),
+          // Built-in Plugins are release-owned packages. Core validates and
+          // copies them into the normal Store while preserving user state.
+          AWAKEN_BUNDLED_PLUGIN_DIR: resolveBuiltinPluginsSourceRoot({
+            packaged: app.isPackaged,
+            resourcesPath: process.resourcesPath,
+            appPath: app.getAppPath(),
+          }),
+          // FileStore projects are selected per run. Core must never derive
+          // a project from Electron userData, a previous workspace, or cwd.
+          AWAKEN_DEFAULT_WORKSPACE: "",
+        };
+        // Search channels are read from userData/config/search.json at each run
+        // start. Login/product env must not pin a Core-lifetime provider list.
+        delete childEnv.AWAKEN_WEB_SEARCH_PROVIDERS;
 
         child = this.deps.spawnProcess(binaryPath, [], {
-          env: {
-            ...runtimeEnvironment,
-            ...productEnvironment,
-            ...acceptanceChildEnvironment({ root: process.env.AWAKEN_DESKTOP_ACCEPTANCE_ROOT, dev: process.argv.includes("--dev"), packaged: app.isPackaged }),
-            AWAKEN_CORE_ADDR: `127.0.0.1:${port}`,
-            AWAKEN_USER_DATA_DIR: app.getPath("userData"),
-            // Business data root shared by dev and packaged installs. Main
-            // resolves the user home itself; inherited shell values must not
-            // change the product identity.
-            AWAKEN_HOME: join(app.getPath("home"), ".awaken"),
-            // Only an explicit development acceptance root may select a fixture catalog.
-            AWAKEN_ENVIRONMENT_CATALOG: process.argv.includes("--dev") && !app.isPackaged && process.env.AWAKEN_DESKTOP_ACCEPTANCE_ROOT
-              ? join(process.env.AWAKEN_DESKTOP_ACCEPTANCE_ROOT, "catalog.json") : "",
-            // Bundled Skills are product-owned. Login shell configuration may
-            // not replace the synchronized Desktop source identity.
-            AWAKEN_BUNDLED_SKILL_DIRS: resolveSystemSkillsTargetRoot(
-              app.getPath("home"),
-            ),
-            // Built-in Plugins are release-owned packages. Core validates and
-            // copies them into the normal Store while preserving user state.
-            AWAKEN_BUNDLED_PLUGIN_DIR: resolveBuiltinPluginsSourceRoot({
-              packaged: app.isPackaged,
-              resourcesPath: process.resourcesPath,
-              appPath: app.getAppPath(),
-            }),
-            // FileStore projects are selected per run. Core must never derive
-            // a project from Electron userData, a previous workspace, or cwd.
-            AWAKEN_DEFAULT_WORKSPACE: "",
-          },
+          env: childEnv,
           stdio: ["ignore", "pipe", "pipe"],
         });
 
@@ -627,8 +631,16 @@ export class RuntimeSupervisor {
   }
 
   async restart(): Promise<SupervisorStatusInfo> {
-    await this.stop();
     this.clearLogs();
+    try {
+      await this.stop();
+    } catch (error) {
+      // Ordinary restart can recover only after the owned process is confirmed
+      // gone. stop() remains strict for update installation and application exit.
+      if (this.child || this.status !== "stopped") throw error;
+      this.appendLog({ timestamp: this.deps.now(), stream: "stderr",
+        line: `previous Core exited incompletely; restarting after confirmed exit: ${error instanceof Error ? error.message : String(error)}` });
+    }
     return this.start();
   }
 

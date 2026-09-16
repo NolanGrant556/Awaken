@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"awaken/src/searchsettings"
 	"awaken/src/tool/sandbox"
 )
 
@@ -78,7 +79,8 @@ type ExecutionEnvironmentSnapshot struct {
 	// ComputerEnabled is set by the runtime when a run is configured with a
 	// Computer binding. It gates whether computer_* tools are exposed in the
 	// pinned tool snapshot. It does not imply a real CUA Host is available.
-	ComputerEnabled bool `json:"computer_enabled,omitempty"`
+	ComputerEnabled bool                     `json:"computer_enabled,omitempty"`
+	SearchSettings  *searchsettings.Snapshot `json:"search_settings,omitempty"`
 }
 
 type VersionProbeFunc func(ctx context.Context, executable string, maxOutputBytes int) (string, error)
@@ -174,6 +176,11 @@ func ProbeExecutionEnvironment(ctx context.Context, options ExecutionEnvironment
 		SkillRoots: skillRoots, TemporaryWorkRoot: temporaryWorkRoot, RefreshReason: refreshReason,
 		Confidence: "observed", Warnings: append(append(pathWarnings, skillRootWarnings...), temporaryWarnings...),
 		ComputerEnabled: options.ComputerEnabled,
+	}
+	search := searchsettings.Load()
+	snapshot.SearchSettings = &search
+	if search.Error != "" {
+		snapshot.Warnings = append(snapshot.Warnings, search.Error)
 	}
 	snapshot.NativeArchitecture, snapshot.Translation = observePlatformArchitecture(ctx)
 	snapshot.ProxyReferences, snapshot.AuthenticationReferences, snapshot.RuntimeReferences = presentEnvironmentReferenceNames()
@@ -856,6 +863,10 @@ func ExecutionEnvironmentSnapshotFromContext(ctx context.Context) (ExecutionEnvi
 // slice is copied so caller mutation cannot rewrite a pinned executable or
 // package-manager observation after ToolRuntime construction.
 func (s ExecutionEnvironmentSnapshot) Clone() ExecutionEnvironmentSnapshot {
+	if s.SearchSettings != nil {
+		value := *s.SearchSettings
+		s.SearchSettings = &value
+	}
 	s.PATH = append([]string(nil), s.PATH...)
 	s.Executables = append([]ExecutableObservation(nil), s.Executables...)
 	s.AvailablePackageManagers = append([]string(nil), s.AvailablePackageManagers...)

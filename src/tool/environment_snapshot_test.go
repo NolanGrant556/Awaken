@@ -32,6 +32,7 @@ func (s *recordingFullVersionProbeSandbox) ApplySandbox(cmd *exec.Cmd, _ string,
 }
 
 func TestProbeExecutionEnvironmentIsBoundedDeterministicAndRedacted(t *testing.T) {
+	t.Setenv("AWAKEN_USER_DATA_DIR", t.TempDir())
 	t.Setenv("HTTP_PROXY", "Bearer proxy-secret-must-not-appear")
 	fixedTime := time.Date(2026, 7, 12, 1, 2, 3, 0, time.UTC)
 	lookPath := func(name string) (string, error) {

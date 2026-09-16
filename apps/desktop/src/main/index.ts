@@ -2525,22 +2525,9 @@ app.whenReady().then(async () => {
     {},
     {
       resolveProductEnvironment: async () => {
-        let searchEnvironment: NodeJS.ProcessEnv = {
-          AWAKEN_WEB_SEARCH_PROVIDERS: "",
-        };
-        try {
-          searchEnvironment = (await searchSettingsStore?.runtimeEnvironment()) ?? {
-            AWAKEN_WEB_SEARCH_PROVIDERS: "",
-          };
-        } catch (error) {
-          console.error("[awaken-desktop] search settings unavailable", {
-            message: error instanceof Error ? error.message : String(error),
-          });
-        }
         const managedBin = cliConnectorManager?.managedBinPath() ?? "";
         const inheritedPath = process.env.PATH ?? "";
         return {
-          ...searchEnvironment,
           ...(networkRouteManager?.runtimeEnvironment() ?? {}),
           AWAKEN_DESKTOP_CONTROL_TOKEN: desktopControlToken,
           ...(process.platform === "win32"
@@ -2632,7 +2619,6 @@ app.whenReady().then(async () => {
     mutateAgentPlanMediaTools,
     prepareNetworkRoute,
     searchSettingsStore,
-    supervisor,
   });
   registerFilesIpc({
     requestRuntime,

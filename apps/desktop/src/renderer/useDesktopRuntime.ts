@@ -29,7 +29,14 @@ export function useDesktopRuntime(
   const desktopReady =
     isDesktopRuntimeAvailable(supervisorStatus) && runtimeInfo !== null;
 
-  const desktopNeedsRestart = supervisorStatus === "crashed";
+  const seenLiveRuntimeRef = useRef(false);
+  if (supervisorStatus === "running" || supervisorStatus === "external-attached") {
+    seenLiveRuntimeRef.current = true;
+  }
+
+  const desktopNeedsRestart =
+    supervisorStatus === "crashed" ||
+    (supervisorStatus === "stopped" && seenLiveRuntimeRef.current);
 
   const desktopStarting = !desktopReady && !desktopNeedsRestart;
 

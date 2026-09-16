@@ -239,7 +239,7 @@ export class SearchSettingsStore {
       if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
         return structuredClone(DEFAULT_FILE);
       }
-      throw new Error("无法读取 ~/.awaken/config/search.json。", { cause: error });
+      throw new Error("无法读取搜索配置。", { cause: error });
     }
   }
 
@@ -258,7 +258,7 @@ export class SearchSettingsStore {
       await fs.rename(tempPath, this.filePath);
       await fs.chmod(this.filePath, 0o600);
     } catch (error) {
-      throw new Error("无法写入 ~/.awaken/config/search.json。", { cause: error });
+      throw new Error("无法写入搜索配置。", { cause: error });
     } finally {
       await fs.rm(tempPath, { force: true }).catch(() => undefined);
     }

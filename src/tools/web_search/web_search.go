@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"awaken/src/searchsettings"
 	"awaken/src/tool"
 )
 
@@ -312,6 +313,10 @@ func NewProviderFromEnvironment() SearchProvider {
 	if !configuredByHost {
 		configured = "exa"
 	}
+	return NewProvider(configured)
+}
+
+func NewProvider(configured string) SearchProvider {
 	var providers []SearchProvider
 	seen := make(map[string]bool)
 	for _, raw := range strings.Split(configured, ",") {
@@ -458,6 +463,28 @@ type WebSearchTool struct {
 
 func New(provider SearchProvider) *WebSearchTool { return &WebSearchTool{provider: provider} }
 
+func (t *WebSearchTool) BindRunSnapshot(environment tool.ExecutionEnvironmentSnapshot) (tool.Tool, string) {
+	// Explicitly injected providers are test/host-owned, never replaced.
+	if t.provider != nil {
+		return t, "injected"
+	}
+	settings := environment.SearchSettings
+	if settings == nil {
+		loaded := searchsettings.Load()
+		settings = &loaded
+	}
+	if settings.Error != "" {
+		return New(configErrorProvider{}), "config-error"
+	}
+	return New(NewProvider(settings.Providers())), settings.Providers()
+}
+
+type configErrorProvider struct{}
+
+func (configErrorProvider) Search(context.Context, SearchRequest) (SearchResponse, error) {
+	return SearchResponse{}, &ProviderError{Kind: ProviderErrorDisabled, Message: "Search settings could not be read. Review Settings and retry.", Retryable: false}
+}
+
 var _ tool.LegacySingleValueInput = (*WebSearchTool)(nil)
 
 func (t *WebSearchTool) UnwrapSingleParameterInput() bool { return true }
@@ -520,7 +547,11 @@ func (t *WebSearchTool) ExecuteOutcome(ctx context.Context, input string, _ tool
 	}
 	provider := t.provider
 	if provider == nil {
-		provider = NewProviderFromEnvironment()
+		settings := searchsettings.Load()
+		provider = NewProvider(settings.Providers())
+		if settings.Error != "" {
+			provider = configErrorProvider{}
+		}
 	}
 	response, err := provider.Search(ctx, SearchRequest{Query: params.Query, AllowedDomains: params.AllowedDomains, BlockedDomains: params.BlockedDomains, Limit: maximumResults})
 	if err != nil {
@@ -704,5 +735,5 @@ func providerFailure(err error) tool.ExecutionOutcome {
 }
 
 func init() {
-	tool.MustRegisterToolWithMode(New(NewProviderFromEnvironment()), tool.DefinitionValidationStrictBuiltin)
+	tool.MustRegisterToolWithMode(New(nil), tool.DefinitionValidationStrictBuiltin)
 }

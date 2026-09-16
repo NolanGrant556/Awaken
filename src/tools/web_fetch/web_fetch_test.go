@@ -8,9 +8,12 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"awaken/src/searchsettings"
 	"awaken/src/tool"
 )
 
@@ -207,10 +210,56 @@ func TestWebFetchCancelled(t *testing.T) {
 }
 
 func TestWebFetchOmittedWhenSearchDisabled(t *testing.T) {
-	t.Setenv("AWAKEN_WEB_SEARCH_PROVIDERS", "")
-	snapshot := tool.NewRunToolAvailabilitySnapshot(tool.ExecutionEnvironmentSnapshot{})
+	snapshot := tool.NewRunToolAvailabilitySnapshot(tool.ExecutionEnvironmentSnapshot{
+		SearchSettings: &searchsettings.Snapshot{},
+	})
 	if _, err := snapshot.Lookup("WebFetch"); err == nil {
 		t.Fatal("WebFetch must not enter the snapshot when search is disabled")
+	}
+}
+
+func TestWebFetchIncludedWhenSearchEnabled(t *testing.T) {
+	snapshot := tool.NewRunToolAvailabilitySnapshot(tool.ExecutionEnvironmentSnapshot{
+		SearchSettings: &searchsettings.Snapshot{Exa: true},
+	})
+	if _, err := snapshot.Lookup("WebFetch"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWebFetchBindRunSnapshotIgnoresLaterSettings(t *testing.T) {
+	runtime, _ := (&Tool{}).BindRunSnapshot(tool.ExecutionEnvironmentSnapshot{
+		SearchSettings: &searchsettings.Snapshot{},
+	})
+	bound := runtime.(*Tool)
+	if bound.IncludeInRunSnapshot(tool.ExecutionEnvironmentSnapshot{
+		SearchSettings: &searchsettings.Snapshot{Exa: true},
+	}) {
+		t.Fatal("bound WebFetch must keep the run snapshot, not later settings")
+	}
+}
+
+func TestWebFetchStaysInPinnedSnapshotAfterLaterDisable(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AWAKEN_USER_DATA_DIR", root)
+	config := filepath.Join(root, "config")
+	if err := os.MkdirAll(config, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(config, "search.json"), []byte(`{"version":1,"providers":{"exa":{"enabled":true},"tavily":{"enabled":false}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settings := searchsettings.Load()
+	snapshot := tool.NewRunToolAvailabilitySnapshot(tool.ExecutionEnvironmentSnapshot{SearchSettings: &settings})
+	if err := os.WriteFile(filepath.Join(config, "search.json"), []byte(`{"version":1,"providers":{"exa":{"enabled":false},"tavily":{"enabled":false}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := snapshot.Lookup("WebFetch"); err != nil {
+		t.Fatal(err)
+	}
+	next := tool.NewRunToolAvailabilitySnapshot(tool.ExecutionEnvironmentSnapshot{})
+	if _, err := next.Lookup("WebFetch"); err == nil {
+		t.Fatal("next run must omit WebFetch after search is disabled")
 	}
 }
 

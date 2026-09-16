@@ -12,7 +12,9 @@ import { DEFAULT_WORKSPACE_PROJECT_ID } from "./projectWorkspace";
 import { useProjectOperations } from "./useProjectOperations";
 import { useProjectRegistry } from "./useProjectRegistry";
 import { useThreadNavigation } from "./useThreadNavigation";
+import { useBackgroundPrimaryClick } from "./useBackgroundPrimaryClick";
 type Props = {
+  onBackgroundPrimaryClick?: () => void;
   projectRegistry: Pick<
     ReturnType<typeof useProjectRegistry>,
     | "expandedProjectIds"
@@ -57,6 +59,7 @@ type Props = {
   >["sidebarUpdateAction"];
 };
 export function DesktopSidebar({
+  onBackgroundPrimaryClick,
   projectRegistry,
   projectOperations,
   threadNavigation,
@@ -74,6 +77,7 @@ export function DesktopSidebar({
   profileButtonRef,
   sidebarUpdateAction,
 }: Props) {
+  const backgroundClick = useBackgroundPrimaryClick(onBackgroundPrimaryClick);
   const {
     expandedProjectIds,
     setExpandedProjectIds,
@@ -99,7 +103,7 @@ export function DesktopSidebar({
     requestThreadDelete,
   } = threadNavigation;
   return (
-    <WorkbenchSidebarFrame>
+    <WorkbenchSidebarFrame {...backgroundClick}>
       <Sidebar
         navItems={navItems}
         activeNavId={activeNavId}

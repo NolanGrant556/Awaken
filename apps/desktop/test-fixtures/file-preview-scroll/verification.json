@@ -1,0 +1,124 @@
+{
+  "date": "2026-09-16",
+  "platform": "macOS arm64",
+  "application": "Awaken Desktop, Electron, http://127.0.0.1:5174/",
+  "source_sha256": {
+    "apps/desktop/src/renderer/styles/project-files.css": "56748be9039d51dd61e735f8e189b3ac4ee02ffc016ee1033fd598c2b537cc9d"
+  },
+  "evidence": "本次真实 Desktop 操作的 CUA 截图、可访问性树与 DevTools 尺寸读数；本文件记录观察结果，不包含截图副本。",
+  "before": {
+    "file": "build_purchase_doc.py",
+    "pointer_wheel": "正文未移动",
+    "accessibility_scroll": "外层被卷动，文件工具栏消失",
+    "host_height": 859,
+    "content_height": 4795,
+    "editor_viewport_height": 4751
+  },
+  "after": {
+    "host_height": 859,
+    "content_height": 859,
+    "editor_viewport_height": 815,
+    "editor_scroll_height": 4751,
+    "cases": [
+      {
+        "format": "Python",
+        "result": "正文滚轮移动到第 125 行附近，文件工具栏保持固定；关闭自动换行"
+      },
+      {
+        "format": "TXT / HTML source / JSON",
+        "result": "分别用 200 行文本样本验证，滚轮后可访问性文本出现第 50 行及后续行"
+      },
+      {
+        "format": "Markdown preview",
+        "result": "滚轮后截图从第 1 节移动到第 27 节附近"
+      },
+      {
+        "format": "Markdown source",
+        "result": "展开面板滚至第 21 节之后；普通右栏再次滚至第 41 节之后"
+      },
+      {
+        "format": "PDF",
+        "result": "11 页样本的第 1 页正文可滚到底部并滚回页首，工具栏固定"
+      },
+      {
+        "format": "DOCX",
+        "result": "真实报告副本的正文滚动到后续页面"
+      },
+      {
+        "format": "XLSX",
+        "result": "真实台账副本滚动至第 123 行之后"
+      },
+      {
+        "format": "SVG",
+        "result": "900x3000 测试图切到 100% 后滚动到 Row 23 至 Row 30"
+      }
+    ]
+  },
+  "automated": {
+    "test_files": 7,
+    "tests": 52,
+    "result": "passed"
+  },
+  "not_tested": [
+    "PPTX live scrolling",
+    "video",
+    "Windows"
+  ],
+  "fixtures": "滚动检查_临时中的文件用于验收，结束后移除；未修改原始业务文件。",
+  "sidebar_background_click": {
+    "date": "2026-09-16",
+    "source_sha256": {
+      "apps/desktop/src/renderer/useBackgroundPrimaryClick.ts": "bfa86f09e32f8d5697326bca1c9f8688a64215ef6afc47c1de129af434e39f9c",
+      "apps/desktop/src/renderer/ProjectFilesWorkspace.tsx": "703c8ab8d96a77fc28f830983f739bf544cbc7eaac494e7396b7c61afcd2e0ac",
+      "apps/desktop/src/renderer/DesktopSidebar.tsx": "68d806cb67534c233c7ab1746ddbc984777d464947ec9696797312286ca158de",
+      "apps/desktop/src/renderer/App.tsx": "7a74083196e09b8f68c87cfbf1bd424a99368fa64a869df5e4a10d2420e62569",
+      "Awaken Design System/src/components/AwakenWorkbenchSidebarFrame/AwakenWorkbenchSidebarFrame.tsx": "e2fa652e128b95b30471846e7e72d2c1d540a13956a5f8367a81fa703c0a728f"
+    },
+    "real_desktop_passed": [
+      "左侧导航空白主键单击：full → rail",
+      "右侧文件目录空白主键单击：full → rail",
+      "目录搜索框、文件项点击保持 full",
+      "侧栏空白拖动与文件目录分隔线点击保持 full"
+    ],
+    "automated": {
+      "test_files": 4,
+      "tests": 44,
+      "result": "passed",
+      "coverage": "真实 Design System SidebarFrame 事件透传、背景点击、编辑/控件/搜索label/分隔线排除、右键、拖动、取消、文件工作区目录及 Composer 组合"
+    },
+    "validation": [
+      "Design System build",
+      "Desktop typecheck"
+    ],
+    "not_tested": [
+      "Windows",
+      "真实运行中 LLM 任务"
+    ]
+  },
+  "content_primary_click": {
+    "date": "2026-09-16",
+    "source_sha256": {
+      "apps/desktop/src/renderer/useBackgroundPrimaryClick.ts": "f6df2d016d4ffa54900aada09cb54a9953a256a833e253e0be241adf05f794a0",
+      "apps/desktop/src/renderer/ProjectFilesWorkspace.tsx": "d72f67e34c200d5a65f791d8648a1f1270451faef036d2034f0e63b97ef70ae6"
+    },
+    "real_desktop_passed": [
+      "Python 正文与编辑空行点击：完整输入框收成横线，焦点仍在编辑器",
+      "代码区拖动不收起；非空草稿收起再两级展开后完整恢复",
+      "Markdown 渲染正文与源码单击收起；源码点击后仍可输入，磁盘读回确认自动保存",
+      "Markdown 查看源码工具按钮不收起",
+      "XLSX guest 正文单击收起"
+    ],
+    "automated": {
+      "test_files": 6,
+      "tests": 65,
+      "result": "passed",
+      "coverage": "共享捕获阶段手势、正文及可编辑区和媒体控件、原事件不取消、内部停止冒泡、拖动、取消、侧栏控件排除、项目与 Artifact Office 和浏览器 guest 回调、Composer 状态"
+    },
+    "not_tested": [
+      "本轮未逐一实测 DOCX、PPTX、PDF、图片和视频；宿主共用内容容器，Office 共用 guest 通知",
+      "Windows",
+      "运行中真实 LLM 任务"
+    ],
+    "cleanup": "Markdown 临时样本及输入框验收草稿已清除，恢复原 make_doc.py 预览"
+  }
+}

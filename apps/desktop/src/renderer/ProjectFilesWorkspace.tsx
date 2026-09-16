@@ -1,3 +1,4 @@
+import { useBackgroundPrimaryClick } from "./useBackgroundPrimaryClick";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type {
   CSSProperties,
@@ -106,17 +107,9 @@ const FILE_LIST_RESIZE_STEP = 12;
 const MINIMUM_WIDTH_FLING_SAMPLE_WINDOW = 140;
 const MINIMUM_WIDTH_FLING_DISTANCE = 120;
 const MINIMUM_WIDTH_FLING_VELOCITY = 1.2;
-const PREVIEW_PRIMARY_CLICK_DISTANCE = 6;
 const CONTEXT_MENU_MARGIN = 8;
 const CONTEXT_SUBMENU_GAP = 6;
 const CONTEXT_SUBMENU_DEFAULT_TOP = -7;
-
-type PreviewPrimaryPointerGesture = {
-  pointerId: number;
-  startX: number;
-  startY: number;
-  moved: boolean;
-};
 
 type ProjectEntryContextMenuState = {
   request: ProjectEntryActionRequest;
@@ -289,9 +282,7 @@ export function ProjectFilesWorkspace({
   const directoryRefreshSequenceRef = useRef(0);
   const listingsRef = useRef(listings);
   const onWorkspaceModeChangeRef = useRef(onWorkspaceModeChange);
-  const previewPrimaryPointerGestureRef = useRef<PreviewPrimaryPointerGesture | undefined>(
-    undefined,
-  );
+  const backgroundClick = useBackgroundPrimaryClick(onPreviewPrimaryClick, ".project-file-preview-content");
 
   onWorkspaceModeChangeRef.current = onWorkspaceModeChange;
 
@@ -776,59 +767,6 @@ export function ProjectFilesWorkspace({
       ? "为当前项目添加文件夹后即可浏览"
       : "从工作区目录树中选择文件";
 
-  function isInteractivePreviewTarget(target: EventTarget | null): boolean {
-    return (
-      target instanceof Element &&
-      Boolean(
-        target.closest(
-          "button, a, input, textarea, select, video, [role='button'], [contenteditable='true']",
-        ),
-      )
-    );
-  }
-
-  function handlePreviewPointerDown(event: ReactPointerEvent<HTMLDivElement>): void {
-    if (event.button !== 0 || !onPreviewPrimaryClick || isInteractivePreviewTarget(event.target)) {
-      return;
-    }
-    previewPrimaryPointerGestureRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      moved: false,
-    };
-  }
-
-  function handlePreviewPointerMove(event: ReactPointerEvent<HTMLDivElement>): void {
-    const gesture = previewPrimaryPointerGestureRef.current;
-    if (!gesture || gesture.pointerId !== event.pointerId || gesture.moved) {
-      return;
-    }
-    const distanceX = event.clientX - gesture.startX;
-    const distanceY = event.clientY - gesture.startY;
-    if (
-      distanceX * distanceX + distanceY * distanceY >
-      PREVIEW_PRIMARY_CLICK_DISTANCE * PREVIEW_PRIMARY_CLICK_DISTANCE
-    ) {
-      gesture.moved = true;
-    }
-  }
-
-  function handlePreviewPointerUp(event: ReactPointerEvent<HTMLDivElement>): void {
-    const gesture = previewPrimaryPointerGestureRef.current;
-    if (!gesture || gesture.pointerId !== event.pointerId) return;
-    previewPrimaryPointerGestureRef.current = undefined;
-    if (!gesture.moved && !isInteractivePreviewTarget(event.target)) {
-      onPreviewPrimaryClick?.();
-    }
-  }
-
-  function handlePreviewPointerCancel(event: ReactPointerEvent<HTMLDivElement>): void {
-    if (previewPrimaryPointerGestureRef.current?.pointerId === event.pointerId) {
-      previewPrimaryPointerGestureRef.current = undefined;
-    }
-  }
-
   function showProjectEntryContextMenu(
     event: ReactMouseEvent<HTMLButtonElement>,
     row: ProjectFileTreeRow,
@@ -935,7 +873,7 @@ export function ProjectFilesWorkspace({
   }
 
   return (
-    <section className="project-files-workspace" aria-label="项目文件">
+    <section className="project-files-workspace" aria-label="项目文件" {...backgroundClick}>
       <div
         ref={workspaceBodyRef}
         className={`project-files-workspace__body${
@@ -953,10 +891,6 @@ export function ProjectFilesWorkspace({
       >
         <div
           className="project-files-preview"
-          onPointerDown={handlePreviewPointerDown}
-          onPointerMove={handlePreviewPointerMove}
-          onPointerUp={handlePreviewPointerUp}
-          onPointerCancel={handlePreviewPointerCancel}
         >
           {artifactPreview && workspaceMode === "files" ? (
             <ArtifactPreviewHost

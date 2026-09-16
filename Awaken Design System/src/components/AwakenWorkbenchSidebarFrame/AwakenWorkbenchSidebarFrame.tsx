@@ -1,10 +1,10 @@
 import "./AwakenWorkbenchSidebarFrame.css";
-import type { ReactNode } from "react";
+import type { HTMLAttributes, ReactNode } from "react";
 
-export type AwakenWorkbenchSidebarFrameProps = {
+export type AwakenWorkbenchSidebarFrameProps = HTMLAttributes<HTMLDivElement> & {
   children: ReactNode;
 };
 
-export function AwakenWorkbenchSidebarFrame({ children }: AwakenWorkbenchSidebarFrameProps) {
-  return <div className="aw-workbench-sidebar-frame">{children}</div>;
+export function AwakenWorkbenchSidebarFrame({ children, className, ...props }: AwakenWorkbenchSidebarFrameProps) {
+  return <div {...props} className={`aw-workbench-sidebar-frame${className ? ` ${className}` : ""}`}>{children}</div>;
 }

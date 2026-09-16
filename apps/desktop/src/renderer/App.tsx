@@ -1838,6 +1838,7 @@ export function App() {
           }
           sidebar={
             <DesktopSidebar
+              onBackgroundPrimaryClick={handleExpandedFilePreviewPrimaryClick}
               projectRegistry={projectRegistry}
               projectOperations={projectOperations}
               threadNavigation={threadNavigation}

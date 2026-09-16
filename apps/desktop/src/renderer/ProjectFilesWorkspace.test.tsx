@@ -321,7 +321,7 @@ createProjectAgentsFile: vi.fn(),
       dispatchPreviewPointerEvent(video, "pointerdown", { clientX: 20 });
       dispatchPreviewPointerEvent(video, "pointerup", { clientX: 20 });
     });
-    expect(onPreviewPrimaryClick).not.toHaveBeenCalled();
+    expect(onPreviewPrimaryClick).toHaveBeenCalledOnce();
   });
 
   it("forwards an Artifact Office guest primary click to the shared composer collapse callback", async () => {
@@ -588,6 +588,78 @@ createProjectAgentsFile: vi.fn(),
       dispatchPreviewPointerEvent(preview, "pointerdown", { clientX: 20 });
       dispatchPreviewPointerEvent(preview, "pointermove", { clientX: 60 });
       dispatchPreviewPointerEvent(preview, "pointerup", { clientX: 60 });
+    });
+    expect(onPreviewPrimaryClick).toHaveBeenCalledTimes(1);
+
+    const navigator = container.querySelector<HTMLElement>(".project-files-navigator")!;
+    const filter = navigator.querySelector("input")!;
+    await act(async () => {
+      dispatchPreviewPointerEvent(filter, "pointerdown", { clientX: 20 });
+      dispatchPreviewPointerEvent(filter, "pointerup", { clientX: 20 });
+    });
+    expect(onPreviewPrimaryClick).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      dispatchPreviewPointerEvent(navigator, "pointerdown", { clientX: 20 });
+      dispatchPreviewPointerEvent(navigator, "pointerup", { clientX: 20 });
+    });
+    expect(onPreviewPrimaryClick).toHaveBeenCalledTimes(2);
+  });
+
+  it("observes editor and preview content clicks without consuming editing, controls or drag selection", async () => {
+    const onPreviewPrimaryClick = vi.fn();
+    await act(async () => {
+      root.render(
+        <ProjectFilesWorkspace
+          runtimeClient={{
+            createProjectAgentsFile: vi.fn(),
+            listProjectDirectory: vi.fn(async () => ({ ok: true as const, relativePath: "", entries: [] })),
+            ...previewRuntimeClient(),
+          }}
+          projectId="project-1"
+          folders={[{ path: "/workspace/app", label: "App", isPrimary: true }]}
+          onPreviewPrimaryClick={onPreviewPrimaryClick}
+        />,
+      );
+    });
+    await settle();
+    const preview = container.querySelector<HTMLElement>(".project-files-preview")!;
+    const content = document.createElement("div");
+    content.className = "project-file-preview-content";
+    content.innerHTML = '<div class="cm-editor"><div class="cm-scroller"><div class="cm-gutters">1</div><div contenteditable="true">source</div></div></div><button>preview control</button><div contenteditable="plaintext-only">text</div><canvas></canvas><img /><video controls></video>';
+    preview.append(content);
+    const originalInteraction = vi.fn((event: Event) => {
+      expect(event.defaultPrevented).toBe(false);
+      event.stopPropagation();
+    });
+    content.addEventListener("pointerup", originalInteraction);
+    const targets = Array.from(content.querySelectorAll("*"));
+    for (const target of targets) {
+      await act(async () => {
+        dispatchPreviewPointerEvent(target, "pointerdown", { clientX: 20 });
+        dispatchPreviewPointerEvent(target, "pointerup", { clientX: 20 });
+      });
+    }
+    expect(onPreviewPrimaryClick).toHaveBeenCalledTimes(targets.length);
+    expect(originalInteraction).toHaveBeenCalledTimes(targets.length);
+    onPreviewPrimaryClick.mockClear();
+    await act(async () => {
+      dispatchPreviewPointerEvent(content, "pointerdown", { clientX: 20 });
+      dispatchPreviewPointerEvent(content, "pointermove", { clientX: 60 });
+      dispatchPreviewPointerEvent(content, "pointerup", { clientX: 60 });
+    });
+    expect(onPreviewPrimaryClick).not.toHaveBeenCalled();
+    const toolbarButton = document.createElement("button");
+    preview.prepend(toolbarButton);
+    // A previous content press must not leak into a new toolbar gesture.
+    await act(async () => {
+      dispatchPreviewPointerEvent(content, "pointerdown", { clientX: 20 });
+      dispatchPreviewPointerEvent(toolbarButton, "pointerdown", { clientX: 20 });
+      dispatchPreviewPointerEvent(content, "pointerup", { clientX: 20 });
+    });
+    expect(onPreviewPrimaryClick).not.toHaveBeenCalled();
+    await act(async () => {
+      dispatchPreviewPointerEvent(content, "pointerdown", { clientX: 20 });
+      dispatchPreviewPointerEvent(content, "pointerup", { clientX: 20 });
     });
     expect(onPreviewPrimaryClick).toHaveBeenCalledTimes(1);
   });

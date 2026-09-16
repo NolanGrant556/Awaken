@@ -53,14 +53,29 @@ func TestCLIOwnershipMigrationIsSharedDurableAndProtectsLegacyAlias(t *testing.T
 	}
 	wg.Wait()
 	all, err := m.instances()
-	if err != nil || len(all) != 1 || all[0].Source != "awaken-managed" || len(all[0].OwnedFiles) != 2 {
+	if err != nil || len(all) != 1 || all[0].Source != "awaken-managed" {
 		t.Fatal(all, err)
+	}
+	official := m.officialCLICommandPath("dingtalk-workspace")
+	wantOwned := 2
+	if info, err := os.Lstat(official); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		wantOwned = 3
+	}
+	if len(all[0].OwnedFiles) != wantOwned {
+		t.Fatal(all[0].OwnedFiles, err)
 	}
 	original := all[0]
 	manifest := filepath.Join(original.Root, "manifest.json")
 	info, _ := os.Stat(manifest)
 	got, err := m.InspectCLIInstallation(ctx, "dingtalk-workspace")
-	if err != nil || got == nil || !got.Healthy || !sameHostPath(got.ExecutablePath, m.canonicalCLIPath(executable)) {
+	if err != nil || got == nil || !got.Healthy {
+		t.Fatal(got, err)
+	}
+	if wantOwned == 3 {
+		if !sameHostPath(got.ExecutablePath, official) {
+			t.Fatal("inspect did not return official command", got.ExecutablePath)
+		}
+	} else if !sameHostPath(got.ExecutablePath, m.canonicalCLIPath(executable)) {
 		t.Fatal(got, err)
 	}
 	after, _ := os.Stat(manifest)
@@ -98,8 +113,8 @@ func TestCLIOwnershipMigrationIsSharedDurableAndProtectsLegacyAlias(t *testing.T
 	if err := m.ReleaseRemoval("dingtalk-workspace", token); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{executable, alias, original.Root} {
-		if _, err := os.Stat(path); !os.IsNotExist(err) {
+	for _, path := range []string{executable, alias, original.Root, official} {
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
 			t.Fatal("owned path retained", path, err)
 		}
 	}
@@ -187,4 +202,143 @@ func TestCLIOwnershipPreservesExternalAndModifiedFiles(t *testing.T) {
 			t.Fatal(got, err)
 		}
 	})
+}
+
+func hashedCLIFixture(t *testing.T) (*Manager, string) {
+	t.Helper()
+	home := t.TempDir()
+	catalog, err := BuiltinCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := managerForTest(t, Options{Root: home, Catalog: catalog})
+	name := cliCommandFileName("dingtalk-workspace", m.target)
+	instance := strings.Repeat("a", 32)
+	key := strings.Repeat("b", 32)
+	root := filepath.Join(m.root, "components", key[:16], instance)
+	executable := filepath.Join(root, name)
+	if err := os.MkdirAll(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(executable, []byte("controlled hashed CLI"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	f := Manifest{SchemaVersion: SchemaVersion, Kind: "component", Key: key, InstanceID: instance, ComponentID: "dingtalk-workspace", Version: "1.0.32", Target: m.target, Source: "awaken-managed", Root: root, State: "ready", Executables: map[string]Launch{"dws": {Executable: executable}}, CreatedAt: m.now(), LastUsedAt: m.now()}
+	f.Fingerprints = fingerprints(f.Executables)
+	if err := m.save(f); err != nil {
+		t.Fatal(err)
+	}
+	return m, executable
+}
+
+func TestCLIOfficialCommandPublishesSymlinkWithoutCliBinCopy(t *testing.T) {
+	m, executable := hashedCLIFixture(t)
+	official := m.officialCLICommandPath("dingtalk-workspace")
+	got, err := m.InspectCLIInstallation(context.Background(), "dingtalk-workspace")
+	if err != nil || got == nil || !got.Healthy {
+		t.Fatal(got, err)
+	}
+	info, err := os.Lstat(official)
+	if err != nil {
+		t.Skip("official command symlink unavailable", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("official command is not a symlink")
+	}
+	resolved, err := filepath.EvalSymlinks(official)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := filepath.EvalSymlinks(executable)
+	if err != nil {
+		target = executable
+	}
+	if !sameHostPath(resolved, target) {
+		t.Fatal(resolved, target)
+	}
+	if !sameHostPath(got.ExecutablePath, official) {
+		t.Fatal(got.ExecutablePath)
+	}
+	binCopy := filepath.Join(m.cliRoot(), "bin", filepath.Base(official))
+	if _, err := os.Lstat(binCopy); !os.IsNotExist(err) {
+		t.Fatal("cli/bin copy created", binCopy, err)
+	}
+}
+
+func TestCLIOfficialCommandDoesNotOverwriteOrRemoveForeignFile(t *testing.T) {
+	m, _ := hashedCLIFixture(t)
+	official := m.officialCLICommandPath("dingtalk-workspace")
+	if err := os.MkdirAll(filepath.Dir(official), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(official, []byte("foreign official CLI"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	got, err := m.InspectCLIInstallation(context.Background(), "dingtalk-workspace")
+	if err != nil || got == nil || !got.Healthy {
+		t.Fatal(got, err)
+	}
+	body, err := os.ReadFile(official)
+	if err != nil || string(body) != "foreign official CLI" {
+		t.Fatal("foreign official command changed", err)
+	}
+	all, err := m.instances()
+	if err != nil || len(all) != 1 || all[0].OwnedFiles[official] != "" {
+		t.Fatal("claimed foreign official command", all, err)
+	}
+	token, err := m.ReserveRemoval(context.Background(), "dingtalk-workspace", os.Getpid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.RemoveComponent(context.Background(), "dingtalk-workspace", token); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(official); err != nil {
+		t.Fatal("foreign official command removed", err)
+	}
+}
+
+func TestCLIOfficialCommandInspectBackfillsExistingInstall(t *testing.T) {
+	userHome := t.TempDir()
+	awakenHome := filepath.Join(userHome, ".awaken")
+	catalog, err := BuiltinCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := managerForTest(t, Options{Root: awakenHome, Catalog: catalog})
+	name := cliCommandFileName("dingtalk-workspace", m.target)
+	instance := strings.Repeat("c", 32)
+	key := strings.Repeat("d", 32)
+	root := filepath.Join(m.root, "components", key[:16], instance)
+	executable := filepath.Join(root, name)
+	if err := os.MkdirAll(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(executable, []byte("controlled hashed CLI"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	f := Manifest{SchemaVersion: SchemaVersion, Kind: "component", Key: key, InstanceID: instance, ComponentID: "dingtalk-workspace", Version: "1.0.32", Target: m.target, Source: "awaken-managed", Root: root, State: "ready", Executables: map[string]Launch{"dws": {Executable: executable}}, CreatedAt: m.now(), LastUsedAt: m.now()}
+	f.Fingerprints = fingerprints(f.Executables)
+	if err := m.save(f); err != nil {
+		t.Fatal(err)
+	}
+	official := m.officialCLICommandPath("dingtalk-workspace")
+	nested := filepath.Join(m.awakenHome(), ".local", "bin", name)
+	got, err := m.InspectCLIInstallation(context.Background(), "dingtalk-workspace")
+	if err != nil || got == nil || !got.Healthy {
+		t.Fatal(got, err)
+	}
+	info, err := os.Lstat(official)
+	if err != nil {
+		t.Skip("official command symlink unavailable", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 || !sameHostPath(got.ExecutablePath, official) {
+		t.Fatal(got.ExecutablePath, info.Mode())
+	}
+	if !sameHostPath(official, filepath.Join(filepath.Dir(m.awakenHome()), ".local", "bin", name)) {
+		t.Fatal("official command is not in the user home", official, m.awakenHome())
+	}
+	if _, err := os.Lstat(nested); !os.IsNotExist(err) {
+		t.Fatal("published under AWAKEN_HOME", nested, err)
+	}
 }

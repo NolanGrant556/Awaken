@@ -49,6 +49,7 @@ it("leaves shared binaries with Core and rejects uninstall before changing an in
     expect(saved.records["dingtalk-workspace"]).not.toHaveProperty("version");
     expect(fetchAsset.mock.calls.every(([url]) => String(url).endsWith("skills.tar.gz"))).toBe(true);
     await expect(fs.stat(path.join(root, ".awaken/runtime/cli/bin/dws"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(fs.stat(path.join(root, ".local/bin/dws"))).rejects.toMatchObject({ code: "ENOENT" });
     await expect(manager.uninstallManaged("dingtalk-workspace", true)).rejects.toThrow("environment_in_use");
     expect(remove).not.toHaveBeenCalled();
     await expect(fs.stat(executable)).resolves.toBeDefined();
@@ -152,4 +153,73 @@ it("migrates Main metadata after Core is ready and recovers a pending uninstall 
     expect(JSON.parse(await fs.readFile(statePath, "utf8")).records["dingtalk-workspace"]).toBeUndefined();
     expect(options.fetchAsset).not.toHaveBeenCalled();
   } finally { await manager.dispose(); await fs.rm(root, { recursive: true, force: true }); }
+});
+
+const dwsFixtureScript = '#!/bin/sh\nif [ "$1" = "version" ]; then printf \'{"version":"v1.0.32"}\\n\'; else printf \'{"success":true,"authenticated":false}\\n\'; fi\n';
+
+it("probes the official user-bin command when it resolves to the managed executable", async () => {
+  if (process.platform === "win32") return;
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "awaken-official-alias-"));
+  const executable = path.join(root, ".awaken/runtime/environments/components/component/instance/dws");
+  const official = path.join(root, ".local/bin/dws");
+  await fs.mkdir(path.dirname(executable), { recursive: true });
+  await fs.writeFile(executable, dwsFixtureScript, { mode: 0o700 });
+  await fs.mkdir(path.dirname(official), { recursive: true });
+  await fs.symlink(executable, official);
+  const manifestPath = path.join(root, "manifest.json");
+  await fs.writeFile(manifestPath, JSON.stringify({ revision: "test", assets: [{ providerId: "dingtalk-workspace", version: "1.0.32", platform: "darwin", architecture: "arm64", url: "https://github.com/example/cli.tar.gz", sha256: "a".repeat(64), archiveType: "tar.gz", executableName: "dws", archiveExecutablePath: "dws" }] }));
+  const inspect = vi.fn(async () => ({ executablePath: executable, version: "1.0.32", healthy: true }));
+  const manager = new CliConnectorManager({
+    homeDir: root, platform: "darwin", architecture: "arm64", manifestPath,
+    inspectSharedComponent: inspect, holdSharedExecutable: async () => async () => {},
+    fetchAsset: vi.fn(async () => { throw new Error("must not download"); }),
+    publishReadiness: async () => {}, onStateChanged: () => {},
+  });
+  try {
+    await manager.initialize();
+    expect(manager.list()[0].readiness).toMatchObject({
+      install: "installed",
+      ownership: "awaken-managed",
+      executablePath: official,
+    });
+    expect(await fs.realpath(manager.list()[0].readiness.executablePath!)).toBe(await fs.realpath(executable));
+    await expect(fs.stat(path.join(root, ".awaken/runtime/cli/bin/dws"))).rejects.toMatchObject({ code: "ENOENT" });
+  } finally {
+    await manager.dispose();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+it("uses a foreign official command without overwriting it and keeps managed uninstall", async () => {
+  if (process.platform === "win32") return;
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "awaken-official-foreign-"));
+  const executable = path.join(root, ".awaken/runtime/environments/components/component/instance/dws");
+  const official = path.join(root, ".local/bin/dws");
+  await fs.mkdir(path.dirname(executable), { recursive: true });
+  await fs.writeFile(executable, dwsFixtureScript, { mode: 0o700 });
+  await fs.mkdir(path.dirname(official), { recursive: true });
+  await fs.writeFile(official, `${dwsFixtureScript}# foreign\n`, { mode: 0o700 });
+  const manifestPath = path.join(root, "manifest.json");
+  await fs.writeFile(manifestPath, JSON.stringify({ revision: "test", assets: [{ providerId: "dingtalk-workspace", version: "1.0.32", platform: "darwin", architecture: "arm64", url: "https://github.com/example/cli.tar.gz", sha256: "a".repeat(64), archiveType: "tar.gz", executableName: "dws", archiveExecutablePath: "dws" }] }));
+  const inspect = vi.fn(async () => ({ executablePath: executable, version: "1.0.32", healthy: true }));
+  const manager = new CliConnectorManager({
+    homeDir: root, platform: "darwin", architecture: "arm64", manifestPath,
+    inspectSharedComponent: inspect, holdSharedExecutable: async () => async () => {},
+    fetchAsset: vi.fn(async () => { throw new Error("must not download"); }),
+    publishReadiness: async () => {}, onStateChanged: () => {},
+  });
+  try {
+    await manager.initialize();
+    expect(manager.list()[0].readiness).toMatchObject({
+      install: "installed",
+      ownership: "user-managed",
+      executablePath: official,
+    });
+    expect(manager.list()[0].canUninstallManaged).toBe(true);
+    expect(await fs.readFile(official, "utf8")).toContain("foreign");
+    await expect(fs.stat(executable)).resolves.toBeDefined();
+  } finally {
+    await manager.dispose();
+    await fs.rm(root, { recursive: true, force: true });
+  }
 });

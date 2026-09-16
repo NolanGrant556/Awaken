@@ -7,7 +7,7 @@ import { createServer } from "node:net";
 import { createHash } from "node:crypto";
 import { userInfo } from "node:os";
 import { createInterface } from "node:readline";
-import { dirname, isAbsolute, join, normalize } from "node:path";
+import { delimiter, dirname, isAbsolute, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { app } from "electron";
 import { resolveSystemSkillsTargetRoot } from "./system-skills-importer.js";
@@ -70,6 +70,57 @@ const LOGIN_ENV_START_MARKER =
   "__AWAKEN_LOGIN_ENV_START_9F6E01A594834F489AB8D774F20A21D8__";
 const LOGIN_ENV_END_MARKER =
   "__AWAKEN_LOGIN_ENV_END_9F6E01A594834F489AB8D774F20A21D8__";
+
+export function mergeLoginPATH(
+  loginPATH: string | undefined,
+  prependPATH: string | undefined,
+  pathDelimiter: string = delimiter,
+): string {
+  const extra: string[] = [];
+  const extraSeen = new Set<string>();
+  for (const entry of (prependPATH ?? "").split(pathDelimiter)) {
+    if (!entry || extraSeen.has(entry)) continue;
+    extra.push(entry);
+    extraSeen.add(entry);
+  }
+  const rest = (loginPATH ?? "")
+    .split(pathDelimiter)
+    .filter((entry) => entry.length > 0 && !extraSeen.has(entry));
+  return [...extra, ...rest].join(pathDelimiter);
+}
+
+export function officialUserCommandDirs(
+  home: string,
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = {},
+): string[] {
+  const dirs = [join(home, ".local", "bin")];
+  if (platform === "win32") {
+    if (env.LOCALAPPDATA) dirs.push(env.LOCALAPPDATA);
+    if (env.APPDATA) dirs.push(join(env.APPDATA, "npm"));
+  }
+  return dirs;
+}
+
+export function runtimeCommandPATH(options: {
+  loginPATH?: string;
+  productPATH?: string;
+  home: string;
+  platform?: NodeJS.Platform;
+  env?: NodeJS.ProcessEnv;
+  pathDelimiter?: string;
+}): string {
+  const pathDelimiter = options.pathDelimiter ?? delimiter;
+  const extras = [
+    ...(options.productPATH ?? "").split(pathDelimiter),
+    ...officialUserCommandDirs(
+      options.home,
+      options.platform ?? process.platform,
+      options.env ?? {},
+    ),
+  ].filter((entry) => entry.length > 0);
+  return mergeLoginPATH(options.loginPATH, extras.join(pathDelimiter), pathDelimiter);
+}
 
 function resolveBinaryPath(): string {
   const platform = process.platform;
@@ -449,9 +500,10 @@ export class RuntimeSupervisor {
         }
         const binaryPath = this.deps.resolveBinaryPath();
         const baseUrl = `http://127.0.0.1:${port}`;
+        const { PATH: productPATH, ...productRest } = productEnvironment;
         const childEnv: NodeJS.ProcessEnv = {
           ...runtimeEnvironment,
-          ...productEnvironment,
+          ...productRest,
           ...acceptanceChildEnvironment({ root: process.env.AWAKEN_DESKTOP_ACCEPTANCE_ROOT, dev: process.argv.includes("--dev"), packaged: app.isPackaged }),
           AWAKEN_CORE_ADDR: `127.0.0.1:${port}`,
           AWAKEN_USER_DATA_DIR: app.getPath("userData"),
@@ -477,6 +529,13 @@ export class RuntimeSupervisor {
           // FileStore projects are selected per run. Core must never derive
           // a project from Electron userData, a previous workspace, or cwd.
           AWAKEN_DEFAULT_WORKSPACE: "",
+          PATH: runtimeCommandPATH({
+            loginPATH: runtimeEnvironment.PATH,
+            productPATH,
+            home: app.getPath("home"),
+            platform: process.platform,
+            env: runtimeEnvironment,
+          }),
         };
         // Search channels are read from userData/config/search.json at each run
         // start. Login/product env must not pin a Core-lifetime provider list.

@@ -131,6 +131,9 @@ func (m *Manager) component(ctx context.Context, id string, op *Operation) (Mani
 		for _, f := range all {
 			if f.Kind == "component" && f.ComponentID == id && (f.Key == key || (removableComponent(id) && f.Version == c.Version && f.Source == "awaken-managed")) && m.healthy(f) {
 				result = f
+				if published, err := m.publishOfficialCLICommand(f); err == nil {
+					result = published
+				}
 				return nil
 			}
 		}
@@ -272,6 +275,9 @@ func (m *Manager) component(ctx context.Context, id string, op *Operation) (Mani
 			return e
 		}
 		result = f
+		if published, err := m.publishOfficialCLICommand(f); err == nil {
+			result = published
+		}
 		return nil
 	})
 	return result, err

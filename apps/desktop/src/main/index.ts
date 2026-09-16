@@ -2526,7 +2526,6 @@ app.whenReady().then(async () => {
     {
       resolveProductEnvironment: async () => {
         const managedBin = cliConnectorManager?.managedBinPath() ?? "";
-        const inheritedPath = process.env.PATH ?? "";
         return {
           ...(networkRouteManager?.runtimeEnvironment() ?? {}),
           AWAKEN_DESKTOP_CONTROL_TOKEN: desktopControlToken,
@@ -2540,7 +2539,7 @@ app.whenReady().then(async () => {
                 ),
               }
             : {}),
-          PATH: managedBin ? `${managedBin}${path.delimiter}${inheritedPath}` : inheritedPath,
+          PATH: managedBin,
         };
       },
     },

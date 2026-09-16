@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   RuntimeSupervisor,
   resolveBuiltinPluginsSourceRoot,
+  runtimeCommandPATH,
 } from "./runtime-supervisor.js";
 import { type RuntimeManifest } from "./runtime-control.js";
 
@@ -132,7 +133,7 @@ describe("RuntimeSupervisor", () => {
       AWAKEN_CORE_ADDR: "127.0.0.1:19001",
       AWAKEN_DEFAULT_WORKSPACE: "",
       AWAKEN_USER_DATA_DIR: "/tmp/awaken-user-data",
-      PATH: "/login/bin:/usr/bin",
+      PATH: `${join("/Users/awaken-home", ".local", "bin")}:/login/bin:/usr/bin`,
       HOME: "/Users/login-user",
       AWAKEN_LOGIN_ENV_CANARY: "login-value",
       AWAKEN_BUNDLED_SKILL_DIRS:
@@ -153,6 +154,49 @@ describe("RuntimeSupervisor", () => {
     expect(spawnOptions?.env).not.toHaveProperty("LLM_AUTH_SCHEME");
     expect(spawnOptions?.env).not.toHaveProperty(
       "AWAKEN_PROCESS_ONLY_CANARY",
+    );
+  });
+
+  it("prepends product PATH directories onto the login PATH instead of replacing it", async () => {
+    let spawnOptions: SpawnOptions | undefined;
+    const supervisor = new RuntimeSupervisor(
+      {},
+      {
+        allocatePort: async () => 19003,
+        resolveBinaryPath: () => "/fake/awaken-core",
+        resolveLoginUserEnvironment: async () => ({
+          PATH: "/login/bin:/usr/bin",
+          HOME: "/Users/login-user",
+        }),
+        resolveProductEnvironment: async () => ({
+          PATH: "/managed/cli/bin",
+        }),
+        spawnProcess: (_command: string, _args: string[], options: SpawnOptions) => {
+          spawnOptions = options;
+          return asChild(new FakeChild());
+        },
+        waitForHealth: vi.fn(async () => {}),
+      },
+    );
+
+    await supervisor.start();
+
+    expect(runtimeCommandPATH({
+      loginPATH: "/login/bin:/usr/bin",
+      productPATH: "/managed/cli/bin",
+      home: "/Users/awaken-home",
+      platform: "darwin",
+      pathDelimiter: ":",
+    })).toBe("/managed/cli/bin:/Users/awaken-home/.local/bin:/login/bin:/usr/bin");
+    expect(runtimeCommandPATH({
+      loginPATH: "/opt/homebrew/bin:/Users/awaken-home/.local/bin:/usr/bin",
+      productPATH: "/managed/cli/bin",
+      home: "/Users/awaken-home",
+      platform: "darwin",
+      pathDelimiter: ":",
+    })).toBe("/managed/cli/bin:/Users/awaken-home/.local/bin:/opt/homebrew/bin:/usr/bin");
+    expect(spawnOptions?.env?.PATH).toBe(
+      `/managed/cli/bin:${join("/Users/awaken-home", ".local", "bin")}:/login/bin:/usr/bin`,
     );
   });
 
@@ -268,7 +312,7 @@ describe("RuntimeSupervisor", () => {
       }
 
       expect(spawnOptions?.env).toMatchObject({
-        PATH: "/login/from-shell:/usr/bin:/bin",
+        PATH: `${join("/Users/awaken-home", ".local", "bin")}:/login/from-shell:/usr/bin:/bin`,
         HOME: "/Users/login-from-shell",
         AWAKEN_LOGIN_ENV_CANARY: "from-login-shell",
         AWAKEN_LOGIN_MODE: "-lic",
@@ -341,7 +385,7 @@ describe("RuntimeSupervisor", () => {
       }
 
       expect(spawnOptions?.env).toMatchObject({
-        PATH: "/fallback/login/bin:/usr/bin:/bin",
+        PATH: `${join("/Users/awaken-home", ".local", "bin")}:/fallback/login/bin:/usr/bin:/bin`,
         HOME: "/Users/login-fallback",
         AWAKEN_LOGIN_MODE: "-lc",
       });

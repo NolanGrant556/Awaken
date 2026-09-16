@@ -27,8 +27,192 @@ func cliCommand(id string) string {
 	}
 	return id
 }
+
+func officialCLIAliasName(id string) string {
+	return cliCommand(id) + "-official-alias"
+}
+
+func cliCommandFileName(id, target string) string {
+	name := cliCommand(id)
+	if strings.HasPrefix(target, "windows-") {
+		name += ".exe"
+	}
+	return name
+}
+
 func (m *Manager) cliRoot() string {
 	return filepath.Join(filepath.Dir(filepath.Dir(m.root)), "runtime", "cli")
+}
+
+func (m *Manager) awakenHome() string {
+	return filepath.Dir(filepath.Dir(m.root))
+}
+
+func (m *Manager) userHome() string {
+	awakenHome := m.awakenHome()
+	if filepath.Base(awakenHome) == ".awaken" {
+		return filepath.Dir(awakenHome)
+	}
+	return awakenHome
+}
+
+func (m *Manager) officialUserBin() string {
+	return filepath.Join(m.userHome(), ".local", "bin")
+}
+
+func (m *Manager) officialCLICommandPath(id string) string {
+	return filepath.Join(m.officialUserBin(), cliCommandFileName(id, m.target))
+}
+
+func (m *Manager) isOfficialCLICommandPath(id, path string) bool {
+	return sameHostPath(filepath.Clean(path), m.officialCLICommandPath(id))
+}
+
+func (m *Manager) officialCLICommandOwned(f Manifest, path string) bool {
+	if !m.isOfficialCLICommandPath(f.ComponentID, path) {
+		return false
+	}
+	info, err := os.Lstat(path)
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		return false
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return false
+	}
+	launch, ok := f.Executables[cliCommand(f.ComponentID)]
+	if !ok {
+		return false
+	}
+	target := launch.Executable
+	if canonical, err := filepath.EvalSymlinks(target); err == nil {
+		target = canonical
+	}
+	return sameHostPath(resolved, target)
+}
+
+func (m *Manager) ownedCLIFileAllowed(f Manifest, path string) bool {
+	if removableComponent(f.ComponentID) && m.officialCLICommandOwned(f, path) {
+		return true
+	}
+	return ownedPath(m.cliRoot(), path) == nil
+}
+
+func (m *Manager) resolvedCLIExecutable(launch Launch) (string, error) {
+	if canonical, err := filepath.EvalSymlinks(launch.Executable); err == nil {
+		return canonical, nil
+	}
+	return filepath.Abs(launch.Executable)
+}
+
+func (m *Manager) inspectCLIExecutablePath(f Manifest) string {
+	launch, ok := f.Executables[cliCommand(f.ComponentID)]
+	if !ok {
+		return ""
+	}
+	if alias, ok := f.Executables[officialCLIAliasName(f.ComponentID)]; ok {
+		if info, err := os.Stat(alias.Executable); err == nil && info.Mode().IsRegular() {
+			return alias.Executable
+		}
+	}
+	return launch.Executable
+}
+
+func (m *Manager) recordOfficialCLIAlias(f Manifest, dest, hash string) (Manifest, error) {
+	alias := officialCLIAliasName(f.ComponentID)
+	if f.OwnedFiles[dest] == hash {
+		if launch, ok := f.Executables[alias]; ok && sameHostPath(launch.Executable, dest) {
+			return f, nil
+		}
+	}
+	f = clone(f)
+	if f.OwnedFiles == nil {
+		f.OwnedFiles = map[string]string{}
+	}
+	f.OwnedFiles[dest] = hash
+	if f.Executables == nil {
+		f.Executables = map[string]Launch{}
+	}
+	f.Executables[alias] = Launch{Executable: dest}
+	if f.Fingerprints == nil {
+		f.Fingerprints = map[string]string{}
+	}
+	if info, err := os.Stat(dest); err == nil {
+		f.Fingerprints[dest] = fileIdentity(info)
+	}
+	if err := m.save(f); err != nil {
+		return f, err
+	}
+	m.invalidateHealth()
+	return f, nil
+}
+
+func (m *Manager) dropOfficialCLIAlias(f Manifest) (Manifest, error) {
+	dest := m.officialCLICommandPath(f.ComponentID)
+	alias := officialCLIAliasName(f.ComponentID)
+	_, hasOwned := f.OwnedFiles[dest]
+	_, hasLaunch := f.Executables[alias]
+	_, hasPrint := f.Fingerprints[dest]
+	if !hasOwned && !hasLaunch && !hasPrint {
+		return f, nil
+	}
+	f = clone(f)
+	if f.OwnedFiles != nil {
+		delete(f.OwnedFiles, dest)
+	}
+	if f.Executables != nil {
+		delete(f.Executables, alias)
+	}
+	if f.Fingerprints != nil {
+		delete(f.Fingerprints, dest)
+	}
+	if err := m.save(f); err != nil {
+		return f, err
+	}
+	m.invalidateHealth()
+	return f, nil
+}
+
+func (m *Manager) publishOfficialCLICommand(f Manifest) (Manifest, error) {
+	if !removableComponent(f.ComponentID) || f.Source != "awaken-managed" {
+		return f, nil
+	}
+	launch, ok := f.Executables[cliCommand(f.ComponentID)]
+	if !ok {
+		return f, nil
+	}
+	target, err := m.resolvedCLIExecutable(launch)
+	if err != nil {
+		return f, nil
+	}
+	hash, err := fileSHA256(target)
+	if err != nil {
+		return f, nil
+	}
+	dest := m.officialCLICommandPath(f.ComponentID)
+	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+		return m.dropOfficialCLIAlias(f)
+	}
+	info, err := os.Lstat(dest)
+	if os.IsNotExist(err) {
+		if err := os.Symlink(target, dest); err != nil {
+			info, err = os.Lstat(dest)
+			if err != nil {
+				return m.dropOfficialCLIAlias(f)
+			}
+		} else {
+			return m.recordOfficialCLIAlias(f, dest, hash)
+		}
+	} else if err != nil {
+		return m.dropOfficialCLIAlias(f)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		resolved, err := filepath.EvalSymlinks(dest)
+		if err == nil && sameHostPath(resolved, target) {
+			return m.recordOfficialCLIAlias(f, dest, hash)
+		}
+	}
+	return m.dropOfficialCLIAlias(f)
 }
 
 // Rebase only aliases above the historical CLI root (for example macOS /var).
@@ -177,11 +361,19 @@ func (m *Manager) InspectCLIInstallation(ctx context.Context, id string) (*CLIIn
 		if f.Kind != "component" || f.ComponentID != id || f.Source != "awaken-managed" || f.Target != m.target {
 			continue
 		}
-		launch, ok := f.Executables[cliCommand(id)]
-		if !ok {
+		if _, ok := f.Executables[cliCommand(id)]; !ok {
 			continue
 		}
-		value := &CLIInstallation{ExecutablePath: launch.Executable, Version: f.Version, Healthy: m.reusable(f)}
+		published, err := m.publishOfficialCLICommand(f)
+		if err != nil {
+			return nil, err
+		}
+		f = published
+		path := m.inspectCLIExecutablePath(f)
+		if path == "" {
+			continue
+		}
+		value := &CLIInstallation{ExecutablePath: path, Version: f.Version, Healthy: m.reusable(f)}
 		if result == nil || (!result.Healthy && value.Healthy) {
 			result = value
 		}
@@ -195,11 +387,28 @@ func (m *Manager) InspectCLIInstallation(ctx context.Context, id string) (*CLIIn
 // Validate all owned legacy files before deleting any. Changed files and
 // redirected parents are never treated as the previously imported executable.
 func (m *Manager) validateOwnedCLIFile(id, path, hash string) error {
-	root := m.cliRoot()
-	name := cliCommand(id)
-	if strings.HasPrefix(m.target, "windows-") {
-		name += ".exe"
+	if m.isOfficialCLICommandPath(id, path) {
+		info, err := os.Lstat(path)
+		if os.IsNotExist(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			return failure("environment_validation_failed", "legacy CLI was changed; refusing removal")
+		}
+		actual, err := fileSHA256(path)
+		if err != nil {
+			return err
+		}
+		if hash == "" || actual != hash {
+			return failure("environment_validation_failed", "legacy CLI was changed; refusing removal")
+		}
+		return nil
 	}
+	root := m.cliRoot()
+	name := cliCommandFileName(id, m.target)
 	if !inside(filepath.Join(root, id), path) && path != filepath.Join(root, "bin", name) {
 		return failure("environment_path_invalid", "invalid legacy CLI path")
 	}

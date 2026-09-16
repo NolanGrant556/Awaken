@@ -577,12 +577,18 @@ export class CliConnectorManager {
     }
     const record = this.installations.records[providerId];
     const candidates = await this.discoverCandidates(providerId, record);
-    // Prefer Awaken-managed or an already recorded path. Never ask the user to
-    // pick an executable; multiple candidates fall back to the first verified one
-    // or a fresh managed install.
-    const executablePath = record?.executablePath && await isExecutableFile(record.executablePath)
+    const officialPath = this.officialCommandPath(providerId);
+    const officialUsable = await isExecutableFile(officialPath);
+    const recordedUsable = record?.executablePath && await isExecutableFile(record.executablePath)
       ? record.executablePath
-      : candidates.find((candidate) => ownershipForPath(candidate, this.options.homeDir) === "awaken-managed")
+      : undefined;
+    // Prefer the official user-bin command when it exists so plugin auth, PATH
+    // lookup and Bash resolve the same file. A foreign file at that path wins
+    // over the hashed managed copy; Awaken still does not overwrite it.
+    const executablePath = officialUsable
+      ? officialPath
+      : recordedUsable
+        ?? candidates.find((candidate) => ownershipForPath(candidate, this.options.homeDir) === "awaken-managed")
         ?? candidates[0];
     if (!executablePath) {
       return commit({
@@ -598,9 +604,14 @@ export class CliConnectorManager {
     }
     try {
       const version = await this.probeVersion(providerId, executablePath);
-      const ownership = record?.executablePath === executablePath
-        ? record.ownership
+      const managedPath = record?.ownership === "awaken-managed" ? record.executablePath : "";
+      const sameAsManaged = Boolean(managedPath) && (
+        executablePath === managedPath || await resolvesToSameFile(executablePath, managedPath)
+      );
+      const displayedOwnership = sameAsManaged
+        ? "awaken-managed"
         : ownershipForPath(executablePath, this.options.homeDir);
+      const ownership = record?.ownership === "awaken-managed" ? "awaken-managed" : displayedOwnership;
       const activation = record?.activation ?? "enabled";
       const status = await this.authStatus(providerId, executablePath);
       const readiness: CliConnectorReadiness = {
@@ -613,14 +624,16 @@ export class CliConnectorManager {
         overall: activation === "disabled" ? "disabled" : status.overall,
         version,
         executablePath,
-        ownership,
-        installMethod: record?.installMethod ?? installMethodForPath(executablePath),
+        ownership: displayedOwnership,
+        installMethod: ownership === "awaken-managed"
+          ? (record?.installMethod ?? "managed-download")
+          : (record?.installMethod ?? installMethodForPath(executablePath)),
         account: status.account,
         safeError: status.safeError,
         updatedAt: new Date().toISOString(),
       };
       if (this.authEpochs.get(providerId) !== epoch) return this.view(providerId);
-      if (!record || record.executablePath !== executablePath) {
+      if (!record || record.executablePath !== executablePath || record.ownership !== ownership) {
         this.installations.records[providerId] = {
           ...record,
           providerId,
@@ -631,7 +644,9 @@ export class CliConnectorManager {
           manifestRevision: this.manifest.revision,
           assetSha256: "",
           ownership,
-          installMethod: installMethodForPath(executablePath),
+          installMethod: ownership === "awaken-managed"
+            ? (record?.installMethod ?? "managed-download")
+            : installMethodForPath(executablePath),
           activation,
           lastVerifiedAt: readiness.updatedAt,
         };
@@ -872,6 +887,13 @@ export class CliConnectorManager {
     }
   }
 
+  private officialCommandPath(providerId: CliProviderId): string {
+    const executableName = providerId === "dingtalk-workspace"
+      ? (this.options.platform === "win32" ? "dws.exe" : "dws")
+      : (this.options.platform === "win32" ? "lark-cli.exe" : "lark-cli");
+    return path.join(this.options.homeDir, ".local", "bin", executableName);
+  }
+
   private async discoverCandidates(providerId: CliProviderId, record?: InstallationRecord): Promise<string[]> {
     const executableName = providerId === "dingtalk-workspace"
       ? (this.options.platform === "win32" ? "dws.exe" : "dws")
@@ -884,8 +906,8 @@ export class CliConnectorManager {
       if (await isExecutableFile(candidate)) candidates.add(path.resolve(candidate));
     }
     const defaults = this.options.platform === "darwin"
-      ? [path.join(this.options.homeDir, ".local", "bin", executableName), path.join("/opt/homebrew/bin", executableName), path.join("/usr/local/bin", executableName)]
-      : [path.join(process.env.LOCALAPPDATA ?? "", executableName), path.join(process.env.APPDATA ?? "", "npm", executableName)];
+      ? [this.officialCommandPath(providerId), path.join("/opt/homebrew/bin", executableName), path.join("/usr/local/bin", executableName)]
+      : [this.officialCommandPath(providerId), path.join(process.env.LOCALAPPDATA ?? "", executableName), path.join(process.env.APPDATA ?? "", "npm", executableName)];
     for (const candidate of defaults) if (candidate && await isExecutableFile(candidate)) candidates.add(path.resolve(candidate));
     return [...candidates].sort();
   }
@@ -1512,6 +1534,17 @@ function ownershipForPath(filePath: string, homeDir: string): CliInstallOwnershi
   const relative = path.relative(homeDir, filePath);
   if (relative && !relative.startsWith("..") && !path.isAbsolute(relative)) return "user-managed";
   return "system-managed";
+}
+
+async function resolvesToSameFile(left: string, right: string): Promise<boolean> {
+  try {
+    const [a, b] = await Promise.all([fs.realpath(left), fs.realpath(right)]);
+    return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
+  } catch {
+    const a = path.resolve(left);
+    const b = path.resolve(right);
+    return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
+  }
 }
 
 function installMethodForPath(filePath: string): "npm" | "homebrew" | "system" | "unknown" {

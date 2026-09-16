@@ -55,7 +55,7 @@ func (m *Manager) readManifest(root string) (Manifest, error) {
 // is shared by nearby lookups; explicit preparation invalidates this cache.
 func (m *Manager) reusable(f Manifest) bool {
 	for path := range f.OwnedFiles {
-		if ownedPath(m.cliRoot(), path) != nil {
+		if !m.ownedCLIFileAllowed(f, path) {
 			return false
 		}
 	}

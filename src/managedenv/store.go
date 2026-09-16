@@ -201,7 +201,7 @@ func (m *Manager) instances() ([]Manifest, error) {
 }
 func (m *Manager) healthy(f Manifest) bool {
 	for path := range f.OwnedFiles {
-		if ownedPath(m.cliRoot(), path) != nil {
+		if !m.ownedCLIFileAllowed(f, path) {
 			return false
 		}
 	}

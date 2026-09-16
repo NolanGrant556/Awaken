@@ -5,11 +5,11 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { c as createTar } from "tar";
 import {
-  CliConnectorManager,
   authVerificationUrl,
   readResponseBody,
   safeCliEnvironment,
 } from "./manager.js";
+import { CliConnectorManager } from "./core.test-helper.js";
 import type { CliConnectorReadiness } from "../../shared/runtime.js";
 
 const originalPath = process.env.PATH;
@@ -90,7 +90,7 @@ describe("CliConnectorManager", () => {
     await expect(readResponseBody(response, 4)).rejects.toMatchObject({ code: "CLI_ARCHIVE_TOO_LARGE" });
   });
 
-  it.each(["remove", "keep", "modified", "legacy", "rollback", "external", "missing", "failed-auth", "symlink", "logout-failed", "logout-still-authorized", "logout-status-error", "both-missing", "cleanup-failed"])("installs pinned assets and safely uninstalls: %s", async (scenario) => {
+  it.each(["remove", "keep", "modified", "legacy", "rollback", "external", "missing", "failed-auth", "symlink", "logout-failed", "logout-still-authorized", "logout-status-error", "both-missing", "cleanup-failed", "move-interrupted"])("installs pinned assets and safely uninstalls: %s", async (scenario) => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "awaken-cli-manager-"));
     const source = path.join(root, "source");
     await fs.mkdir(source);
@@ -172,18 +172,18 @@ fi
       version: "1.0.32",
       ownership: "awaken-managed",
     });
-    await expect(fs.stat(path.join(root, ".awaken", "runtime", "cli", "bin", "dws"))).resolves.toBeDefined();
+    await expect(fs.stat(path.join(root, ".awaken", "runtime", "cli", "bin", "dws"))).rejects.toMatchObject({ code: "ENOENT" });
     await expect(fs.readFile(path.join(root, ".agents", "skills", "dws", "SKILL.md"), "utf8"))
       .resolves.toContain("name: dws");
     expect(published.some((entry) => entry.providerId === "dingtalk-workspace")).toBe(true);
     const progressEvents = stateChanges.mock.calls
       .map(([view]) => view.installProgress?.percent)
       .filter((percent): percent is number => typeof percent === "number");
-    expect(progressEvents.length).toBeGreaterThan(3);
+    expect(progressEvents).toEqual([]);
     expect(progressEvents).toEqual([...progressEvents].sort((a, b) => a - b));
     expect(stateChanges.mock.calls.some(([view]) => view.installProgress?.phase === "downloading_skills")).toBe(true);
     expect(beforeNetworkOperation).toHaveBeenCalledWith("cli-command");
-    expect(beforeNetworkOperation).toHaveBeenCalledWith("cli-download");
+    expect(beforeNetworkOperation).not.toHaveBeenCalledWith("cli-download");
     expect(beforeNetworkOperation).toHaveBeenCalledWith("cli-skill-download");
 
     const authRoot = path.join(root, ".awaken", "runtime", "auth");
@@ -216,7 +216,7 @@ fi
     const skillFile = path.join(root, ".agents", "skills", "dws", "SKILL.md");
     await expect(fs.readFile(skillFile, "utf8")).resolves.toContain("name: dws");
     expect(restarted.list()[0].canUninstallManaged).toBe(true);
-    const registryPath = path.join(root, ".awaken", "runtime", "cli", "installations.json");
+    const registryPath = path.join(root, ".awaken", "runtime", "cli", "connector-state.json");
     if (scenario === "modified") await fs.appendFile(skillFile, "user edits");
     if (scenario === "symlink") {
       const outside = path.join(root, "external-skill");
@@ -242,6 +242,9 @@ fi
       await fs.rm(installed.readiness.executablePath!);
       await restarted.refreshProvider("dingtalk-workspace");
       expect(restarted.list()[0].canUninstallManaged).toBe(true);
+      await expect(restarted.uninstallManaged("dingtalk-workspace", true)).rejects.toMatchObject({ code: "CLI_UNINSTALL_LOGOUT_UNAVAILABLE" });
+      await fs.copyFile(executable, installed.readiness.executablePath!);
+      await fs.chmod(installed.readiness.executablePath!, 0o700);
     }
     await fs.writeFile(path.join(root, "authorized"), "yes");
     if (scenario.startsWith("logout-")) {
@@ -254,7 +257,7 @@ fi
     }
     if (scenario === "both-missing") {
       await fs.rm(installed.readiness.executablePath!);
-      await fs.rm(path.join(root, ".awaken", "runtime", "cli", "bin", "dws"));
+      await fs.rm(path.join(root, ".awaken", "runtime", "cli", "bin", "dws"), { force: true });
       await expect(restarted.uninstallManaged("dingtalk-workspace", true)).rejects.toMatchObject({ code: "CLI_UNINSTALL_LOGOUT_UNAVAILABLE" });
       await expect(fs.stat(skillFile)).resolves.toBeDefined();
       await restarted.dispose(); await fs.rm(root, { recursive: true, force: true }); return;
@@ -270,6 +273,22 @@ fi
       await expect(fs.readFile(skillFile, "utf8")).resolves.toContain("name: dws");
       await expect(fs.stat(installed.readiness.executablePath!)).resolves.toBeDefined();
       expect(JSON.parse(await fs.readFile(registryPath, "utf8")).records["dingtalk-workspace"]).toBeDefined();
+    }
+    if (scenario === "move-interrupted") {
+      const rename = fs.rename.bind(fs);
+      const failure = vi.spyOn(fs, "rename").mockImplementation(async (from, to) => {
+        await rename(from, to);
+        if (String(from) === path.dirname(skillFile)) throw new Error("process ended after first Skill move");
+      });
+      await expect(restarted.uninstallManaged("dingtalk-workspace", true)).rejects.toThrow("卸载清理未完成");
+      failure.mockRestore();
+      const pending = JSON.parse(await fs.readFile(registryPath, "utf8")).records["dingtalk-workspace"].pendingUninstall;
+      expect(pending.skillsStaged).toBe(false);
+      expect(pending.skills).toEqual([expect.objectContaining({ name: "dws" })]);
+      await expect(fs.stat(path.join(pending.directory, "dws", "SKILL.md"))).resolves.toBeDefined();
+      await restarted.dispose(); restarted = makeRestarted(); await restarted.initialize();
+      expect(restarted.list()[0].canUninstallManaged).toBe(true);
+      await expect(fs.stat(skillFile)).rejects.toMatchObject({ code: "ENOENT" });
     }
     if (scenario === "cleanup-failed") {
       const remove = fs.rm.bind(fs);
@@ -354,16 +373,16 @@ fi
 
     const installing = manager.install("dingtalk-workspace");
     await vi.waitFor(() => {
-      expect(stateChanges.mock.calls.some(([view]) => view.installProgress?.phase === "downloading_cli")).toBe(true);
+      expect(stateChanges.mock.calls.some(([view]) => view.installProgress?.phase === "preparing" && view.installProgress?.label === "正在下载官方 CLI")).toBe(true);
     });
 
     const reopened = await manager.refreshProvider("dingtalk-workspace");
     expect(reopened.readiness).toMatchObject({ install: "installing", overall: "working" });
-    expect(reopened.installProgress).toMatchObject({ phase: "downloading_cli", label: "正在下载官方 CLI" });
+    expect(reopened.installProgress).toMatchObject({ phase: "preparing", label: "正在下载官方 CLI" });
 
     const duplicateStart = await manager.install("dingtalk-workspace");
     expect(duplicateStart.readiness).toMatchObject({ install: "installing", overall: "working" });
-    expect(duplicateStart.installProgress).toMatchObject({ phase: "downloading_cli", label: "正在下载官方 CLI" });
+    expect(duplicateStart.installProgress).toMatchObject({ phase: "preparing", label: "正在下载官方 CLI" });
 
     await manager.cancelInstall("dingtalk-workspace");
     const cancelled = await installing;
@@ -614,14 +633,14 @@ fi
       await expect(fs.stat(path.join(root, ".agents", "skills", "lark-im", "SKILL.md"))).resolves.toBeDefined();
       await fs.rm(path.join(stateDir, scenario));
     }
-    const rename = fs.rename.bind(fs);
+    const remove = fs.rm.bind(fs);
     let userRemovedBeforeFiles = false;
-    const observe = vi.spyOn(fs, "rename").mockImplementation(async (from, to) => {
-      if (String(from) === path.dirname(installed.readiness.executablePath!)) {
+    const observe = vi.spyOn(fs, "rm").mockImplementation(async (target, options) => {
+      if (String(target) === installed.readiness.executablePath!) {
         await expect(fs.stat(path.join(stateDir, "authorized"))).rejects.toMatchObject({ code: "ENOENT" });
         userRemovedBeforeFiles = true;
       }
-      return rename(from, to);
+      return remove(target, options);
     });
     const uninstalled = await manager.uninstallManaged("lark-cli");
     observe.mockRestore();

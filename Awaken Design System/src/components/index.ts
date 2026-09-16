@@ -100,3 +100,5 @@ export * from "./AwakenUserPromptBlock";
 export * from "./AwakenWorkbenchChrome";
 export * from "./AwakenWorkbenchShell";
 export * from "./AwakenWorkbenchSidebarFrame";
+
+export * from "./AwakenOfficeEnvironment";

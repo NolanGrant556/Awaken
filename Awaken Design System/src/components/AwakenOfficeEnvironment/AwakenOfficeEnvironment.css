@@ -1,0 +1,36 @@
+.office-environment {
+  width: min(100%, var(--aw-settings-focused-content-width, 820px));
+  min-width: 0;
+  margin-inline: auto;
+  padding: 8px 0 36px;
+  color: var(--aw-text-primary);
+}
+.office-environment-list { list-style: none; padding: 0; margin: 0; }
+.office-environment-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(90px, 140px) 100px;
+  align-items: center;
+  gap: 24px;
+  min-height: 68px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--aw-border-light);
+}
+.office-environment-name { font-size: 14px; font-weight: var(--aw-font-weight-semibold); }
+.office-environment-version { color: var(--aw-text-secondary); font-size: 13px; font-variant-numeric: tabular-nums; }
+.office-environment-status { display: inline-flex; align-items: center; justify-self: end; gap: 6px; font-size: 12px; color: var(--aw-text-secondary); white-space: nowrap; }
+.office-environment-status[data-state="ready"] { color: var(--aw-status-success-text); }
+.office-environment-status[data-state="damaged"] { color: var(--aw-warning-text); }
+.office-environment-status-dot { width: 5px; height: 5px; margin: 0 5px; border-radius: 50%; background: currentColor; }
+.office-environment-actions { display: flex; justify-content: flex-end; padding-top: 20px; }
+.office-environment-progress { display: grid; gap: 10px; padding-top: 20px; color: var(--aw-text-secondary); font-size: 12px; }
+.office-environment-progress-label { display: flex; align-items: center; justify-content: space-between; gap: 16px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.office-environment-progress progress { width: 100%; height: 5px; accent-color: var(--aw-text-primary); }
+.office-environment-feedback { margin: 16px 0 0; color: var(--aw-text-secondary); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.office-environment .office-environment-error { color: var(--aw-error); }
+.office-environment button:focus-visible { outline: 2px solid var(--aw-text-primary); outline-offset: 3px; }
+@media (max-width: 760px) {
+  .office-environment-row { grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; }
+  .office-environment-version { grid-column: 1; grid-row: 2; font-size: 12px; }
+  .office-environment-status { grid-column: 2; grid-row: 1 / 3; }
+  .office-environment-name { grid-column: 1; grid-row: 1; }
+}

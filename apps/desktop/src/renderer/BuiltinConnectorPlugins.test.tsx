@@ -125,6 +125,13 @@ describe("built-in DingTalk and Feishu entry migration", () => {
     expect([...document.querySelectorAll("button")].some(el => el.textContent === "卸载")).toBe(false);
   });
 
+  it("shows the actionable uninstall refusal without Electron IPC diagnostics", async () => {
+    client.uninstallManagedCli.mockRejectedValueOnce(new Error("Error invoking remote method 'awaken:uninstall-managed-cli': Error: 当前有任务正在运行，请结束任务后重试。"));
+    await render(); await click("查看插件 钉钉"); await click("卸载"); await click("确认卸载");
+    expect(document.querySelector('[role="alert"]')?.textContent).toBe("当前有任务正在运行，请结束任务后重试。");
+    expect(button("确认卸载")).toBeTruthy();
+  });
+
   it("removes the old CLI tab and cards from Connectors", async () => {
     await render("connectors");
     expect(container.textContent).not.toMatch(/CLI|钉钉|飞书/);

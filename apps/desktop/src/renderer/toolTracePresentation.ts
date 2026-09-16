@@ -352,6 +352,8 @@ function namedBuiltinTitle(
       return "读取 会话";
     case "archived_history":
       return "读取 归档";
+    case "ensure_environment":
+      return "准备 运行环境";
     case "dependency_install":
       return titled(
         "安装",

@@ -212,6 +212,7 @@ export function useProjectRegistry(
     defaultWorkspacePath,
     defaultProjectRemoved,
     activeThreadWorkspacePath,
+    activeThreadProjectId,
     projectsFromWorkspace,
   });
 
@@ -358,7 +359,7 @@ export function useProjectRegistry(
     const workspaceRoot = resolveWorkspaceRootForRun({
       workspacePath, workspaceTargetPath: workspaceTargetPathRef.current,
       conversationScope, selectedProjectId, defaultWorkspacePath,
-      defaultProjectRemoved, activeThreadWorkspacePath, projectsFromWorkspace,
+      defaultProjectRemoved, activeThreadWorkspacePath, activeThreadProjectId, projectsFromWorkspace,
     });
     const { projectId, projectName } = resolveRunProjectForRun({
       workspaceRoot, selectedProjectId, defaultWorkspacePath,

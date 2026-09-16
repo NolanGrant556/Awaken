@@ -10,6 +10,12 @@ context: inline
 
 交付准确触发、按需提供知识的 Skill。只写能改变 Agent 决策的非显然知识；description 简短说明何时使用，不列穷尽能力或吸引无关任务。SKILL.md 保留目标、路由、共同不变量与完成条件。
 
+## 共享执行环境
+
+执行 helper 前，通过 `tool_find` 找到 `load_workspace_dependencies`，以 `{}` 取得整套办公环境。每次 Bash 显式传入本 Agent 的 `environment_ref`，使用返回的解释器与启动参数；切换 Python/Node 或项目复用底层安装，各任务取得自己的引用。
+
+缺失或损坏时由同一入口准备或恢复。失败如实报告原因，不改用系统软件、`ensure_environment` 或项目/全局安装补齐办公包。环境、文件内容、结构、视觉与发布分别验收。
+
 ## 按需选择
 
 - 需要选择资源边界时读 [包设计](references/package-design.md)：条件性知识进入 references/，确定性重复逻辑进入 scripts/，实际交付底稿进入 assets/；简单技能无需额外目录。

@@ -17,6 +17,12 @@ user-invocable: true
 | 财务模型且无用户模板约定 | [财务模型](references/financial-model.md) |
 | 执行脚本或恢复依赖 | [依赖与执行](references/依赖与执行.md) |
 
+## 共享执行环境
+
+执行 helper 前，通过 `tool_find` 找到 `load_workspace_dependencies`，以 `{}` 取得整套办公环境。每次 Bash 显式传入本 Agent 的 `environment_ref`，使用返回的解释器与启动参数；切换 Python/Node 或项目复用底层安装，各任务取得自己的引用。
+
+缺失或损坏时由同一入口准备或恢复。失败如实报告原因，不改用系统软件、`ensure_environment` 或项目/全局安装补齐办公包。环境、文件内容、结构、视觉与发布分别验收。
+
 ## 共同边界
 
 - helper 支持 Python 3.9+，通过 `${AWAKEN_SKILL_DIR}` 绝对路径执行并复用 `execution_plan.python`；只探测当前 route。

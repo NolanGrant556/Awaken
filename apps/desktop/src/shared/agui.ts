@@ -432,6 +432,11 @@ export type AguiEvent = {
   authScope?: string;
   authUrl?: string;
   runtimeName?: string;
+  runtimeOperationId?: string;
+  runtimeDownloadedBytes?: number;
+  runtimeTotalBytes?: number;
+  runtimeInstallCount?: number;
+  runtimeDownloadCount?: number;
   runtimeVersion?: string;
   runtimeComponent?: string;
   runtimeRequiredVersion?: string;

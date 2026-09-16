@@ -1,3 +1,4 @@
+import { OFFICE_ENVIRONMENT_CHANNELS as officeChannels, type OfficeEnvironmentProgress } from "../shared/office-environment.js";
 import type { DesktopRequestResult } from "../shared/runtime-request.js";
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from "electron";
 import type { AguiEvent } from "../shared/agui.js";
@@ -238,6 +239,14 @@ const bridge: AwakenBridge = {
     return () => ipcRenderer.removeListener(DESKTOP_SELECT_ALL_REQUESTED_CHANNEL, handler);
   },
   relaunchDesktop: () => ipcRenderer.invoke("awaken:relaunch-desktop") as Promise<void>,
+  getOfficeEnvironment: () => ipcRenderer.invoke(officeChannels.status),
+  prepareOfficeEnvironment: (request) => ipcRenderer.invoke(officeChannels.prepare, request),
+  cancelOfficeEnvironment: (id) => ipcRenderer.invoke(officeChannels.cancel, id),
+  onOfficeEnvironmentProgress: (callback) => {
+    const listener = (_event: IpcRendererEvent, progress: OfficeEnvironmentProgress) => callback(progress);
+    ipcRenderer.on(officeChannels.progress, listener);
+    return () => ipcRenderer.removeListener(officeChannels.progress, listener);
+  },
   getSearchSettings: () => ipcRenderer.invoke("awaken:get-search-settings"),
   saveSearchSettings: (request) => ipcRenderer.invoke("awaken:save-search-settings", request),
   testSearchProvider: (request) => ipcRenderer.invoke("awaken:test-search-provider", request),

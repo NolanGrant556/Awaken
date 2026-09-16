@@ -1,3 +1,4 @@
+import { registerOfficeEnvironmentIpc } from "./office-environment-ipc.js";
 import {
   app,
   BrowserWindow,
@@ -143,6 +144,7 @@ import { EmbeddedBrowserHost } from "./embedded-browser/host.js";
 import { registerEmbeddedBrowserIpc, registerEmbeddedBrowserReloadHandler } from "./embedded-browser/ipc.js";
 import { EmbeddedBrowserViewManager } from "./embedded-browser/manager.js";
 import { authorizeEmbeddedBrowserWebview } from "./embedded-browser/options.js";
+import { acceptanceChildEnvironment } from "./acceptance-environment.js";
 
 const { autoUpdater } = electronUpdaterPkg;
 
@@ -152,6 +154,15 @@ const isDevServer = process.argv.includes("--dev");
 const instanceIdentity = desktopInstanceIdentity(isDevServer);
 app.setName(instanceIdentity.applicationName);
 app.setPath("userData", join(app.getPath("appData"), ...instanceIdentity.userDataPathSegments));
+// An explicit development-only acceptance root isolates both product state and
+// dependencies. Packaged Desktop always uses the OS account's normal paths.
+if (isDevServer && !app.isPackaged && process.env.AWAKEN_DESKTOP_ACCEPTANCE_ROOT) {
+  const acceptanceRoot = process.env.AWAKEN_DESKTOP_ACCEPTANCE_ROOT;
+  if (!path.isAbsolute(acceptanceRoot)) throw new Error("Desktop acceptance root must be absolute");
+  app.setPath("home", path.join(acceptanceRoot, "home"));
+  app.setPath("userData", path.join(acceptanceRoot, "userData"));
+}
+
 if (process.platform === "win32") {
   app.setAppUserModelId(instanceIdentity.applicationId);
 }
@@ -1376,6 +1387,8 @@ function subscribeDesktopUpdateStateBroadcast(): void {
   });
 }
 
+let stopOfficeEnvironmentWaiters: (() => void) | undefined;
+
 function registerDesktopUpdateIpcHandlers(): void {
   ipcMain.handle(DESKTOP_UPDATE_CHANNELS.getState, (event) => {
     requireMainWindowSender(event);
@@ -2284,6 +2297,45 @@ app.whenReady().then(async () => {
   powerMonitor.on("resume", networkRoutePowerListener);
   powerMonitor.on("unlock-screen", networkRoutePowerListener);
   cliConnectorManager = new CliConnectorManager({
+    inspectSharedComponent: async (providerId) => {
+      const client = supervisor?.getControlClient();
+      if (!client) throw new Error("本地服务尚未就绪，请稍后重试");
+      return client.inspectCLIInstallation(providerId);
+    },
+    reserveSharedComponentRemoval: async (providerId) => {
+      const client = supervisor?.getControlClient();
+      if (!client) throw new Error("本地服务尚未就绪，请稍后重试");
+      const token = await client.reserveEnvironmentComponentRemoval(providerId);
+      return { token, release: async () => {
+        const current = supervisor?.getControlClient();
+        if (!current) throw new Error("本地服务尚未就绪，请稍后重试");
+        await current.releaseEnvironmentComponentRemoval(providerId, token);
+      } };
+    },
+    holdSharedExecutable: async (executable, token) => {
+      const client = supervisor?.getControlClient();
+      if (!client) throw new Error("本地服务尚未就绪，请稍后重试");
+      const reference = await client.holdEnvironmentExecutable(executable, token);
+      return async () => {
+        const current = supervisor?.getControlClient();
+        if (!current) throw new Error("本地服务尚未就绪，请稍后重试");
+        await current.releaseEnvironmentExecutable(reference);
+      };
+    },
+    removeSharedComponent: async (providerId, token) => {
+      const client = supervisor?.getControlClient();
+      if (!client) throw new Error("本地服务尚未就绪，请稍后重试");
+      await client.removeEnvironmentComponent(providerId, token);
+    },
+    prepareSharedComponent: async (providerId, signal, progress) => {
+      const client = supervisor?.getControlClient();
+      if (!client) throw new Error("本地服务尚未就绪，请稍后重试");
+      const binding = await client.prepareEnvironment(providerId, signal, progress);
+      const name = providerId === "dingtalk-workspace" ? "dws" : "lark-cli";
+      const executable = binding.executables[name]?.executable;
+      if (!executable) throw new Error("共享运行组件未返回可执行文件");
+      return executable;
+    },
     homeDir: app.getPath("home"),
     platform: process.platform,
     architecture: process.arch,
@@ -2292,7 +2344,10 @@ app.whenReady().then(async () => {
     openExternal: (url) => shell.openExternal(url),
     publishReadiness: publishCliReadiness,
     onStateChanged: broadcastCliConnectorState,
-    environment: () => networkRouteManager?.childEnvironment(process.env) ?? process.env,
+    environment: () => ({
+      ...(networkRouteManager?.childEnvironment(process.env) ?? process.env),
+      ...acceptanceChildEnvironment({ root: process.env.AWAKEN_DESKTOP_ACCEPTANCE_ROOT, dev: isDevServer, packaged: app.isPackaged }),
+    }),
     beforeNetworkOperation: prepareNetworkRoute,
     onTransportFailure: (surface) => networkRouteManager?.notifyTransportFailure(surface),
   });
@@ -2373,6 +2428,7 @@ app.whenReady().then(async () => {
   desktopUpdateManager.initialize();
   subscribeDesktopUpdateStateBroadcast();
   registerDesktopUpdateIpcHandlers();
+  stopOfficeEnvironmentWaiters = registerOfficeEnvironmentIpc({ requireSender: requireMainWindowSender, getClient: () => supervisor?.getControlClient() });
   updatePowerResumeListener = () => void desktopUpdateManager?.check("resume");
   powerMonitor.on("resume", updatePowerResumeListener);
 
@@ -2624,6 +2680,7 @@ app.on("window-all-closed", () => {
 
 /** 退出清理的同步 owner：与 before-quit 原顺序一致，供 shutdown coordinator 调用。 */
 function stopSyncShutdownOwners(): void {
+  stopOfficeEnvironmentWaiters?.();
   stopProjectTrashWorker();
   stopScheduledTaskEventStream();
   stopComposerCatalogEventStream();

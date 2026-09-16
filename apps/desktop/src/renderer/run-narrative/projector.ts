@@ -1,3 +1,4 @@
+import { runtimeDownloadProgress } from "../../shared/office-environment";
 import { stopMessage, terminalMessage } from "../runtime/stop-display";
 import { compactEventDetails } from "../runtime/compact-event";
 import type { AguiEvent } from "../../shared/agui";
@@ -341,12 +342,12 @@ export function projectAguiEventToNarrative(
         base,
         event,
         "runtime",
-        event.type === "AWAKEN_RUNTIME_READY"
-          ? "Runtime ready"
+        event.runtimeOperationId && event.message ? [event.message, runtimeDownloadProgress(event.runtimeDownloadedBytes, event.runtimeTotalBytes)].filter(Boolean).join(" · ") : event.type === "AWAKEN_RUNTIME_READY"
+          ? "运行环境已就绪"
           : event.type === "AWAKEN_RUNTIME_MISSING" ||
               event.type === "AWAKEN_RUNTIME_REPAIR_FAILED"
-            ? "Runtime missing"
-            : "Runtime preparing",
+            ? "运行环境未就绪"
+            : "正在准备运行环境",
         [
           event.runtimeName,
           event.runtimeComponent,
@@ -2605,7 +2606,7 @@ function commitRuntimeNotice(
 ): RunNarrativeState {
   const id = `${prefix}:${eventScopedId(
     event,
-    event.toolCallId ??
+    (event.runtimeOperationId ? `${event.toolCallId ?? ""}:${event.runtimeOperationId}` : event.toolCallId) ??
       event.runtimeComponent ??
       event.runtimeName ??
       event.authProvider ??

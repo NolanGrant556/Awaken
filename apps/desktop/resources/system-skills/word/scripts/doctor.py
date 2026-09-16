@@ -8,10 +8,11 @@ import importlib.util
 import json
 import os
 import platform
-import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+from office_runtime import find_office_command
 
 
 ROUTE_NAMES = ("read", "create", "edit_ooxml", "accept_changes", "visual_qa")
@@ -26,7 +27,7 @@ def node_module_available(name: str, dependency_root: Path | None = None) -> boo
     node = command_path("node")
     if not node:
         return False
-    root = (dependency_root or Path.cwd()).resolve()
+    root = Path(os.environ["AWAKEN_NODE_PACKAGE_ROOT"]).resolve() if os.environ.get("AWAKEN_NODE_PACKAGE_ROOT") else (dependency_root or Path.cwd()).resolve()
     try:
         result = subprocess.run(
             [
@@ -48,28 +49,14 @@ def node_module_available(name: str, dependency_root: Path | None = None) -> boo
 
 def command_path(*names: str) -> str | None:
     for name in names:
-        found = shutil.which(name)
+        found = find_office_command(name)
         if found:
-            return str(Path(found).resolve())
+            return str(found)
     return None
 
 
 def libreoffice_path() -> str | None:
-    found = command_path("soffice", "libreoffice")
-    if found:
-        return found
-    if platform.system() == "Darwin":
-        candidate = Path("/Applications/LibreOffice.app/Contents/MacOS/soffice")
-        return str(candidate) if candidate.is_file() else None
-    if platform.system() == "Windows":
-        for env_name in ("PROGRAMFILES", "PROGRAMFILES(X86)"):
-            base = os.environ.get(env_name)
-            if not base:
-                continue
-            candidate = Path(base) / "LibreOffice" / "program" / "soffice.exe"
-            if candidate.is_file():
-                return str(candidate)
-    return None
+    return command_path("soffice")
 
 
 def capability(
@@ -79,7 +66,7 @@ def capability(
 ) -> dict:
     result = {"available": bool(available)}
     if path:
-        result["path"] = str(Path(path).resolve())
+        result["path"] = str(Path(path).absolute())
     result.update(details)
     return result
 
@@ -117,7 +104,7 @@ def alternative_route(capabilities: dict, alternatives: list[list[str]]) -> dict
 
 def inspect(route: str | None = None, dependency_root: Path | None = None) -> dict:
     script_dir = Path(__file__).resolve().parent
-    dependency_root = (dependency_root or Path.cwd()).resolve()
+    dependency_root = Path(os.environ["AWAKEN_NODE_PACKAGE_ROOT"]).resolve() if os.environ.get("AWAKEN_NODE_PACKAGE_ROOT") else (dependency_root or Path.cwd()).resolve()
     bundled_paths = {
         "bundled_ooxml_reader": script_dir / "read_docx.py",
         "bundled_ooxml_editor": script_dir / "ooxml_package.py",
@@ -189,11 +176,11 @@ def inspect(route: str | None = None, dependency_root: Path | None = None) -> di
         for alternative in route_result.get("missing_alternatives", []):
             blocking_missing.update(alternative["missing"])
     all_hints = {
-        "node": "使用当前系统包管理器安装 Node.js",
-        "docx_node": "在任务工作区执行 npm install docx",
-        "python_docx": "在工作区 venv 中安装 python-docx",
-        "libreoffice": "使用 Awaken 可用安装计划或系统包管理器安装 LibreOffice",
-        "pdftoppm": "使用 Awaken 可用安装计划或系统包管理器安装 Poppler",
+        "node": "调用 load_workspace_dependencies，输入 {}",
+        "docx_node": "调用 load_workspace_dependencies，输入 {}",
+        "python_docx": "调用 load_workspace_dependencies，输入 {}",
+        "libreoffice": "调用 load_workspace_dependencies，输入 {}",
+        "pdftoppm": "调用 load_workspace_dependencies，输入 {}",
     }
     return {
         "status": "ready" if not unavailable_routes else "partial",
@@ -207,6 +194,7 @@ def inspect(route: str | None = None, dependency_root: Path | None = None) -> di
             for name in sorted(blocking_missing)
             if name in all_hints
         },
+        "environment_ref": os.environ.get("AWAKEN_ENVIRONMENT_REF"),
         "execution_plan": {
             "dependency_root": str(dependency_root),
             **{

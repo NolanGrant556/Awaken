@@ -1,3 +1,4 @@
+import { desktopErrorMessage } from "./desktopErrorMessage";
 import type { CliProviderId } from "../shared/runtime";
 
 export type CliConnectorProductCopy = {
@@ -25,7 +26,8 @@ export function cliConnectorProductCopy(providerId: string): CliConnectorProduct
 
 /** Product wording only. State and diagnostics codes remain owned by Main. */
 export function cliConnectorUserMessage(message: string | undefined): string | undefined {
-  return message?.replace(/\bCLI\b/g, "运行组件").replace(/\bSkills?\b/g, "技能");
+  return message === undefined ? undefined : desktopErrorMessage(message)
+    .replace(/\bCLI\b/g, "运行组件").replace(/\bSkills?\b/g, "技能");
 }
 
 export const builtinConnectorProviders: readonly CliProviderId[] = ["dingtalk-workspace", "lark-cli"];

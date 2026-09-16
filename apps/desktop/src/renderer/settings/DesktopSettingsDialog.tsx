@@ -25,6 +25,7 @@ import type {
 import type { RuntimeClient } from "../runtime/client";
 import { providerBrandForId } from "../model-provider-brand";
 import { PetsSettingsPanel } from "./PetsSettingsPanel";
+import { OfficeEnvironmentPanel } from "./OfficeEnvironmentPanel";
 import { SearchSettingsPanel } from "./SearchSettingsPanel";
 import { MemorySettingsPanel } from "./MemorySettingsPanel";
 import { ACPSettingsPanel } from "./ACPSettingsPanel";
@@ -56,6 +57,7 @@ type ModelSettingsSection = ModelAccessType;
 type ModelSettingsView = "connections" | "llm";
 type SettingsDialogSection =
   | "models"
+  | "office"
   | "search"
   | "memory"
   | "instructions"
@@ -106,6 +108,7 @@ const MODEL_SETTINGS_COPY: Record<
 const SETTINGS_SECTION_TITLES: Record<SettingsDialogSection, string> = {
   models: "模型",
   search: "搜索",
+  office: "环境管理",
   memory: "记忆",
   instructions: "全局规则",
   appearance: "外观",
@@ -1511,7 +1514,9 @@ export function DesktopSettingsDialog({
         setActiveSettingsSection(section as SettingsDialogSection)
       }
     >
-      {activeSettingsSection === "search" ? (
+      {activeSettingsSection === "office" ? (
+        <OfficeEnvironmentPanel runtimeClient={runtimeClient} />
+      ) : activeSettingsSection === "search" ? (
         <SearchSettingsPanel runtimeClient={runtimeClient} />
       ) : activeSettingsSection === "memory" ? (
         <MemorySettingsPanel

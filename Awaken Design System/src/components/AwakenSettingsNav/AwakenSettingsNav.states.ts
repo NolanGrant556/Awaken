@@ -7,6 +7,7 @@ export const AwakenSettingsNavItems: AwakenSettingsNavProps["items"] = [
   { id: "instructions", label: "全局规则", concept: "context-file" },
   { id: "appearance", label: "外观", concept: "settings-appearance" },
   { id: "pets", label: "宠物", concept: "settings-pets" },
+  { id: "office", label: "环境管理", concept: "context-file" },
   { id: "computer", label: "计算机操作", concept: "computer-use" },
   { id: "hooks", label: "钩子", concept: "hook" },
   // ACP 配置的是外部 runner 进程，用机器人头像与本机能力型分区区分开。

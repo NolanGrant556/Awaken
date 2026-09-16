@@ -1,3 +1,4 @@
+import { runtimeDownloadProgress } from "../../shared/office-environment";
 import { stopMessage, terminalMessage } from "./stop-display";
 import type { RunStepItem } from "@awaken/design-system";
 import type {
@@ -3309,7 +3310,7 @@ function reduceActiveRuntimeState(
         case "AWAKEN_RUNTIME_READY":
         case "AWAKEN_RUNTIME_REPAIR_FAILED":
         case "AWAKEN_RUNTIME_MISSING": {
-          const runtimeKey = [
+          const runtimeKey = action.event.runtimeOperationId ? `${action.event.toolCallId ?? ""}:${action.event.runtimeOperationId}` : [
             action.event.runtimeName,
             action.event.runtimeComponent,
           ]
@@ -3320,11 +3321,11 @@ function reduceActiveRuntimeState(
             action.event.type === "AWAKEN_RUNTIME_REPAIR_FAILED";
           const ready = action.event.type === "AWAKEN_RUNTIME_READY";
           records = upsertStep(records, `runtime:${runtimeKey || "tool"}`, {
-            title: ready
-              ? "Runtime ready"
+            title: action.event.runtimeOperationId && action.event.message ? [action.event.message, runtimeDownloadProgress(action.event.runtimeDownloadedBytes, action.event.runtimeTotalBytes)].filter(Boolean).join(" · ") : ready
+              ? "运行环境已就绪"
               : missing
-                ? "Runtime missing"
-                : "Runtime preparing",
+                ? "运行环境未就绪"
+                : "正在准备运行环境",
             description: [
               action.event.runtimeComponent,
               action.event.runtimePrepareStatus,

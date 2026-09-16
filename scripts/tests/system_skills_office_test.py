@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
 from pathlib import Path
 
@@ -136,6 +138,41 @@ class SkillResourceRoutingTests(unittest.TestCase):
                         pending.append(destination)
             for reference in (root / "references").glob("*.md"):
                 self.assertIn(reference.resolve(), visited, f"unrouted reference: {reference}")
+
+
+class OfficeRuntimePolicyTests(unittest.TestCase):
+    def test_standalone_skill_copies_share_the_same_resolver(self):
+        paths = [SYSTEM_SKILLS / skill / "scripts/office_runtime.py" for skill in ("word", "excel", "ppt")]
+        self.assertEqual(1, len({path.read_bytes() for path in paths}))
+
+    def test_doctors_and_helpers_use_only_the_bound_office_command(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            inside, outside = root / "bundle/soffice", root / "system-soffice"
+            inside.parent.mkdir()
+            inside.touch()
+            outside.touch()
+            for skill in ("word", "excel", "ppt"):
+                helper = load_script(skill, "office_runtime.py", f"{skill}_runtime_policy")
+                doctor = load_script(skill, "doctor.py", f"{skill}_doctor_policy")
+                with self.subTest(skill=skill), patch.dict(os.environ, {"AWAKEN_OFFICE_BUNDLE_ROOT": str(inside.parent)}, clear=True), patch("shutil.which", return_value=str(outside)) as lookup:
+                    self.assertIsNone(helper.find_soffice())
+                    self.assertIsNone(doctor.libreoffice_path())
+                    os.environ["AWAKEN_LIBREOFFICE"] = str(outside)
+                    self.assertIsNone(helper.find_soffice())
+                    self.assertIsNone(doctor.libreoffice_path())
+                    os.environ["AWAKEN_LIBREOFFICE"] = str(inside)
+                    self.assertEqual(inside.resolve(), helper.find_soffice())
+                    self.assertEqual(str(inside.resolve()), doctor.libreoffice_path())
+                    lookup.assert_not_called()
+
+    def test_typst_missing_binding_never_installs_or_falls_back(self):
+        runtime = load_script("PDF_Max", "typst_runtime.py", "typst_runtime_policy")
+        with patch.dict(os.environ, {"AWAKEN_ENVIRONMENT_REF": "test-ref"}, clear=True), patch("shutil.which") as lookup:
+            self.assertEqual("needs_runtime", runtime.resolve_runtime()["source"])
+            with self.assertRaisesRegex(runtime.RuntimeErrorWithCode, "load_workspace_dependencies"):
+                runtime.install_runtime()
+            lookup.assert_not_called()
 
 
 class WordScriptTests(unittest.TestCase):
@@ -282,6 +319,18 @@ class WordScriptTests(unittest.TestCase):
             self.reader.parse_part(encrypted, "word/document.xml")
         self.assertIn("无法读取", str(raised.exception))
 
+    def test_doctor_preserves_virtual_environment_interpreter(self):
+        import subprocess
+        import venv
+        with tempfile.TemporaryDirectory(prefix="awaken python 中文 ") as directory:
+            directory = str(Path(directory).resolve())
+            venv.EnvBuilder(with_pip=False, symlinks=os.name != "nt").create(directory)
+            python = Path(directory) / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+            doctor = SYSTEM_SKILLS / "word/scripts/doctor.py"
+            result = subprocess.run([str(python), "-B", str(doctor), "--route", "read", "--json"], capture_output=True, text=True, check=True)
+            plan = json.loads(result.stdout)["execution_plan"]
+            self.assertEqual(str(python.absolute()), plan["python"])
+
     def test_doctor_reports_routes_independently(self):
         original_command_path = self.doctor.command_path
         original_libreoffice_path = self.doctor.libreoffice_path
@@ -313,7 +362,7 @@ class WordScriptTests(unittest.TestCase):
             set(read_only["capabilities"]),
         )
         self.assertEqual(str(Path.cwd().resolve()), read_only["execution_plan"]["dependency_root"])
-        self.assertEqual(str(Path(sys.executable).resolve()), read_only["execution_plan"]["python"])
+        self.assertEqual(str(Path(sys.executable).absolute()), read_only["execution_plan"]["python"])
         self.assertEqual("3.9", read_only["capabilities"]["python"]["minimum_version"])
 
     def test_doctor_does_not_recommend_missing_unused_create_alternative(self):
@@ -449,7 +498,7 @@ class ExcelScriptTests(unittest.TestCase):
     def test_doctor_scopes_recalc_and_returns_absolute_plan(self):
         result = self.doctor.inspect("recalc")
         self.assertEqual({"python", "openpyxl", "libreoffice", "bundled_recalculator"}, set(result["capabilities"]))
-        self.assertEqual(str(Path(sys.executable).resolve()), result["execution_plan"]["python"])
+        self.assertEqual(str(Path(sys.executable).absolute()), result["execution_plan"]["python"])
         self.assertEqual("3.9", result["capabilities"]["python"]["minimum_version"])
 
 
@@ -502,6 +551,27 @@ class OfficePythonCompatibilityTests(unittest.TestCase):
         for skill in ("word", "excel", "ppt"):
             for script in (SYSTEM_SKILLS / skill / "scripts").glob("*.py"):
                 self.assertNotIn("ignore_cleanup_errors", script.read_text(encoding="utf-8"), str(script))
+
+
+class ManagedOfficePathTests(unittest.TestCase):
+    def test_incomplete_awaken_binding_does_not_use_system_office(self):
+        for skill in ("word", "excel", "ppt"):
+            helper = load_script(skill, "office_runtime.py", skill + "_binding_paths")
+            with patch.dict(os.environ, {"AWAKEN_CWD_RESULT": "/task/cwd"}, clear=True), patch.object(helper.shutil, "which", return_value="/system/soffice"):
+                self.assertIsNone(helper.find_soffice())
+                self.assertIsNone(helper.find_office_command("pdftoppm"))
+
+    def test_fixed_bundle_rejects_an_external_explicit_program(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            bundle = directory / "办公环境"
+            bundle.mkdir()
+            external = directory / "soffice"
+            external.write_text("fixture")
+            for skill in ("word", "excel", "ppt"):
+                helper = load_script(skill, "office_runtime.py", skill + "_binding_external")
+                with patch.dict(os.environ, {"AWAKEN_OFFICE_BUNDLE_ROOT": str(bundle), "AWAKEN_LIBREOFFICE": str(external)}, clear=True):
+                    self.assertIsNone(helper.find_soffice())
 
 
 if __name__ == "__main__":

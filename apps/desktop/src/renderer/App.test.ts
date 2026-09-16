@@ -802,6 +802,10 @@ function stubElectronBridge(): void {
       platform: "macos",
       onSelectAllRequested: vi.fn(() => () => {}),
       relaunchDesktop: vi.fn(async () => undefined),
+      getOfficeEnvironment: vi.fn(async () => { throw new Error("unused"); }),
+      prepareOfficeEnvironment: vi.fn(async () => ({ status: "ready" as const })),
+      cancelOfficeEnvironment: vi.fn(async () => {}),
+      onOfficeEnvironmentProgress: vi.fn(() => () => {}),
       getSearchSettings: vi.fn(async () => ({
         providers: {
           exa: { enabled: true },
@@ -1357,6 +1361,19 @@ describe("resolveWorkspaceRootForRun", () => {
         ],
       }),
     ).toBe("/tmp/new");
+  });
+
+  it("continues a project thread at the replacement root after its old folder is detached", () => {
+    for (const folders of [userFolders("/tmp/moved"), []]) {
+      expect(resolveWorkspaceRootForRun({
+        workspaceTargetPath: "/tmp/old",
+        activeThreadWorkspacePath: "/tmp/old",
+        activeThreadProjectId: "project-moved",
+        selectedProjectId: "project-moved",
+        projectsFromWorkspace: [{ id: "project-moved", label: "moved",
+          path: folders.length ? "/tmp/moved" : "", folders }],
+      })).toBe(folders.length ? "/tmp/moved" : "");
+    }
   });
 
   it("uses the selected project path before a stale workspace path", () => {

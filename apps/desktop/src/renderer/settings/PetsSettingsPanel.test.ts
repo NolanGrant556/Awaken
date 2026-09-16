@@ -31,7 +31,11 @@ function createMockRuntimeClient(): RuntimeClient {
     source: "electron",
     platform: "windows",
     relaunchDesktop: vi.fn(async () => undefined),
-    getSearchSettings: vi.fn(async () => ({
+    getOfficeEnvironment: vi.fn(async () => { throw new Error("unused"); }),
+      prepareOfficeEnvironment: vi.fn(async () => ({ status: "ready" as const })),
+      cancelOfficeEnvironment: vi.fn(async () => {}),
+      onOfficeEnvironmentProgress: vi.fn(() => () => {}),
+      getSearchSettings: vi.fn(async () => ({
       providers: {
         exa: { enabled: true },
         tavily: { enabled: false },

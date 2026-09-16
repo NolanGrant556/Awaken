@@ -51,6 +51,7 @@ export function resolveWorkspaceRootForRun(args: {
   defaultWorkspacePath?: string;
   defaultProjectRemoved?: boolean;
   activeThreadWorkspacePath?: string;
+  activeThreadProjectId?: string;
   projectsFromWorkspace: WorkspaceProject[];
 }): string {
   const {
@@ -61,6 +62,7 @@ export function resolveWorkspaceRootForRun(args: {
     defaultWorkspacePath,
     defaultProjectRemoved,
     activeThreadWorkspacePath,
+    activeThreadProjectId,
     projectsFromWorkspace,
   } = args;
 
@@ -72,10 +74,6 @@ export function resolveWorkspaceRootForRun(args: {
   }
 
   const explicitTarget = workspaceTargetPath?.trim();
-  if (explicitTarget) {
-    return explicitTarget;
-  }
-
   const selectedProject =
     selectedProjectId === undefined ||
     selectedProjectId === DEFAULT_WORKSPACE_PROJECT_ID
@@ -83,6 +81,14 @@ export function resolveWorkspaceRootForRun(args: {
       : projectsFromWorkspace.find(
           (project) => project.id === selectedProjectId,
         );
+
+  // A continued thread may remember a folder removed in Edit Project. Its
+  // durable project still owns the next run; use that project's current root.
+  const detachedThreadTarget = selectedProject &&
+    activeThreadProjectId === selectedProject.id &&
+    !selectedProject.folders.some((folder) =>
+      isSameWorkspacePath(folder.path, explicitTarget));
+  if (explicitTarget && !detachedThreadTarget) return explicitTarget;
 
   // A project the user created without picking a folder anchors nothing on disk.
   // Returning empty lets Core resolve that project's session workspace, instead

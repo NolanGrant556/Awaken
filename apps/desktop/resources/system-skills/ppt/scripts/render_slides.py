@@ -15,7 +15,7 @@ from xml.etree import ElementTree
 
 sys.dont_write_bytecode = True
 
-from office_runtime import run_soffice, temporary_directory
+from office_runtime import find_office_command, run_soffice, temporary_directory
 
 
 P_NS = "http://schemas.openxmlformats.org/presentationml/2006/main"
@@ -45,9 +45,9 @@ def render(input_path: Path, output_dir: Path, dpi: int, timeout: int) -> dict:
         raise FileNotFoundError(f"输入文件不存在: {input_path}")
     if output_dir.exists() and any(output_dir.iterdir()):
         raise ValueError(f"预览目录不是空目录，请为本轮 QA 使用新目录: {output_dir}")
-    pdftoppm = shutil.which("pdftoppm")
+    pdftoppm = find_office_command("pdftoppm")
     if not pdftoppm:
-        raise FileNotFoundError("未找到 pdftoppm（Poppler）")
+        raise FileNotFoundError("needs_runtime: 未取得 Poppler；请调用 load_workspace_dependencies")
     declared, hidden = slide_counts(input_path)
     if declared == 0:
         raise ValueError("演示文稿没有注册任何 slide")

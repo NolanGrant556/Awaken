@@ -1,3 +1,4 @@
+import type { OfficeEnvironmentStatus, OfficeEnvironmentOperation } from "../shared/office-environment.js";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { NetworkRouteSnapshot } from "./network-route-manager.js";
@@ -63,6 +64,87 @@ export class RuntimeControlClient {
     if (body.base_url !== this.baseUrl) {
       throw new Error(`base_url mismatch: ${body.base_url} != ${this.baseUrl}`);
     }
+  }
+
+  async inspectCLIInstallation(component: string): Promise<{ executablePath: string; version: string; healthy: boolean } | null> {
+    const response = await fetch(`${this.baseUrl}/v1/control/environments/components/${encodeURIComponent(component)}`, { headers: { Authorization: `Bearer ${this.token}` } });
+    if (!response.ok) throw new Error("运行组件登记无法读取，请稍后重试");
+    return (await response.json() as { installation: { executablePath: string; version: string; healthy: boolean } | null }).installation;
+  }
+
+  async reserveEnvironmentComponentRemoval(component: string): Promise<string> {
+    const response = await fetch(`${this.baseUrl}/v1/control/environments/components/${encodeURIComponent(component)}/removal`, { method: "POST", headers: { Authorization: `Bearer ${this.token}`, "Content-Type": "application/json" }, body: JSON.stringify({ pid: process.pid }) });
+    if (!response.ok) throw new Error("运行组件仍被任务或服务使用，请稍后卸载");
+    return (await response.json() as { removal_token: string }).removal_token;
+  }
+
+  async releaseEnvironmentComponentRemoval(component: string, token: string): Promise<void> {
+    const response = await fetch(`${this.baseUrl}/v1/control/environments/components/${encodeURIComponent(component)}/removal`, { method: "DELETE", headers: { Authorization: `Bearer ${this.token}`, "X-Awaken-Removal-Token": token } });
+    if (!response.ok) throw new Error("共享组件卸载占用释放失败，请重试");
+  }
+
+  async holdEnvironmentExecutable(executable: string, removalToken?: string): Promise<string> {
+    const response = await fetch(`${this.baseUrl}/v1/control/environments/host-leases`, { method: "POST", headers: { Authorization: `Bearer ${this.token}`, "Content-Type": "application/json" }, body: JSON.stringify({ executable, pid: process.pid, removal_token: removalToken }) });
+    if (!response.ok) throw new Error("运行组件当前不可用或正在卸载");
+    const { reference } = await response.json() as { reference: string };
+    return reference;
+  }
+
+  async releaseEnvironmentExecutable(reference: string): Promise<void> {
+    if (!reference) return;
+    const released = await fetch(`${this.baseUrl}/v1/control/environments/host-leases/${encodeURIComponent(reference)}`, { method: "DELETE", headers: { Authorization: `Bearer ${this.token}` } });
+    if (!released.ok) throw new Error("共享组件使用记录释放失败");
+  }
+
+  async removeEnvironmentComponent(component: string, removalToken?: string): Promise<void> {
+    const response = await fetch(`${this.baseUrl}/v1/control/environments/components/${encodeURIComponent(component)}`, { method: "DELETE", headers: { Authorization: `Bearer ${this.token}`, ...(removalToken ? { "X-Awaken-Removal-Token": removalToken } : {}) } });
+    if (!response.ok) throw new Error(`共享运行组件卸载失败 (${response.status})`);
+  }
+
+  async prepareEnvironment(capability: string, signal: AbortSignal, progress?: (message: string) => void): Promise<{ environment_ref: string; instance_id: string; executables: Record<string, { executable: string; args?: string[] }> }> {
+    return this.streamEnvironment<{ environment_ref: string; instance_id: string; executables: Record<string, { executable: string; args?: string[] }> }>("prepare", { capability }, signal, (operation) => progress?.(operation.message));
+  }
+
+  async getOfficeEnvironment(): Promise<OfficeEnvironmentStatus> {
+    const response = await fetch(`${this.baseUrl}/v1/control/environments/office`, {
+      headers: { Authorization: `Bearer ${this.token}` }, signal: AbortSignal.timeout(30000),
+    });
+    if (!response.ok) throw new Error(`无法读取办公环境状态 (${response.status})`);
+    return response.json() as Promise<OfficeEnvironmentStatus>;
+  }
+
+  async prepareOfficeEnvironment(action: "prepare" | "repair", expectedInstanceId: string | undefined, signal: AbortSignal, progress: (operation: OfficeEnvironmentOperation) => void): Promise<void> {
+    await this.streamEnvironment<void>(`office/${action}`, action === "repair" ? { expected_instance_id: expectedInstanceId } : {}, signal, progress);
+  }
+
+  private async streamEnvironment<T>(path: string, body: object, signal: AbortSignal, progress?: (operation: OfficeEnvironmentOperation) => void): Promise<T> {
+    const response = await fetch(`${this.baseUrl}/v1/control/environments/${path}`, {
+      method: "POST", signal,
+      headers: { Authorization: `Bearer ${this.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok || !response.body) throw new Error(`环境准备服务不可用 (${response.status})`);
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let pending = "";
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        pending += decoder.decode(value, { stream: !done });
+        if (pending.length > 1024 * 1024) throw new Error("环境准备响应过大");
+        let newline: number;
+        while ((newline = pending.indexOf("\n")) >= 0) {
+          const line = pending.slice(0, newline); pending = pending.slice(newline + 1);
+          if (!line.trim()) continue;
+          const item = JSON.parse(line);
+          if (item.type === "error") throw new Error(`${item.code}: ${item.message}`);
+          if (item.type === "progress") progress?.(item.operation);
+          if (item.type === "ready") return item.binding;
+        }
+        if (done) break;
+      }
+      throw new Error("环境准备连接中断，请重试");
+    } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
   }
 
   async updateNetworkRoute(snapshot: NetworkRouteSnapshot): Promise<NetworkRouteSnapshot> {

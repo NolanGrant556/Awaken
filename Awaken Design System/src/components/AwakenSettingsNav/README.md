@@ -5,3 +5,5 @@
 `AwakenSettingsNavItems` 是这些分区及其 concept 图标的唯一定义，Desktop 直接消费它而不自行追加条目；`AwakenSettings` 的右侧一级标题也从当前 item 继承同一 concept，不维护第二张图标表。Hook 状态/信任/详情面板和 ACP runner 列表/编辑表单由 Desktop 拥有，设计系统只拥有它们的导航入口。
 
 条目可声明可选的 `groupLabel`：当某一项的 `groupLabel` 与前一项不同，组件在该条目上方渲染分组标题。导航容器是 `role="tablist"`，分组标题以 `role="presentation"` 的纯文本渲染，不是 tab、也不进入 tab 语义；Desktop 不允许在导航旁手工插入第二份分组条目。
+
+环境管理导航进入 Desktop 管理页；状态、请求和取消归 Desktop，设计系统只提供导航与纯展示组件。

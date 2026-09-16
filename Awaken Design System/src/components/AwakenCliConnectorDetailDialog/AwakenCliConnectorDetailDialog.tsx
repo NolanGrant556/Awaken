@@ -118,7 +118,8 @@ export function AwakenCliConnectorDetailDialog({
         : readiness.install === "installed"
           ? readiness.safeErrorMessage || "运行组件与官方技能已安装，当前未授权"
           : readiness.safeErrorMessage || "尚未安装";
-  const progress = Math.max(0, Math.min(100, installProgress?.percent ?? 0));
+  const progress = typeof installProgress?.percent === "number" && Number.isFinite(installProgress.percent)
+    ? Math.max(0, Math.min(100, installProgress.percent)) : undefined;
   const actionable = action !== "unsupported";
 
   function handleOpenChange(nextOpen: boolean): void {
@@ -214,9 +215,9 @@ export function AwakenCliConnectorDetailDialog({
           <div className="aw-cli-connector-detail__progress" aria-live="polite">
             <div className="aw-cli-connector-detail__progress-copy">
               <span>{status}</span>
-              <strong>{progress}%</strong>
+              {progress !== undefined ? <strong>{progress}%</strong> : null}
             </div>
-            <div
+            {progress !== undefined ? <div
               className="aw-cli-connector-detail__progress-track"
               role="progressbar"
               aria-label={`${displayName} 安装进度`}
@@ -225,7 +226,7 @@ export function AwakenCliConnectorDetailDialog({
               aria-valuenow={progress}
             >
               <span style={{ width: `${progress}%` }} />
-            </div>
+            </div> : null}
             <p>将同步安装所需组件与官方技能</p>
           </div>
         ) : connected ? (

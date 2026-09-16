@@ -93,6 +93,19 @@ describe("CliConnectorDetailDialog", () => {
     }))).toBe("logout");
   });
 
+  it("shows an unknown shared preparation duration without inventing a percentage", async () => {
+    await act(async () => {
+      root.render(<CliConnectorDetailDialog open connector={connector}
+        readiness={readiness({ install: "installing", overall: "working" })}
+        installProgress={{ phase: "preparing", label: "正在准备运行组件" }}
+        onOpenChange={vi.fn()} onAction={vi.fn()} />);
+    });
+    expect(document.body.textContent).toContain("正在准备运行组件");
+    expect(document.body.textContent).not.toContain("%");
+    expect(document.querySelector('[role="progressbar"]')).toBeNull();
+    expect(document.body.textContent).toContain("取消安装");
+  });
+
   it("lets the user cancel authorization while the external browser is waiting", async () => {
     const onAction = vi.fn();
     await act(async () => {

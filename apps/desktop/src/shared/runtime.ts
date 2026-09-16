@@ -1,3 +1,4 @@
+import type { OfficeEnvironmentBridge } from "./office-environment.js";
 import type { DesktopRequestResult } from "./runtime-request.js";
 import type { AguiEvent, InstructionSnapshotSummary } from "./agui.js";
 import type { DesktopUpdateSnapshot } from "./desktop-update.js";
@@ -822,7 +823,7 @@ export type CliInstallPhase =
 
 export type CliInstallProgress = {
   phase: CliInstallPhase;
-  percent: number;
+  percent?: number;
   label: string;
 };
 
@@ -2581,7 +2582,7 @@ export type ScheduledTaskExecutionListWire = {
   executions: ScheduledTaskExecutionWire[];
 };
 
-export type AwakenBridge = {
+export type AwakenBridge = OfficeEnvironmentBridge & {
   platform: DesktopPlatform;
   onSelectAllRequested: (callback: () => void) => () => void;
   relaunchDesktop: () => Promise<void>;

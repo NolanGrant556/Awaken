@@ -10,6 +10,12 @@ context: inline
 
 创建便携 Agent Plugins 1.0.0：根 plugin.json、可选 skills/ 与 mcp.json。插件是包管理与来源容器，Skill/MCP 执行仍由宿主已有 runtime 拥有；本 Skill 的创作范围不等于其他方言的全部产品能力。
 
+## 共享执行环境
+
+执行 helper 前，通过 `tool_find` 找到 `load_workspace_dependencies`，以 `{}` 取得整套办公环境。每次 Bash 显式传入本 Agent 的 `environment_ref`，使用返回的解释器与启动参数；切换 Python/Node 或项目复用底层安装，各任务取得自己的引用。
+
+缺失或损坏时由同一入口准备或恢复。失败如实报告原因，不改用系统软件、`ensure_environment` 或项目/全局安装补齐办公包。环境、文件内容、结构、视觉与发布分别验收。
+
 ## 按需路线
 
 - 设计完整 Skill 与 MCP 边界：读 [包设计](references/package-authoring.md)。Skill 入口只保留目标、路由与关键约束；条件性内容进入 references/，实际重复逻辑进入 scripts/，交付底稿进入 assets/。

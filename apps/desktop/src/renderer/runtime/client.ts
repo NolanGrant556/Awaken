@@ -1,3 +1,4 @@
+import type { OfficeEnvironmentBridge } from "../../shared/office-environment.js";
 import { runtimeRequestIssue, unwrapRuntimeRequest } from "../../shared/runtime-request";
 import { reconnectingSubscription } from "./reconnecting-subscription";
 import { threadActivitySubscriber } from "./activity-client";
@@ -223,7 +224,7 @@ async function unwrapDesktopOperation<T>(
   throw error;
 }
 
-export type RuntimeClient = {
+export type RuntimeClient = OfficeEnvironmentBridge & {
   source: "electron";
   platform: DesktopPlatform;
   relaunchDesktop: () => Promise<void>;
@@ -581,6 +582,10 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     platform: bridge.platform,
     relaunchDesktop: () => bridge.relaunchDesktop(),
     getRuntimeInfo: () => bridge.getRuntimeInfo(),
+    getOfficeEnvironment: () => bridge.getOfficeEnvironment(),
+    prepareOfficeEnvironment: (request) => bridge.prepareOfficeEnvironment(request),
+    cancelOfficeEnvironment: (id) => bridge.cancelOfficeEnvironment(id),
+    onOfficeEnvironmentProgress: (callback) => bridge.onOfficeEnvironmentProgress(callback),
     getSearchSettings: () => bridge.getSearchSettings(),
     saveSearchSettings: (request) => bridge.saveSearchSettings(request),
     testSearchProvider: (request) => bridge.testSearchProvider(request),

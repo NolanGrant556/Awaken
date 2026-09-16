@@ -9,6 +9,12 @@ user-invocable: true
 
 `Read` 负责阅读；Bash 与包内脚本负责用户需要的 PDF 加工。只读任务回答问题并说明页码范围即可；生成／修改文件才执行输出校验与 `artifact_publish`。
 
+## 共享执行环境
+
+执行 helper 前，通过 `tool_find` 找到 `load_workspace_dependencies`，以 `{}` 取得整套办公环境。每次 Bash 显式传入本 Agent 的 `environment_ref`，使用返回的解释器与启动参数；切换 Python/Node 或项目复用底层安装，各任务取得自己的引用。
+
+缺失或损坏时由同一入口准备或恢复。失败如实报告原因，不改用系统软件、`ensure_environment` 或项目/全局安装补齐办公包。环境、文件内容、结构、视觉与发布分别验收。
+
 ## 阅读与能力边界
 
 先 `Read` 目标 PDF。若返回 `model_pdf_unsupported` / `unsupported_media`，立即停止阅读／摘要／看图任务，请用户切换到支持原生 PDF 或视觉的模型。禁止通过 Bash 抽文、pip/uv/venv、Poppler/OCR 或其他 Office Skill 绕过该边界。

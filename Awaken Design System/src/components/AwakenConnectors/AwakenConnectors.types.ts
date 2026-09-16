@@ -59,7 +59,7 @@ export type AwakenCliAuthSession = {
 };
 
 export type AwakenCliInstallProgress = {
-  percent: number;
+  percent?: number;
   label: string;
 };
 

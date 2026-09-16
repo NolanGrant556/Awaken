@@ -8,9 +8,10 @@ import importlib.util
 import json
 import os
 import platform
-import shutil
 import sys
 from pathlib import Path
+
+from office_runtime import find_office_command
 
 
 ROUTE_NAMES = ("read_precise", "read_quick", "clean", "create_edit", "recalc")
@@ -19,34 +20,20 @@ MINIMUM_PYTHON = (3, 9)
 
 def command_path(*names: str) -> str | None:
     for name in names:
-        found = shutil.which(name)
+        found = find_office_command(name)
         if found:
-            return str(Path(found).resolve())
+            return str(found)
     return None
 
 
 def libreoffice_path() -> str | None:
-    found = command_path("soffice", "libreoffice")
-    if found:
-        return found
-    if platform.system() == "Darwin":
-        candidate = Path("/Applications/LibreOffice.app/Contents/MacOS/soffice")
-        return str(candidate) if candidate.is_file() else None
-    if platform.system() == "Windows":
-        for env_name in ("PROGRAMFILES", "PROGRAMFILES(X86)"):
-            base = os.environ.get(env_name)
-            if not base:
-                continue
-            candidate = Path(base) / "LibreOffice" / "program" / "soffice.exe"
-            if candidate.is_file():
-                return str(candidate)
-    return None
+    return command_path("soffice")
 
 
 def capability(available: bool, path: str | Path | None = None, **details) -> dict:
     result = {"available": bool(available)}
     if path:
-        result["path"] = str(Path(path).resolve())
+        result["path"] = str(Path(path).absolute())
     result.update(details)
     return result
 
@@ -62,7 +49,7 @@ def required_route(capabilities: dict, required: list[str]) -> dict:
 
 def inspect(route: str | None = None, dependency_root: Path | None = None) -> dict:
     script_dir = Path(__file__).resolve().parent
-    dependency_root = (dependency_root or Path.cwd()).resolve()
+    dependency_root = Path(os.environ["AWAKEN_NODE_PACKAGE_ROOT"]).resolve() if os.environ.get("AWAKEN_NODE_PACKAGE_ROOT") else (dependency_root or Path.cwd()).resolve()
     python_compatible = sys.version_info[:2] >= MINIMUM_PYTHON
     office_path = libreoffice_path()
     bundled_paths = {
@@ -109,10 +96,10 @@ def inspect(route: str | None = None, dependency_root: Path | None = None) -> di
     }
     all_hints = {
         "python": "使用 Python 3.9 或更高版本执行 Excel Skill",
-        "openpyxl": "在工作区 venv 中安装 openpyxl",
-        "pandas": "在工作区 venv 中安装 pandas",
-        "markitdown": "在工作区 venv 中安装 markitdown[xlsx]",
-        "libreoffice": "使用 Awaken 可用安装计划或系统包管理器安装 LibreOffice",
+        "openpyxl": "调用 load_workspace_dependencies，输入 {}",
+        "pandas": "调用 load_workspace_dependencies，输入 {}",
+        "markitdown": "调用 load_workspace_dependencies，输入 {}",
+        "libreoffice": "调用 load_workspace_dependencies，输入 {}",
     }
     return {
         "status": "ready" if not unavailable_routes else "partial",
@@ -126,6 +113,7 @@ def inspect(route: str | None = None, dependency_root: Path | None = None) -> di
             for name in sorted(blocking_missing)
             if name in all_hints
         },
+        "environment_ref": os.environ.get("AWAKEN_ENVIRONMENT_REF"),
         "execution_plan": {
             "dependency_root": str(dependency_root),
             **{

@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { app } from "electron";
 import { resolveSystemSkillsTargetRoot } from "./system-skills-importer.js";
 import { RuntimeControlClient, type RuntimeManifest } from "./runtime-control.js";
+import { acceptanceChildEnvironment } from "./acceptance-environment.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -453,12 +454,16 @@ export class RuntimeSupervisor {
           env: {
             ...runtimeEnvironment,
             ...productEnvironment,
+            ...acceptanceChildEnvironment({ root: process.env.AWAKEN_DESKTOP_ACCEPTANCE_ROOT, dev: process.argv.includes("--dev"), packaged: app.isPackaged }),
             AWAKEN_CORE_ADDR: `127.0.0.1:${port}`,
             AWAKEN_USER_DATA_DIR: app.getPath("userData"),
             // Business data root shared by dev and packaged installs. Main
             // resolves the user home itself; inherited shell values must not
             // change the product identity.
             AWAKEN_HOME: join(app.getPath("home"), ".awaken"),
+            // Only an explicit development acceptance root may select a fixture catalog.
+            AWAKEN_ENVIRONMENT_CATALOG: process.argv.includes("--dev") && !app.isPackaged && process.env.AWAKEN_DESKTOP_ACCEPTANCE_ROOT
+              ? join(process.env.AWAKEN_DESKTOP_ACCEPTANCE_ROOT, "catalog.json") : "",
             // Bundled Skills are product-owned. Login shell configuration may
             // not replace the synchronized Desktop source identity.
             AWAKEN_BUNDLED_SKILL_DIRS: resolveSystemSkillsTargetRoot(

@@ -17,11 +17,16 @@ import (
 // target must not replace its lock. Lock files remain until OS temp cleanup;
 // unlinking them on release would let waiters lock different inodes.
 func WithPathLock(ctx context.Context, path string, write func() error) error {
+	return WithPathLockAt(ctx, filepath.Join(os.TempDir(), fmt.Sprintf("awaken-file-locks-%d", os.Getuid())), path, write)
+}
+
+// WithPathLockAt uses a caller-owned persistent lock directory. All writers
+// sharing a store must use the same directory, including across launch modes.
+func WithPathLockAt(ctx context.Context, dir, path string, write func() error) error {
 	key, err := pathLockIdentity(path)
 	if err != nil {
 		return err
 	}
-	dir := filepath.Join(os.TempDir(), fmt.Sprintf("awaken-file-locks-%d", os.Getuid()))
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}

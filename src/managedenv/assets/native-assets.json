@@ -1,0 +1,398 @@
+{
+  "schema_version": 1,
+  "release": "deps-2026.09.15.1",
+  "published": false,
+  "entries": [
+    {
+      "component": "ffmpeg",
+      "version": "9.0.1",
+      "target": "darwin-arm64",
+      "source": "https://github.com/conda-forge/ffmpeg-feedstock",
+      "license": "LGPL-3.0-or-later",
+      "dynamic_libraries": {},
+      "pe_validation": null,
+      "probe_output": "ffmpeg version 9.0.1 Copyright (c) 2000-2026 the FFmpeg developers\nbuilt with clang version 21.1.8\nconfiguration: --prefix=/Users/runner/miniforge3/conda-bld/ffmpeg_1788401094454/_h_env_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_pl --cc=arm64-apple-darwin20.0.0-clang --cxx=arm64-apple-darwin20.0.0-clang++ --nm=arm64-apple-darwin20.0.0-nm --ar=arm64-apple-darwin20.0.0-ar --disable-doc --enable-openssl --enable-demuxer=dash --enable-hardcoded-tables --enable-libfreetype --enable-libharfbuzz --enable-libfontconfig --enable-libopenh264 --enable-libdav1d --enable-cross-compile --arch=arm64 --target-os=darwin --cross-prefix=arm64-apple-darwin20.0.0- --host-cc=/Users/runner/miniforge3/conda-bld/ffmpeg_1788401094454/_build_env/bin/x86_64-apple-darwin13.4.0-clang --enable-neon --disable-gnutls --enable-libvpx --enable-libass --enable-libplacebo --enable-pthreads --enable-libopenvino --disable-gpl --enable-libmp3lame --enable-libaom --enable-libsvtav1 --enable-libxml2 --enable-pic --enable-shared --disable-static --enable-version3 --enable-zlib --enable-libvorbis --enable-libopus --enable-librsvg --enable-libjxl --enable-libwebp --enable-ffplay --enable-vulkan --pkg-config=/Users/runner/miniforge3/conda-bld/ffmpeg_1788401094454/_build_env/bin/pkg-config\nlibavutil      61.  1.101 / 61.  1.101\nlibavcodec     63.  1.101 / 63.  1.101\nlibavformat    63.  1.101 / 63.  1.101\nlibavdevice    63.  1.101 / 63.  1.101\nlibavfilter    12.  1.101 / 12.  1.101\nlibswscale     10.  1.101 / 10.  1.101\nlibswresample   7.  1.101 /  7.  1.101\n\nExiting with exit code 0",
+      "native_execution_verified": true,
+      "asset": {
+        "url": "https://github.com/NolanGrant556/Awaken-Releases/releases/download/deps-2026.09.15.1/ffmpeg-9.0.1-darwin-arm64.tar.gz",
+        "sha256": "f177faf1baa69fa3a4965ba14cad95df0a9a464582760d6bb632714e78774f33",
+        "format": "tar.gz",
+        "executables": {
+          "ffmpeg": "bin/ffmpeg",
+          "ffprobe": "bin/ffprobe"
+        },
+        "max_bytes": 121393373
+      },
+      "probe": "ffmpeg",
+      "probe_args": [
+        "-version"
+      ]
+    },
+    {
+      "component": "ffmpeg",
+      "version": "9.0.1",
+      "target": "darwin-x64",
+      "source": "https://github.com/conda-forge/ffmpeg-feedstock",
+      "license": "LGPL-3.0-or-later",
+      "dynamic_libraries": {},
+      "pe_validation": null,
+      "probe_output": null,
+      "native_execution_verified": false,
+      "asset": {
+        "url": "https://github.com/NolanGrant556/Awaken-Releases/releases/download/deps-2026.09.15.1/ffmpeg-9.0.1-darwin-x64.tar.gz",
+        "sha256": "6a10235edd42ee50c23e272eade7e225f310daca5a99cd501658e1ddb03af6a0",
+        "format": "tar.gz",
+        "executables": {
+          "ffmpeg": "bin/ffmpeg",
+          "ffprobe": "bin/ffprobe"
+        },
+        "max_bytes": 94916167
+      },
+      "probe": "ffmpeg",
+      "probe_args": [
+        "-version"
+      ]
+    },
+    {
+      "component": "ffmpeg",
+      "version": "9.0.1",
+      "target": "windows-x64",
+      "source": "https://github.com/conda-forge/ffmpeg-feedstock",
+      "license": "LGPL-3.0-or-later",
+      "dynamic_libraries": {},
+      "pe_validation": {
+        "architecture": "windows-x64",
+        "native_execution_verified": false,
+        "files_checked": 64,
+        "windows_media_features": [],
+        "missing": []
+      },
+      "probe_output": null,
+      "native_execution_verified": false,
+      "asset": {
+        "url": "https://github.com/NolanGrant556/Awaken-Releases/releases/download/deps-2026.09.15.1/ffmpeg-9.0.1-windows-x64.tar.gz",
+        "sha256": "3558a808fee9aecea238b3b80d70cee35c8ab5e0050ada5c44b9fd3f52072a9d",
+        "format": "tar.gz",
+        "executables": {
+          "ffmpeg": "Library/bin/ffmpeg.exe",
+          "ffprobe": "Library/bin/ffprobe.exe"
+        },
+        "max_bytes": 135492499
+      },
+      "probe": "ffmpeg",
+      "probe_args": [
+        "-version"
+      ]
+    },
+    {
+      "component": "git",
+      "version": "2.55.0",
+      "target": "darwin-arm64",
+      "source": "https://www.kernel.org/pub/software/scm/git/git-2.55.0.tar.xz",
+      "license": "GPL-2.0-only",
+      "dynamic_libraries": {},
+      "pe_validation": null,
+      "probe_output": "git version 2.55.0",
+      "native_execution_verified": true,
+      "asset": {
+        "url": "https://github.com/NolanGrant556/Awaken-Releases/releases/download/deps-2026.09.15.1/git-2.55.0-darwin-arm64.tar.gz",
+        "sha256": "2c416d729269c67f2ddca8ac62a904e5cc33a1f375e82092116d191b9ac68f86",
+        "format": "tar.gz",
+        "executables": {
+          "git": "bin/git",
+          "git-remote-https": "libexec/git-core/git-remote-https"
+        },
+        "max_bytes": 300446578
+      },
+      "probe": "git",
+      "probe_args": [
+        "--version"
+      ]
+    },
+    {
+      "component": "git",
+      "version": "2.55.0",
+      "target": "darwin-x64",
+      "source": "https://www.kernel.org/pub/software/scm/git/git-2.55.0.tar.xz",
+      "license": "GPL-2.0-only",
+      "dynamic_libraries": {},
+      "pe_validation": null,
+      "probe_output": null,
+      "native_execution_verified": false,
+      "asset": {
+        "url": "https://github.com/NolanGrant556/Awaken-Releases/releases/download/deps-2026.09.15.1/git-2.55.0-darwin-x64.tar.gz",
+        "sha256": "7fca49ebd58b34ceee2ed49a89921343c203c9c890d7a025b735e24bc09c1f43",
+        "format": "tar.gz",
+        "executables": {
+          "git": "bin/git",
+          "git-remote-https": "libexec/git-core/git-remote-https"
+        },
+        "max_bytes": 319324097
+      },
+      "probe": "git",
+      "probe_args": [
+        "--version"
+      ]
+    },
+    {
+      "component": "libreoffice",
+      "version": "26.2.2.2",
+      "target": "darwin-arm64",
+      "source": "https://downloadarchive.documentfoundation.org/libreoffice/old/26.2.2.2/mac/aarch64/LibreOffice_26.2.2.2_MacOS_aarch64.dmg",
+      "license": "MPL-2.0",
+      "dynamic_libraries": {},
+      "pe_validation": null,
+      "probe_output": "LibreOffice 26.2.2.2 1f77d10d6938fd34972958f64b2bcfa54f8b1ba5",
+      "native_execution_verified": true,
+      "asset": {
+        "url": "https://github.com/NolanGrant556/Awaken-Releases/releases/download/deps-2026.09.15.1/libreoffice-26.2.2.2-darwin-arm64.tar.gz",
+        "sha256": "9338d12d82c024906f6f5999cf83324bf7437324326835caf7af5fea158c20cd",
+        "format": "tar.gz",
+        "executables": {
+          "soffice": "Contents/MacOS/soffice"
+        },
+        "max_bytes": 288287446
+      },
+      "probe": "soffice",
+      "probe_args": [
+        "--version"
+      ]
+    },
+    {
+      "component": "libreoffice",
+      "version": "26.2.2.2",
+      "target": "darwin-x64",
+      "source": "https://downloadarchive.documentfoundation.org/libreoffice/old/26.2.2.2/mac/x86_64/LibreOffice_26.2.2.2_MacOS_x86-64.dmg",
+      "license": "MPL-2.0",
+      "dynamic_libraries": {},
+      "probe_output": null,
+      "native_execution_verified": false,
+      "asset": {
+        "url": "https://github.com/NolanGrant556/Awaken-Releases/releases/download/deps-2026.09.15.1/libreoffice-26.2.2.2-darwin-x64.tar.gz",
+        "sha256": "cf0f0b281d0668e960366385cc8b1e21e4ee5141216e0f205a4e7e529de2d411",
+        "format": "tar.gz",
+        "executables": {
+          "soffice": "Contents/MacOS/soffice"
+        },
+        "max_bytes": 298531789
+      },
+      "probe": "soffice",
+      "probe_args": [
+        "--version"
+      ]
+    },
+    {
+      "component": "libreoffice",
+      "version": "26.2.2.2",
+      "target": "windows-x64",
+      "source": "https://downloadarchive.documentfoundation.org/libreoffice/old/26.2.2.2/win/x86_64/LibreOffice_26.2.2.2_Win_x86-64.msi",
+      "license": "MPL-2.0",
+      "dynamic_libraries": {},
+      "pe_validation": {
+        "architecture": "windows-x64",
+        "native_execution_verified": false,
+        "files_checked": 57,
+        "windows_media_features": [
+          "mfplat.dll",
+          "mfplay.dll",
+          "mfreadwrite.dll"
+        ],
+        "missing": []
+      },
+      "probe_output": null,
+      "native_execution_verified": false,
+      "asset": {
+        "url": "https://github.com/NolanGrant556/Awaken-Releases/releases/download/deps-2026.09.15.1/libreoffice-26.2.2.2-windows-x64.tar.gz",
+        "sha256": "1fdd20631bb5e33698fb3ae2049e832fb7b9dfe485083f5ec34a586d8bf0c9e0",
+        "format": "tar.gz",
+        "executables": {
+          "soffice": "program/soffice.exe",
+          "soffice-bin": "program/soffice.bin"
+        },
+        "max_bytes": 474832973
+      },
+      "probe": "soffice",
+      "probe_args": [
+        "--version"
+      ]
+    },
+    {
+      "component": "poppler",
+      "version": "26.09.0",
+      "target": "darwin-arm64",
+      "source": "https://github.com/conda-forge/poppler-feedstock",
+      "license": "GPL-2.0-or-later; see bundled dependency notices",
+      "dynamic_libraries": {},
+      "probe_output": "pdftoppm version 26.09.0\nCopyright 2005-2026 The Poppler Developers - http://poppler.freedesktop.org\nCopyright 1996-2011, 2022 Glyph & Cog, LLC",
+      "native_execution_verified": true,
+      "asset": {
+        "url": "https://github.com/NolanGrant556/Awaken-Releases/releases/download/deps-2026.09.15.1/poppler-26.09.0-darwin-arm64.tar.gz",
+        "sha256": "b30642d05a1fe1e65e3b3e0042f9326aeb3d2abb77cfde81f67151963eac552c",
+        "format": "tar.gz",
+        "executables": {
+          "pdftoppm": "bin/pdftoppm",
+          "pdfinfo": "bin/pdfinfo",
+          "pdftotext": "bin/pdftotext"
+        },
+        "max_bytes": 57512626
+      },
+      "probe": "pdftoppm",
+      "probe_args": [
+        "-v"
+      ]
+    },
+    {
+      "component": "poppler",
+      "version": "26.09.0",
+      "target": "darwin-x64",
+      "source": "https://github.com/conda-forge/poppler-feedstock",
+      "license": "GPL-2.0-or-later; see bundled dependency notices",
+      "dynamic_libraries": {},
+      "probe_output": null,
+      "native_execution_verified": false,
+      "asset": {
+        "url": "https://github.com/NolanGrant556/Awaken-Releases/releases/download/deps-2026.09.15.1/poppler-26.09.0-darwin-x64.tar.gz",
+        "sha256": "d53d4ac097e3d50240cec1b1e64aa6e9ff9eeec9e1693f715a472cfa71ac2c38",
+        "format": "tar.gz",
+        "executables": {
+          "pdftoppm": "bin/pdftoppm",
+          "pdfinfo": "bin/pdfinfo",
+          "pdftotext": "bin/pdftotext"
+        },
+        "max_bytes": 59185943
+      },
+      "probe": "pdftoppm",
+      "probe_args": [
+        "-v"
+      ]
+    },
+    {
+      "component": "poppler",
+      "version": "26.09.0",
+      "target": "windows-x64",
+      "source": "https://github.com/conda-forge/poppler-feedstock",
+      "license": "GPL-2.0-or-later; see bundled dependency notices",
+      "dynamic_libraries": {},
+      "pe_validation": {
+        "architecture": "windows-x64",
+        "native_execution_verified": false,
+        "files_checked": 24,
+        "windows_media_features": [],
+        "missing": []
+      },
+      "probe_output": null,
+      "native_execution_verified": false,
+      "asset": {
+        "url": "https://github.com/NolanGrant556/Awaken-Releases/releases/download/deps-2026.09.15.1/poppler-26.09.0-windows-x64.tar.gz",
+        "sha256": "4288a243f1c3d0d942341c0ed11490af373e1e1776dd060cdb5346c4c98f0943",
+        "format": "tar.gz",
+        "executables": {
+          "pdftoppm": "Library/bin/pdftoppm.exe",
+          "pdfinfo": "Library/bin/pdfinfo.exe",
+          "pdftotext": "Library/bin/pdftotext.exe"
+        },
+        "max_bytes": 76195832
+      },
+      "probe": "pdftoppm",
+      "probe_args": [
+        "-v"
+      ]
+    },
+    {
+      "component": "tesseract",
+      "version": "5.5.3",
+      "target": "darwin-arm64",
+      "source": "https://github.com/conda-forge/tesseract-feedstock",
+      "license": "Apache-2.0",
+      "dynamic_libraries": {},
+      "pe_validation": null,
+      "probe_output": "tesseract 5.5.3\n leptonica-1.87.0\n  libgif 5.2.2 : libjpeg 8d (libjpeg-turbo 3.1.2) : libpng 1.6.58 : libtiff 4.7.2 : zlib 1.3.2 : libwebp 1.6.0 : libopenjp2 2.5.4\n Found NEON\n Found OpenMP 202011\n Found libarchive 3.8.9 zlib/1.3.2 liblzma/5.8.3 bz2lib/1.0.8 liblz4/1.10.0 libzstd/1.5.7 liblzo2/2.10 CommonCrypto/system libb2/bundled\n Found libcurl/8.22.0 OpenSSL/3.6.4 zlib/1.3.2 zstd/1.5.7 libpsl/0.23.1 libssh2/1.11.1 nghttp2/1.68.1 mit-krb5/1.22.2",
+      "native_execution_verified": true,
+      "asset": {
+        "url": "https://github.com/NolanGrant556/Awaken-Releases/releases/download/deps-2026.09.15.1/tesseract-5.5.3-darwin-arm64.tar.gz",
+        "sha256": "515a69fd291f52c54989030c8f6470be8cbfdd2bc6f4168166c72b166aa07af5",
+        "format": "tar.gz",
+        "executables": {
+          "tesseract": "bin/tesseract"
+        },
+        "max_bytes": 51268218,
+        "resources": {
+          "ocr_chi_sim": "share/tessdata/chi_sim.traineddata",
+          "ocr_chi_tra": "share/tessdata/chi_tra.traineddata",
+          "ocr_eng": "share/tessdata/eng.traineddata",
+          "ocr_osd": "share/tessdata/osd.traineddata"
+        }
+      },
+      "probe": "tesseract",
+      "probe_args": [
+        "--version"
+      ]
+    },
+    {
+      "component": "tesseract",
+      "version": "5.5.3",
+      "target": "darwin-x64",
+      "source": "https://github.com/conda-forge/tesseract-feedstock",
+      "license": "Apache-2.0",
+      "dynamic_libraries": {},
+      "pe_validation": null,
+      "probe_output": null,
+      "native_execution_verified": false,
+      "asset": {
+        "url": "https://github.com/NolanGrant556/Awaken-Releases/releases/download/deps-2026.09.15.1/tesseract-5.5.3-darwin-x64.tar.gz",
+        "sha256": "000c3ec64e2098da84faa7f64dd9872eaf3941822596d32f54c1a256525b86c6",
+        "format": "tar.gz",
+        "executables": {
+          "tesseract": "bin/tesseract"
+        },
+        "max_bytes": 52077579,
+        "resources": {
+          "ocr_chi_sim": "share/tessdata/chi_sim.traineddata",
+          "ocr_chi_tra": "share/tessdata/chi_tra.traineddata",
+          "ocr_eng": "share/tessdata/eng.traineddata",
+          "ocr_osd": "share/tessdata/osd.traineddata"
+        }
+      },
+      "probe": "tesseract",
+      "probe_args": [
+        "--version"
+      ]
+    },
+    {
+      "component": "tesseract",
+      "version": "5.5.3",
+      "target": "windows-x64",
+      "source": "https://github.com/conda-forge/tesseract-feedstock",
+      "license": "Apache-2.0",
+      "dynamic_libraries": {},
+      "pe_validation": {
+        "architecture": "windows-x64",
+        "native_execution_verified": false,
+        "files_checked": 31,
+        "windows_media_features": [],
+        "missing": []
+      },
+      "probe_output": null,
+      "native_execution_verified": false,
+      "asset": {
+        "url": "https://github.com/NolanGrant556/Awaken-Releases/releases/download/deps-2026.09.15.1/tesseract-5.5.3-windows-x64.tar.gz",
+        "sha256": "e280aa9544af91a675ffe7c00d75ddbad88e247ee0b215e5d83ed8612ea69c03",
+        "format": "tar.gz",
+        "executables": {
+          "tesseract": "Library/bin/tesseract.exe"
+        },
+        "max_bytes": 66120594,
+        "resources": {
+          "ocr_chi_sim": "share/tessdata/chi_sim.traineddata",
+          "ocr_chi_tra": "share/tessdata/chi_tra.traineddata",
+          "ocr_eng": "share/tessdata/eng.traineddata",
+          "ocr_osd": "share/tessdata/osd.traineddata"
+        }
+      },
+      "probe": "tesseract",
+      "probe_args": [
+        "--version"
+      ]
+    }
+  ]
+}

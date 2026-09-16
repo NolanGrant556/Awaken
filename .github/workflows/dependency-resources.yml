@@ -1,0 +1,88 @@
+name: dependency-resources
+
+# Native bundles are produced by the pinned macOS arm64 cross-platform producer.
+# This independent workflow assembles their checksums and never touches the
+# Desktop latest.yml/latest-mac.yml stable update feed.
+on:
+  workflow_dispatch:
+    inputs:
+      artifact_run_id:
+        description: "Run containing verified managedenv-native-* bundle artifacts"
+        required: true
+        type: string
+      resource_tag:
+        description: "New immutable deps-* resource release tag"
+        required: true
+        type: string
+      publish:
+        description: "Publish to public Awaken-Releases (separate delivery action)"
+        required: true
+        default: false
+        type: boolean
+      resource_set:
+        description: "Publish fixed Office bundles or independent native extensions"
+        required: true
+        default: office
+        type: choice
+        options: [office, extensions]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: dependency-resources-${{ inputs.resource_tag }}
+  cancel-in-progress: false
+
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ inputs.artifact_run_id }}
+          github-token: ${{ github.token }}
+          pattern: ${{ inputs.resource_set == 'office' && 'managedenv-office' || 'managedenv-native-*' }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/managedenv-assets
+      - name: Assemble and verify every required release target
+        env:
+          RESOURCE_TAG: ${{ inputs.resource_tag }}
+          ASSET_DIRECTORY: ${{ runner.temp }}/managedenv-assets
+          RESOURCE_SET: ${{ inputs.resource_set }}
+        run: |
+          set -euo pipefail
+          [[ "$RESOURCE_TAG" =~ ^deps-[0-9][0-9A-Za-z.-]+$ ]]
+          if [[ "$RESOURCE_SET" == office ]]; then
+            node scripts/assemble-managedenv-catalog.mjs "$ASSET_DIRECTORY" "$ASSET_DIRECTORY/catalog.json" --office-only
+          else
+            node scripts/assemble-managedenv-catalog.mjs "$ASSET_DIRECTORY" "$ASSET_DIRECTORY/catalog.json"
+          fi
+          if [[ "$RESOURCE_SET" == office ]]; then
+            node scripts/check-managedenv-catalog.mjs "$ASSET_DIRECTORY/catalog.json" --office-release
+          else
+            node scripts/check-managedenv-catalog.mjs "$ASSET_DIRECTORY/catalog.json" --release
+          fi
+          node --input-type=module -e 'import fs from "node:fs";const dir=process.env.ASSET_DIRECTORY;for(const n of fs.readdirSync(dir).filter(n=>n.endsWith(".tar.gz.json"))){const d=JSON.parse(fs.readFileSync(dir+"/"+n));if(!d.asset.url.includes("/download/"+process.env.RESOURCE_TAG+"/"))throw Error("resource tag mismatch");if(d.component==="office-bundle"&&d.target==="darwin-arm64"&&!d.native_execution_verified)throw Error("Office native verification missing");}'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: managedenv-release
+          path: ${{ runner.temp }}/managedenv-assets
+      - name: Publish immutable dependency prerelease
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ secrets.AWAKEN_RELEASES_TOKEN }}
+          RESOURCE_TAG: ${{ inputs.resource_tag }}
+          ASSET_DIRECTORY: ${{ runner.temp }}/managedenv-assets
+        run: |
+          set -euo pipefail
+          REPOSITORY=NolanGrant556/Awaken-Releases
+          if gh release view "$RESOURCE_TAG" --repo "$REPOSITORY" >/dev/null 2>&1; then
+            echo "Resource release already exists; immutable assets cannot be replaced" >&2
+            exit 1
+          fi
+          gh release create "$RESOURCE_TAG" "$ASSET_DIRECTORY"/* --repo "$REPOSITORY" --prerelease --title "Awaken 依赖资源 $RESOURCE_TAG" --notes "固定版本的跨项目共享依赖资源。此预发布不进入 Desktop 稳定更新通道。"

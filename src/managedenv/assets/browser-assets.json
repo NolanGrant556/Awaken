@@ -1,0 +1,42 @@
+{
+  "version": "148.0.7778.178",
+  "license": "Google Chrome for Testing terms and bundled third-party notices",
+  "source": "https://developer.chrome.com/blog/chrome-for-testing",
+  "probe": "chrome",
+  "probe_args": [
+    "--version"
+  ],
+  "optional": true,
+  "assets": {
+    "darwin-arm64": {
+      "url": "https://storage.googleapis.com/chrome-for-testing-public/148.0.7778.178/mac-arm64/chrome-mac-arm64.zip",
+      "sha256": "2d6a26edcbdd39d38ddfe7a0f11cb315eea7d0c5bbf2e3200ecdaa2855bc2bf5",
+      "format": "zip",
+      "strip_prefix": "chrome-mac-arm64",
+      "executables": {
+        "chrome": "Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
+      },
+      "max_bytes": 177436423
+    },
+    "darwin-x64": {
+      "url": "https://storage.googleapis.com/chrome-for-testing-public/148.0.7778.178/mac-x64/chrome-mac-x64.zip",
+      "sha256": "75869c23d156f75e9702866b43d31a1dbc7a9f081dac4b26705c979aedc407eb",
+      "format": "zip",
+      "strip_prefix": "chrome-mac-x64",
+      "executables": {
+        "chrome": "Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
+      },
+      "max_bytes": 187914405
+    },
+    "windows-x64": {
+      "url": "https://storage.googleapis.com/chrome-for-testing-public/148.0.7778.178/win64/chrome-win64.zip",
+      "sha256": "ed2e010765f18067adbdc2f983e87111029cf0027a5647d2563ea2305a0f7ca3",
+      "format": "zip",
+      "strip_prefix": "chrome-win64",
+      "executables": {
+        "chrome": "chrome.exe"
+      },
+      "max_bytes": 190965441
+    }
+  }
+}

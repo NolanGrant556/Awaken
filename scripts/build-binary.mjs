@@ -1,10 +1,23 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "..");
+
+// Release resources are independently built and verified. A Go overlay embeds
+// their catalog without overwriting the checkout's development catalog.
+let dependencyOverlay;
+if (process.env.AWAKEN_DEPENDENCY_CATALOG) {
+  const catalog = resolve(process.env.AWAKEN_DEPENDENCY_CATALOG);
+  execFileSync(process.execPath, [join(root, "scripts/check-managedenv-catalog.mjs"), catalog, "--release"], { stdio: "inherit" });
+  const temporary = mkdtempSync(join(tmpdir(), "awaken-dependency-overlay-"));
+  dependencyOverlay = join(temporary, "overlay.json");
+  writeFileSync(dependencyOverlay, JSON.stringify({ Replace: { [join(root, "src/managedenv/assets/catalog.json")]: catalog } }));
+  process.on("exit", () => rmSync(temporary, { recursive: true, force: true }));
+}
 
 const currentTarget = `${process.platform}-${process.arch}`;
 const targets = process.env.AWAKEN_BINARY_TARGETS
@@ -26,6 +39,7 @@ if (microsoftOutlookClientId && !/^[A-Za-z0-9._-]+$/.test(microsoftOutlookClient
 
 function coreBuildArgs(outputPath) {
   const args = ["build"];
+  if (dependencyOverlay) args.push("-overlay", dependencyOverlay);
   if (microsoftOutlookClientId) {
     args.push("-ldflags", `-X=main.microsoftOutlookClientID=${microsoftOutlookClientId}`);
   }

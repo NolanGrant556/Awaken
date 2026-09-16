@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "resources": [
+    {
+      "id": "core",
+      "source": "app-bundled",
+      "owner": "desktop-release",
+      "resolver": "apps/desktop/src/main/runtime-supervisor.ts"
+    },
+    {
+      "id": "electron-browser",
+      "source": "app-bundled",
+      "owner": "desktop-release",
+      "resolver": "apps/desktop/src/main/embedded-browser/options.ts"
+    },
+    {
+      "id": "officecli",
+      "source": "app-bundled",
+      "owner": "desktop-release",
+      "resolver": "apps/desktop/src/main/officecli.ts"
+    },
+    {
+      "id": "cua-node",
+      "source": "app-bundled",
+      "owner": "desktop-release",
+      "resolver": "scripts/prepare-node-runtime.mjs"
+    },
+    {
+      "id": "official-skills",
+      "source": "app-bundled",
+      "owner": "desktop-main",
+      "resolver": "apps/desktop/src/main/index.ts"
+    },
+    {
+      "id": "cua-host",
+      "source": "app-bundled",
+      "owner": "desktop-release",
+      "resolver": "scripts/prepare-cua-driver.mjs"
+    },
+    {
+      "id": "builtin-plugins",
+      "source": "app-bundled",
+      "owner": "desktop-release",
+      "resolver": "apps/desktop/src/main/index.ts"
+    }
+  ]
+}

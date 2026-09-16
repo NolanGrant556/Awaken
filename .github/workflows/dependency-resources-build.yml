@@ -1,0 +1,88 @@
+name: dependency-resources-build
+
+on:
+  workflow_dispatch:
+    inputs:
+      resource_tag:
+        description: "New immutable deps-* dependency resource tag"
+        required: true
+        type: string
+      resource_set:
+        description: "Build fixed Office bundles or independent native extensions"
+        required: true
+        default: office
+        type: choice
+        options: [office, extensions]
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        component: ${{ fromJSON(inputs.resource_set == 'office' && '["libreoffice","poppler"]' || '["libreoffice","poppler","git","ffmpeg","tesseract"]') }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build pinned native resources outside the checkout
+        env:
+          RESOURCE_TAG: ${{ inputs.resource_tag }}
+          COMPONENT: ${{ matrix.component }}
+        run: |
+          set -euo pipefail
+          [[ "$RESOURCE_TAG" =~ ^deps-[0-9][0-9A-Za-z.-]+$ ]]
+          python3 -B scripts/build-managedenv-resources.py \
+            --work "$RUNNER_TEMP/managedenv-builder" \
+            --output "$RUNNER_TEMP/managedenv-assets" \
+            --component "$COMPONENT" \
+            --release "$RESOURCE_TAG"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: managedenv-native-${{ matrix.component }}
+          path: ${{ runner.temp }}/managedenv-assets
+          if-no-files-found: error
+          retention-days: 14
+
+  office:
+    if: inputs.resource_set == 'office'
+    needs: native
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: managedenv-native-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/office-builder/assets
+      - name: Assemble bundles and verify native macOS execution
+        env:
+          RESOURCE_TAG: ${{ inputs.resource_tag }}
+        run: |
+          set -euo pipefail
+          python3 -B scripts/build-managedenv-office.py --work "$RUNNER_TEMP/office-builder" --target all --release "$RESOURCE_TAG"
+          node scripts/assemble-managedenv-catalog.mjs "$RUNNER_TEMP/office-builder/assets" "$RUNNER_TEMP/office-builder/assets/catalog.json" --office-only
+          node scripts/check-managedenv-catalog.mjs "$RUNNER_TEMP/office-builder/assets/catalog.json" --office-release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: managedenv-office
+          path: |
+            ${{ runner.temp }}/office-builder/assets/office-*
+            ${{ runner.temp }}/office-builder/assets/catalog.json
+          if-no-files-found: error
+          retention-days: 14

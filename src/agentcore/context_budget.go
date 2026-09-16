@@ -147,3 +147,21 @@ func compactMemoryReferenceText(ref MemoryRecallSnapshotRef) string {
 	}
 	return strings.Join(parts, "\n")
 }
+
+// projectPostCompactBudget builds a disposable draft using the same V2
+// allocator as commit. It neither invokes a model nor persists/installs a
+// boundary. Preflight supplies a minimum summary; the postcondition supplies
+// the actual summary and retained tail, both including durable environment refs.
+func (r *Runner) projectPostCompactBudget(result CompactResult) (bool, CompactBudgetReceipt, error) {
+	if !contextCompactionV2Enabled() || usesLegacyContextCompactionRecorder(r.recorder) || (r.config.ModelConfig.ContextWindow <= 0 && r.config.ModelConfig.MaxInputTokens <= 0) {
+		return false, CompactBudgetReceipt{}, nil
+	}
+	bundle, err := r.buildPostCompactContextBundleV2(result, compactInvokedSkillContextBlocks(r.config.SkillContextBlocks))
+	if err != nil {
+		return true, CompactBudgetReceipt{}, err
+	}
+	if bundle.BudgetReceipt.Value == nil {
+		return true, CompactBudgetReceipt{}, fmt.Errorf("post-compact budget receipt is missing")
+	}
+	return true, *bundle.BudgetReceipt.Value, nil
+}

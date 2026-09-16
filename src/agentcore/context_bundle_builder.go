@@ -1,6 +1,7 @@
 package agentcore
 
 import (
+	"awaken/src/managedenv"
 	"errors"
 	"fmt"
 	"sort"
@@ -99,6 +100,15 @@ func (r *Runner) buildPostCompactContextBundleV2(result CompactResult, skillBloc
 		ProviderOpaqueState:    providerOpaqueSection,
 		BudgetReceipt:          NotMaterializedSection[CompactBudgetReceipt](),
 		CoverageReceipt:        coverageSection,
+	}
+	if m := managedenv.Default(); m != nil {
+		owner := managedenv.Owner{ThreadID: r.threadID, AgentID: "root"}
+		if r.config.SubagentOrigin != nil {
+			owner.AgentID = r.config.SubagentOrigin.AgentID
+		}
+		for _, b := range m.Bindings(owner) {
+			bundle.EnvironmentBindings = append(bundle.EnvironmentBindings, EnvironmentBindingRef{Reference: b.EnvironmentRef, InstanceID: b.InstanceID})
+		}
 	}
 	if r.config.ModelConfig.ContextWindow > 0 || r.config.ModelConfig.MaxInputTokens > 0 {
 		budgetReceipt, budgetErr := r.evaluatePostCompactBudgetWithRecentTurnAllocation(&bundle, result, skillBlocks)

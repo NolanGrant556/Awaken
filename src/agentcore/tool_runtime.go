@@ -10,6 +10,7 @@ import (
 	"awaken/src/agentcore/guardian"
 	"awaken/src/agentcore/subagent"
 	convcontext "awaken/src/context"
+	"awaken/src/managedenv"
 	"awaken/src/tool"
 	"awaken/src/tool/profile"
 	"awaken/src/tools/ask_user"
@@ -433,6 +434,9 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 	result.ProviderID = provider.ProviderID
 	result.ProviderSource = provider.Source
 	result.ProviderCapabilities = append([]tool.Capability(nil), provider.Capabilities...)
+	if provider.Source == tool.SourceBuiltin {
+		readiness = tool.ManagedReadiness(tool.ContextWithToolExecutionIdentity(tool.ContextWithToolThreadID(ctx, rt.threadID), identity), readiness)
+	}
 	result.ProviderReadiness = readiness.Readiness
 	result.ProviderDependencies = append([]tool.DependencyRequirement(nil), provider.Dependencies...)
 	result.DependencyObservations = append([]tool.DependencyObservation(nil), readiness.Dependencies...)
@@ -540,6 +544,15 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 		rt.sink.Emit(MapACPEvent(e))
 	})
 	toolCtx = tool.ContextWithToolExecutionIdentity(toolCtx, identity)
+	toolCtx = tool.ContextWithEnvironmentProgress(toolCtx, func(op managedenv.Operation) {
+		typ := RuntimePrepareProgressEventType
+		if op.State == "ready" {
+			typ = RuntimeReadyEventType
+		} else if op.State == "failed" || op.State == "interrupted" {
+			typ = RuntimeRepairFailedEventType
+		}
+		rt.sink.Emit(AwakenEvent{Type: typ, Timestamp: timeNowUTC(), ToolCallID: identity.ToolCallID, ToolName: identity.ToolName, AgentID: identity.AgentID, SubagentTaskID: identity.SubagentTaskID, RuntimeName: "共享运行环境", Content: op.Message, RuntimeOperationID: op.ID, RuntimePrepareStatus: op.State, RuntimeComponent: op.Component, RuntimeDownloadedBytes: op.DownloadedBytes, RuntimeTotalBytes: op.TotalBytes, RuntimeInstallCount: op.Installs, RuntimeDownloadCount: op.Downloads})
+	})
 	toolCtx = tool.ContextWithAgentHistoryScope(toolCtx, tool.AgentHistoryScope{AgentID: identity.AgentID, Ancestors: rt.historyAncestors})
 	if rt.runPlanService != nil {
 		toolCtx = tool.ContextWithRunPlanService(toolCtx, rt.runPlanService)

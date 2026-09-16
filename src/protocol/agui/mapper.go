@@ -10,6 +10,13 @@ import (
 
 func MapEvent(event agentcore.AwakenEvent) []Event {
 	base := Event{
+		RuntimeOperationID:               event.RuntimeOperationID,
+		RuntimeDownloadedBytes:           event.RuntimeDownloadedBytes,
+		RuntimeTotalBytes:                event.RuntimeTotalBytes,
+		RuntimeInstallCount:              event.RuntimeInstallCount,
+		RuntimeDownloadCount:             event.RuntimeDownloadCount,
+		RuntimePrepareStatus:             event.RuntimePrepareStatus,
+		RuntimeComponent:                 event.RuntimeComponent,
 		Timestamp:                        toUnixMillis(event.Timestamp),
 		ThreadID:                         event.ThreadID,
 		RunID:                            event.RunID,

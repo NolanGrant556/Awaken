@@ -434,7 +434,8 @@ func displayMatchPath(path, root string, multiRoot bool) string {
 func needsRuntime(started time.Time, message string) tool.ExecutionOutcome {
 	outcome := tool.FailedOutcome(message, tool.ErrorCodeNeedsRuntime, tool.ErrorCategoryRuntime, true)
 	outcome.Status = tool.OutcomeNeedsRuntime
-	outcome.RecoveryOptions = []string{"install_ripgrep", "refresh_run_environment"}
+	outcome.RecoveryOptions = []string{"ensure_environment:ripgrep"}
+	outcome.NextActions = []tool.NextAction{{ID: "prepare_environment", Description: "准备所需共享环境后重试原工具", Tool: "ensure_environment", InputHint: map[string]any{"capability": "ripgrep"}}}
 	return outcome.WithTiming(started, time.Now().UTC())
 }
 

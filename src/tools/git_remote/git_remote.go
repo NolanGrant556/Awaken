@@ -20,6 +20,7 @@ import (
 	"unicode"
 
 	"awaken/src/internal/outputlimit"
+	"awaken/src/managedenv"
 	"awaken/src/tool"
 	"awaken/src/tool/sandbox"
 )
@@ -214,7 +215,7 @@ func (t *Tool) ExecuteOutcome(ctx context.Context, raw string, observer tool.Too
 	if !ok {
 		return failedBeforeTransport(started, "run_availability_snapshot_missing: typed Git requires pinned tool and environment snapshots", "run_availability_snapshot_missing", tool.ErrorCategoryRuntime, tool.OutcomeUnsupported, []string{"start_or_refresh_run_availability"}), nil
 	}
-	gitObservation, gitTrust, err := t.validatePinnedGit(snapshot, environment)
+	gitObservation, gitTrust, err := t.validatePinnedGit(ctx, snapshot, environment)
 	if err != nil {
 		return failedBeforeTransport(started, err.Error(), "git_snapshot_invalid", tool.ErrorCategoryPolicy, tool.OutcomeDenied, []string{"refresh_run_availability", "restore_pinned_git_executable"}), nil
 	}
@@ -675,7 +676,7 @@ func validGitRef(value string) bool {
 	return true
 }
 
-func (t *Tool) validatePinnedGit(snapshot tool.RunToolAvailabilitySnapshot, environment tool.ExecutionEnvironmentSnapshot) (tool.ExecutableObservation, gitRuntimeTrust, error) {
+func (t *Tool) validatePinnedGit(ctx context.Context, snapshot tool.RunToolAvailabilitySnapshot, environment tool.ExecutionEnvironmentSnapshot) (tool.ExecutableObservation, gitRuntimeTrust, error) {
 	if snapshot.EnvironmentSnapshotID == "" || snapshot.EnvironmentSnapshotID != environment.SnapshotID {
 		return tool.ExecutableObservation{}, gitRuntimeTrust{}, fmt.Errorf("Git tool/environment snapshot binding is stale")
 	}
@@ -685,10 +686,19 @@ func (t *Tool) validatePinnedGit(snapshot tool.RunToolAvailabilitySnapshot, envi
 		!tool.HasCapability(entry.Provider.Capabilities, tool.CapabilityGitClone) {
 		return tool.ExecutableObservation{}, gitRuntimeTrust{}, fmt.Errorf("current run snapshot does not contain the builtin typed Git provider")
 	}
-	if entry.Readiness.Readiness != tool.ProviderReady {
+	managed, hasManaged := tool.ManagedExecutable(ctx, "git")
+	if entry.Readiness.Readiness != tool.ProviderReady && !(entry.Readiness.Readiness == tool.ProviderNeedsRuntime && hasManaged) {
 		return tool.ExecutableObservation{}, gitRuntimeTrust{}, fmt.Errorf("typed Git provider is not ready in the current run snapshot")
 	}
 	gitObservation, ok := environment.Executable("git")
+	if (!ok || gitObservation.Path == "") && hasManaged {
+		fingerprint, err := tool.FingerprintExecutable(managed.Executable)
+		if err != nil {
+			return tool.ExecutableObservation{}, gitRuntimeTrust{}, err
+		}
+		gitObservation = tool.ExecutableObservation{Name: "git", Path: managed.Executable, Fingerprint: fingerprint, Provenance: "awaken-managed"}
+		ok = true
+	}
 	if !ok || !filepath.IsAbs(gitObservation.Path) || strings.TrimSpace(gitObservation.Fingerprint) == "" {
 		return tool.ExecutableObservation{}, gitRuntimeTrust{}, fmt.Errorf("pinned environment lacks an absolute fingerprinted Git executable")
 	}
@@ -701,6 +711,15 @@ func (t *Tool) validatePinnedGit(snapshot tool.RunToolAvailabilitySnapshot, envi
 		trustValidator = validateHostTrustedGitRuntime
 	}
 	trust, err := trustValidator(gitObservation)
+	if gitObservation.Provenance == "awaken-managed" {
+		if m := managedenv.FromContext(ctx); m != nil {
+			if execPath, helper, ok := m.ManagedGitFiles(gitObservation.Path); ok {
+				fingerprint, e := tool.FingerprintExecutable(helper)
+				trust = gitRuntimeTrust{ExecPath: execPath, RemoteHelper: helper, HelperFingerprint: fingerprint}
+				err = e
+			}
+		}
+	}
 	if err != nil {
 		return tool.ExecutableObservation{}, gitRuntimeTrust{}, err
 	}

@@ -405,7 +405,8 @@ func readPDF(ctx context.Context, p params, path string, data []byte) (tool.Exec
 		if errorsIsRuntimeMissing(err) {
 			outcome := tool.FailedOutcome(err.Error(), tool.ErrorCodeNeedsRuntime, tool.ErrorCategoryRuntime, true)
 			outcome.Status = tool.OutcomeNeedsRuntime
-			outcome.RecoveryOptions = []string{"install_poppler", "select_a_native_pdf_model"}
+			outcome.RecoveryOptions = []string{"load_workspace_dependencies", "select_a_native_pdf_model"}
+			outcome.NextActions = []tool.NextAction{{ID: "prepare_environment", Description: "准备所需共享环境后重试原工具", Tool: "load_workspace_dependencies", InputHint: map[string]any{}}}
 			return outcome, nil
 		}
 		return tool.FailedOutcome(err.Error(), "pdf_render_failed", tool.ErrorCategoryRuntime, true), nil
@@ -528,6 +529,9 @@ func pdfPageCount(ctx context.Context, path string) (int, bool) {
 }
 
 func lookupPopplerBinary(ctx context.Context, name string) string {
+	if launch, ok := tool.ManagedExecutable(ctx, name); ok {
+		return launch.Executable
+	}
 	environment, ok := tool.ExecutionEnvironmentSnapshotFromContext(ctx)
 	if ok {
 		if observed, found := environment.Executable(name); found && strings.TrimSpace(observed.Path) != "" {

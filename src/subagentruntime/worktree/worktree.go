@@ -8,8 +8,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 	"unicode"
 
+	"awaken/src/managedenv"
 	"awaken/src/subagentruntime"
 )
 
@@ -153,7 +155,15 @@ func (s *Service) git(ctx context.Context, dir string, args ...string) (string, 
 }
 
 func runGit(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
+	executable := "git"
+	if m := managedenv.FromContext(ctx); m != nil {
+		owner := managedenv.Owner{ThreadID: "worktree", AgentID: "host", RunID: fmt.Sprintf("worktree-%d", time.Now().UnixNano()), Kind: "service"}
+		if launch, ok := m.AcquireExecutable("git", owner); ok {
+			executable = launch.Executable
+			defer m.ReleaseOwner(owner)
+		}
+	}
+	cmd := exec.CommandContext(ctx, executable, args...)
 	cmd.Dir = dir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

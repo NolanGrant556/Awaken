@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"awaken/src/managedenv"
 )
 
 // Registry loads user-scoped ACP runner configurations.
@@ -154,6 +156,13 @@ func (r *Registry) Probe(id string) error {
 	cfg, ok := r.Get(id)
 	if !ok {
 		return fmt.Errorf("%s: %s", ErrCodeRunnerNotConfigured, id)
+	}
+	if managedenv.Default() != nil {
+		if _, recognized := managedenv.RecognizePackageCommand(cfg.Command, cfg.Args); recognized {
+			// Readiness means this registered launch mode can be prepared; actual
+			// package verification still happens before the ACP process is spawned.
+			return nil
+		}
 	}
 	if _, err := execLookPath(cfg.Command); err != nil {
 		return fmt.Errorf("%s: %w", ErrCodeRunnerNotReady, err)

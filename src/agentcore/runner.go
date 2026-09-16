@@ -4,6 +4,7 @@ import (
 	"awaken/src/context"
 	"awaken/src/hookruntime"
 	"awaken/src/llm"
+	"awaken/src/managedenv"
 	"awaken/src/researchruntime"
 	"awaken/src/skillruntime"
 	"awaken/src/subagentruntime"
@@ -11,6 +12,7 @@ import (
 	stdcontext "context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 )
@@ -134,6 +136,7 @@ func NewRunner(config AgentConfig, conv *context.Conversation, reqBuilder *Reque
 			return nil
 		},
 	)
+	runner.contextGovernor.projectCompactBudget = runner.projectPostCompactBudget
 	runner.contextGovernor.RestoreUsageAnchor(config.RestoredContextWindowUsageAnchor, config.ModelConfig)
 	runner.contextGovernor.preCompactHook = func(ctx stdcontext.Context, sink contextWindowEventSink, mode CompactMode, state ContextWindowState) (string, error) {
 		events, _ := sink.(*runEventEmitter)
@@ -161,6 +164,7 @@ func NewRunner(config AgentConfig, conv *context.Conversation, reqBuilder *Reque
 }
 
 func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (answer string, runErr error) {
+
 	r.progressNudge = newProgressNudge(r.config)
 	events := newRunEventEmitter(r.threadID, sink)
 	events.attemptID = r.config.AttemptID
@@ -199,6 +203,33 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 		events.runID = r.runID
 	} else {
 		r.runID = events.runID
+	}
+	if manager := managedenv.Default(); manager != nil {
+		if origin := r.config.SubagentOrigin; origin != nil {
+			if e := manager.Inherit(managedenv.Owner{ThreadID: r.threadID, AgentID: origin.ParentAgentID}, managedenv.Owner{ThreadID: r.threadID, AgentID: origin.AgentID, RunID: r.runID, TaskID: r.config.SubagentTaskID, Kind: "run"}); e != nil {
+				slog.Warn("managed environment inheritance unavailable", "error", e)
+			}
+		}
+		owner := managedenv.Owner{ThreadID: r.threadID, AgentID: "root", RunID: r.runID}
+		if r.config.SubagentOrigin != nil {
+			owner.AgentID = r.config.SubagentOrigin.AgentID
+		}
+		defer manager.ReleaseOwner(owner)
+		// A model may use an exact previously returned interpreter path without
+		// asking for the same environment again. Keep its healthy references alive
+		// for this run; this does not change PATH or select another implementation.
+		for _, binding := range manager.Bindings(owner) {
+			if _, err := manager.Binding(ctx, binding.EnvironmentRef, owner); err != nil {
+				slog.Warn("managed environment binding unavailable", "error", err)
+			}
+		}
+		if bundle := r.config.RestoredContextBundleV2; bundle != nil {
+			for _, ref := range bundle.EnvironmentBindings {
+				if _, err := manager.RestoreBinding(ctx, ref.Reference, ref.InstanceID, owner); err != nil {
+					slog.Warn("managed environment reference needs preparation", "error", err)
+				}
+			}
+		}
 	}
 	events.recorder = r.recorder
 	events.sessionID = r.sessionID

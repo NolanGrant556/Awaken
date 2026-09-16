@@ -27,6 +27,7 @@ import (
 	"awaken/src/hookruntime"
 	"awaken/src/instructions"
 	"awaken/src/llm"
+	"awaken/src/managedenv"
 	"awaken/src/researchruntime"
 	"awaken/src/skillruntime"
 	"awaken/src/skills"
@@ -1115,6 +1116,13 @@ func (s *RunService) closeAndEvictDeletedThread(threadID string) error {
 		delete(s.threads, threadID)
 	}
 	s.mu.Unlock()
+	return forgetDeletedThreadEnvironment(threadID)
+}
+
+func forgetDeletedThreadEnvironment(threadID string) error {
+	if manager := managedenv.Default(); manager != nil {
+		return manager.ForgetThread(threadID)
+	}
 	return nil
 }
 
@@ -1246,6 +1254,39 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 			return Run{}, ErrProjectOperationConflict
 		}
 	}
+	// Resolve the current project while project mutations are fenced. Only an
+	// explicitly retained project can move a thread away from a detached root.
+	var currentProject *Project
+	if hasRequestedThread && workspace.ProjectID != "" && s.projectService != nil {
+		projects, err := s.projectService.ListProjects(false)
+		if err != nil {
+			return Run{}, err
+		}
+		for _, project := range projects {
+			if project.ProjectID == workspace.ProjectID && project.State == ProjectStateActive {
+				currentProject = &project
+				break
+			}
+		}
+	}
+	canContinueWorkspace := func(owner string, previous WorkspaceConfig) bool {
+		if sameWorkspaceRoot(previous, workspace) || req.reanchorWorkspace {
+			return true
+		}
+		if currentProject == nil || owner != currentProject.ProjectID {
+			return false
+		}
+		for _, root := range currentProject.AllRoots() {
+			if normalizeProjectWorkspaceRoot(root) == normalizeProjectWorkspaceRoot(previous.WorkspaceRoot) {
+				return false
+			}
+		}
+		target := currentProject.PrimaryRoot()
+		if target == "" {
+			target = desktopdata.SessionWorkspacePath(desktopdata.AwakenHomeRoot(), owner)
+		}
+		return normalizeProjectWorkspaceRoot(target) == normalizeProjectWorkspaceRoot(workspace.WorkspaceRoot)
+	}
 	s.mu.RLock()
 	projectFenced := len(s.projectFences[normalizeProjectWorkspaceRoot(workspace.WorkspaceRoot)]) > 0
 	s.mu.RUnlock()
@@ -1349,6 +1390,10 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 			}
 			restoredMeta = &latestMeta
 			restored = &latestRestored
+			if !canContinueWorkspace(latestMeta.Snapshot.ProjectID, latestMeta.Snapshot.Workspace) {
+				s.mu.Unlock()
+				return rollbackStart(ErrThreadWorkspaceMismatch, false)
+			}
 			// Archived threads reject new runs even when the caller bypasses
 			// the UI; the user must unarchive first (archive contract [状态转换](docs/01_桌面工作台/会话管理/实现方案.md#状态转换)).
 			if restoredMeta.Snapshot.Archived {
@@ -1404,7 +1449,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 			threadSnapshot = s.threads[threadID].snapshot()
 		} else {
 			previousThread = cloneThread(thread)
-			if !sameWorkspaceRoot(thread.workspace, workspace) && !req.reanchorWorkspace {
+			if !canContinueWorkspace(thread.projectID, thread.workspace) {
 				s.mu.Unlock()
 				return rollbackStart(ErrThreadWorkspaceMismatch, false)
 			}
@@ -2448,10 +2493,16 @@ func (s *RunService) DeleteThread(threadID string) error {
 		}
 		s.mu.Unlock()
 		bashtool.CancelThreadTasks(threadID)
+		if err := forgetDeletedThreadEnvironment(threadID); err != nil {
+			return err
+		}
 		return s.threadStore.DeleteThread(threadID)
 	}
 	s.mu.Unlock()
 	bashtool.CancelThreadTasks(threadID)
+	if err := forgetDeletedThreadEnvironment(threadID); err != nil {
+		return err
+	}
 	return s.threadStore.DeleteThread(threadID)
 }
 

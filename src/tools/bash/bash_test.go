@@ -245,3 +245,39 @@ func TestSubagentCleanupDrainsOnlyOwnedBackgroundCommands(t *testing.T) {
 		}
 	}
 }
+
+func TestDeletedTemporaryCWDNeedsExplicitRecovery(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell fixture")
+	}
+	root := t.TempDir()
+	ctx := bashContext(root, "cwd-recovery", "call-recovery")
+	tmp := filepath.Join(root, "temporary")
+	if err := os.Mkdir(tmp, 0700); err != nil {
+		t.Fatal(err)
+	}
+	state, _ := tool.ToolSessionStateFromContext(ctx)
+	if err := state.SetCWD(tmp); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(tmp); err != nil {
+		t.Fatal(err)
+	}
+	first, err := (&Tool{}).ExecuteOutcome(ctx, `{"command":"touch should-not-exist"}`, nil)
+	if err != nil || first.ErrorCode != "bash_cwd_unavailable" || len(first.NextActions) == 0 {
+		t.Fatalf("missing recovery: %+v %v", first, err)
+	}
+	if _, err = os.Stat(filepath.Join(root, "should-not-exist")); !os.IsNotExist(err) {
+		t.Fatal("silently executed in another directory")
+	}
+	raw, _ := json.Marshal(map[string]any{"command": "pwd", "cwd": root})
+	second, err := (&Tool{}).ExecuteOutcome(ctx, string(raw), nil)
+	if err != nil || second.IsError() {
+		t.Fatalf("explicit recovery failed: %+v %v", second, err)
+	}
+	actual, _ := second.Details["stdout"].(string)
+	want, _ := filepath.EvalSymlinks(root)
+	if strings.TrimSpace(actual) != want {
+		t.Fatalf("wrong cwd %q", actual)
+	}
+}

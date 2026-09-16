@@ -427,6 +427,13 @@ func projectSemanticRecord(record agentcore.SemanticRecord) []Event {
 		notice.ToolCallName = stringFromAny(payload["tool_name"])
 		notice.RuntimeName = stringFromAny(payload["runtime_name"])
 		notice.RuntimeVersion = stringFromAny(payload["runtime_version"])
+		notice.RuntimeOperationID = stringFromAny(payload["runtime_operation_id"])
+		notice.RuntimePrepareStatus = stringFromAny(payload["runtime_prepare_status"])
+		notice.RuntimeComponent = stringFromAny(payload["runtime_component"])
+		notice.RuntimeDownloadedBytes = int64FromAny(payload["runtime_downloaded_bytes"])
+		notice.RuntimeTotalBytes = int64FromAny(payload["runtime_total_bytes"])
+		notice.RuntimeInstallCount = intFromAny(payload["runtime_install_count"])
+		notice.RuntimeDownloadCount = intFromAny(payload["runtime_download_count"])
 		return []Event{notice}
 	case agentcore.SemanticKindScheduledNotice:
 		// Host-owned fixed reminder (contract [固定提醒](docs/12_定时任务/定时执行与提醒/实现方案.md#固定提醒)/[HTTP、IPC 与事件](docs/12_定时任务/定时执行与提醒/实现方案.md#httpipc-与事件)): one replayable frame

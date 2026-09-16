@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"awaken/src/acp"
+	"awaken/src/managedenv"
 
 	acpsdk "github.com/coder/acp-go-sdk"
 )
@@ -34,12 +35,13 @@ type Client struct {
 	mu            sync.Mutex
 	currentPrompt *promptState
 
-	processMu   sync.RWMutex
-	processDone chan struct{}
-	processErr  error
-	processStop context.CancelFunc
-	closeOnce   sync.Once
-	closeErr    error
+	processMu          sync.RWMutex
+	processDone        chan struct{}
+	processErr         error
+	processStop        context.CancelFunc
+	closeOnce          sync.Once
+	closeErr           error
+	environmentRelease func()
 }
 
 // NewClient spawns a local stdio ACP runner and establishes a client-side connection.
@@ -50,12 +52,30 @@ func NewClient(ctx context.Context, snapshot acp.RunnerSnapshot, cwd string) (*C
 	// The ACP process belongs to the Manager-owned conversation, not to the
 	// context of the start tool call. Startup and prompt requests keep their
 	// own bounded contexts; this private context is cancelled only by Close.
+	environment := acp.MergeProcessEnv(os.Environ(), snapshot.Env)
+	launch := managedenv.Launch{Executable: snapshot.Command, Args: snapshot.Args}
+	release := func() {}
+	if m := managedenv.Default(); m != nil {
+		var err error
+		launch, environment, release, err = m.PrepareCommand(ctx, snapshot.Command, snapshot.Args, environment, "acp")
+		if err != nil {
+			return nil, err
+		}
+	} else if _, recognized := managedenv.RecognizePackageCommand(snapshot.Command, snapshot.Args); recognized {
+		return nil, fmt.Errorf("environment_manager_unavailable: 共享环境管理器不可用，未启动包管理器")
+	}
+	started := false
+	defer func() {
+		if !started {
+			release()
+		}
+	}()
 	processCtx, processStop := context.WithCancel(context.Background())
-	cmd := exec.CommandContext(processCtx, snapshot.Command, snapshot.Args...)
+	cmd := exec.CommandContext(processCtx, launch.Executable, launch.Args...)
 	if cwd != "" {
 		cmd.Dir = cwd
 	}
-	cmd.Env = acp.MergeProcessEnv(os.Environ(), snapshot.Env)
+	cmd.Env = environment
 	acp.ConfigureProcessTree(cmd)
 
 	stdin, err := cmd.StdinPipe()
@@ -79,6 +99,18 @@ func NewClient(ctx context.Context, snapshot acp.RunnerSnapshot, cwd string) (*C
 		processStop()
 		return nil, fmt.Errorf("%s: %w", acp.ErrCodeRunnerNotReady, err)
 	}
+	if launch.ManagedInstanceID != "" {
+		if m := managedenv.Default(); m != nil {
+			hold, err := m.HoldProcess(managedenv.Binding{InstanceID: launch.ManagedInstanceID}, cmd.Process.Pid)
+			if err != nil {
+				processStop()
+				_ = cmd.Wait()
+				return nil, err
+			}
+			originalRelease := release
+			release = func() { hold(); originalRelease() }
+		}
+	}
 
 	impl := &sdkClientImpl{}
 	conn := acpsdk.NewClientSideConnection(impl, stdin, stdout)
@@ -89,14 +121,16 @@ func NewClient(ctx context.Context, snapshot acp.RunnerSnapshot, cwd string) (*C
 		maxFrame = 8 * 1024 * 1024
 	}
 	c := &Client{
-		conn:        conn,
-		cmd:         cmd,
-		maxFrame:    maxFrame,
-		maxTurn:     maxFrame * 4,
-		logger:      slog.Default(),
-		processDone: make(chan struct{}),
-		processStop: processStop,
+		conn:               conn,
+		cmd:                cmd,
+		maxFrame:           maxFrame,
+		maxTurn:            maxFrame * 4,
+		logger:             slog.Default(),
+		processDone:        make(chan struct{}),
+		processStop:        processStop,
+		environmentRelease: release,
 	}
+	started = true
 	go c.waitProcess()
 
 	initCtx, cancel := context.WithTimeout(ctx, time.Duration(snapshot.StartupTimeoutSeconds)*time.Second)
@@ -255,6 +289,9 @@ func (c *Client) Close() error {
 
 func (c *Client) waitProcess() {
 	err := c.cmd.Wait()
+	if c.environmentRelease != nil {
+		c.environmentRelease()
+	}
 	c.processMu.Lock()
 	c.processErr = err
 	c.processMu.Unlock()

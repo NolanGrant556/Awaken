@@ -3,6 +3,7 @@ package runtime
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -743,5 +744,52 @@ func TestLegacySnapshotWithoutFoldersIsPromotedToASinglePrimaryFolder(t *testing
 	holders, err := reopened.ProjectsHoldingFolder(legacyRoot)
 	if err != nil || len(holders) != 1 || holders[0].ProjectID != "project_legacy" {
 		t.Fatalf("legacy folder must resolve to its project, holders=%+v err=%v", holders, err)
+	}
+}
+
+// Moving the selected project is different from moving a thread to another
+// project. Both live and restored threads must use the same guarded rule.
+func TestContinueThreadAfterProjectFolderReplacement(t *testing.T) {
+	for _, restart := range []bool{false, true} {
+		t.Run(fmt.Sprint("restart=", restart), func(t *testing.T) {
+			t.Setenv(awakenHomeEnv, t.TempDir())
+			service := newDurableThreadTestService()
+			oldRoot, newRoot, unrelated := t.TempDir(), t.TempDir(), t.TempDir()
+			project, err := service.ProjectService().CreateProject([]ProjectFolder{{Path: oldRoot, IsPrimary: true}}, "moved")
+			if err != nil {
+				t.Fatal(err)
+			}
+			first, err := service.StartRun(StartRunRequest{Input: "first", Workspace: WorkspaceConfig{ProjectID: project.ProjectID, WorkspaceRoot: oldRoot}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			waitForRunTerminal(t, service, first.RunID)
+			waitForThreadIdle(t, service, first.ThreadID)
+			if _, err = service.ProjectService().DetachProjectFolder(project.ProjectID, oldRoot); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = service.ProjectService().AttachProjectFolder(project.ProjectID, newRoot); err != nil {
+				t.Fatal(err)
+			}
+			if restart {
+				service = newDurableThreadTestService()
+			}
+			if _, err = service.StartRun(StartRunRequest{Input: "wrong", ThreadID: first.ThreadID, Workspace: WorkspaceConfig{ProjectID: project.ProjectID, WorkspaceRoot: unrelated}}); !errors.Is(err, ErrThreadWorkspaceMismatch) {
+				t.Fatalf("unrelated root: %v", err)
+			}
+			second, err := service.StartRun(StartRunRequest{Input: "continue", ThreadID: first.ThreadID, Workspace: WorkspaceConfig{ProjectID: project.ProjectID, WorkspaceRoot: newRoot}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			waitForRunTerminal(t, service, second.RunID)
+			waitForThreadIdle(t, service, first.ThreadID)
+			transcript, err := service.GetThreadTranscript(first.ThreadID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if transcript.Thread.Workspace.WorkspaceRoot != normalizeProjectWorkspaceRoot(newRoot) {
+				t.Fatalf("workspace: %+v", transcript.Thread.Workspace)
+			}
+		})
 	}
 }

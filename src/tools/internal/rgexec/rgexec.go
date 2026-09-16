@@ -18,6 +18,9 @@ type Runtime struct {
 }
 
 func Resolve(ctx context.Context) (Runtime, error) {
+	if launch, ok := tool.ManagedExecutable(ctx, "rg"); ok {
+		return Runtime{Executable: launch.Executable, Environment: os.Environ(), SnapshotID: "managed"}, nil
+	}
 	if snapshot, ok := tool.ExecutionEnvironmentSnapshotFromContext(ctx); ok {
 		observed, found := snapshot.Executable("rg")
 		if !found || strings.TrimSpace(observed.Path) == "" {

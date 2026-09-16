@@ -660,3 +660,19 @@ func TestTerminalStopSourceProjectionAndLegacyNeutral(t *testing.T) {
 		}
 	}
 }
+
+func TestManagedEnvironmentProgressPreservesWaiterScopeInReplay(t *testing.T) {
+	for _, call := range []string{"waiter-a", "waiter-b"} {
+		source := agentcore.AwakenEvent{Type: agentcore.RuntimePrepareProgressEventType, ThreadID: "thread", RunID: "run", TurnID: "turn", ToolCallID: call, ToolName: "ensure_environment", AgentID: "child", ParentAgentID: "root", SubagentTaskID: "child-task", RuntimeName: "共享运行环境", RuntimeOperationID: "shared-operation", RuntimePrepareStatus: "downloading", RuntimeComponent: "python", RuntimeDownloadedBytes: 12, RuntimeTotalBytes: 100, RuntimeDownloadCount: 1, RuntimeInstallCount: 0, Content: "正在下载运行组件"}
+		live := MapEvent(source)
+		replay := ProjectSemanticRecord(agentcore.RuntimeNoticeSemanticRecord("thread", "run", "turn", "session", source))
+		if len(live) != 1 || len(replay) != 1 {
+			t.Fatalf("invalid projection: %v %v", live, replay)
+		}
+		for _, frame := range []Event{live[0], replay[0]} {
+			if frame.Type != EventAwakenRuntimePrepareProgress || frame.ToolCallID != call || frame.RuntimeOperationID != "shared-operation" || frame.SubagentTaskID != "child-task" || frame.SubagentAgentID != "child" || frame.RuntimeDownloadedBytes != 12 || frame.RuntimeTotalBytes != 100 || frame.RuntimeDownloadCount != 1 {
+				t.Fatalf("progress lost scope: %+v", frame)
+			}
+		}
+	}
+}

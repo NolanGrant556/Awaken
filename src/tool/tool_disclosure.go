@@ -127,6 +127,8 @@ var deferrableBuiltinToolNames = []string{
 	"configure_hook",
 	"delegate_external_agent",
 	"dependency_install",
+	"ensure_environment",
+	"load_workspace_dependencies",
 	"git_remote",
 	"plugin",
 	"skill_install",

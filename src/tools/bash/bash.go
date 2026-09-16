@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"awaken/src/managedenv"
 	"awaken/src/tool"
 	"awaken/src/tools/internal/textfile"
 )
@@ -32,6 +33,8 @@ type params struct {
 	Timeout         int    `json:"timeout,omitempty"`
 	Description     string `json:"description,omitempty"`
 	RunInBackground bool   `json:"run_in_background,omitempty"`
+	EnvironmentRef  string `json:"environment_ref,omitempty"`
+	CWD             string `json:"cwd,omitempty"`
 }
 
 type result struct {
@@ -61,6 +64,8 @@ func (t *Tool) Parameters() []tool.ToolParameter {
 		{Name: "timeout", Description: "Timeout in milliseconds. Defaults to 120000 and is capped at 600000.", Type: "integer"},
 		{Name: "description", Description: "Short user-facing description of the command.", Type: "string"},
 		{Name: "run_in_background", Description: "Start a thread-owned background task and return immediately.", Type: "boolean"},
+		{Name: "environment_ref", Description: "Use the shared environment reference returned by load_workspace_dependencies or ensure_environment for this Agent. Does not change the command's permissions or project dependency semantics.", Type: "string"},
+		{Name: "cwd", Description: "Optional existing absolute working directory. Use this to recover when a remembered temporary cwd was removed. Omit to retain this thread's current directory.", Type: "string"},
 	}
 }
 func (t *Tool) Definition() tool.ToolDefinition {
@@ -127,12 +132,37 @@ func (t *Tool) ExecuteOutcome(ctx context.Context, input string, observer tool.T
 	if state != nil {
 		cwd = state.CWD(cwd)
 	}
+	if p.CWD != "" {
+		if !filepath.IsAbs(p.CWD) {
+			return tool.FailedOutcome("cwd must be an existing absolute directory", tool.ErrorCodeValidationError, tool.ErrorCategoryValidation, false).WithTiming(started, time.Now().UTC()), nil
+		}
+		cwd = filepath.Clean(p.CWD)
+	}
 	if info, statErr := os.Stat(cwd); statErr != nil || !info.IsDir() {
-		return tool.FailedOutcome(fmt.Sprintf("Bash cwd is unavailable: %s", cwd), "bash_cwd_unavailable", tool.ErrorCategoryRuntime, true).WithTiming(started, time.Now().UTC()), nil
+		outcome := tool.FailedOutcome(fmt.Sprintf("Bash cwd is unavailable: %s. Retry with cwd set to an existing absolute directory; the command has not executed.", cwd), "bash_cwd_unavailable", tool.ErrorCategoryRuntime, true).WithTiming(started, time.Now().UTC())
+		outcome.NextActions = []tool.NextAction{{ID: "select_working_directory", Description: "明确选择仍存在的工作目录后重试", Tool: "Bash", InputHint: map[string]any{"cwd": permissionContext.WorkspaceRootOrCWD()}}}
+		return outcome, nil
 	}
 	hostEnvironment, err := pinnedHostEnvironment(ctx, cwd)
 	if err != nil {
 		return tool.FailedOutcome(err.Error(), tool.ErrorCodeNeedsRuntime, tool.ErrorCategoryRuntime, true).WithTiming(started, time.Now().UTC()), nil
+	}
+	if p.EnvironmentRef != "" {
+		m := managedenv.FromContext(ctx)
+		if m == nil {
+			return tool.FailedOutcome("shared environment manager unavailable", "environment_manager_unavailable", tool.ErrorCategoryRuntime, true), nil
+		}
+		binding, bindErr := m.Binding(ctx, p.EnvironmentRef, tool.ManagedEnvironmentOwner(ctx))
+		if bindErr != nil {
+			return tool.FailedOutcome(bindErr.Error(), "environment_binding_stale", tool.ErrorCategoryRuntime, true), nil
+		}
+		ctx = tool.ContextWithEnvironmentBinding(ctx, binding)
+		hostEnvironment.Environment = binding.ExecutionEnvironment(hostEnvironment.Environment)
+		for _, entry := range hostEnvironment.Environment {
+			if strings.HasPrefix(entry, "PATH=") {
+				hostEnvironment.PATH = strings.TrimPrefix(entry, "PATH=")
+			}
+		}
 	}
 	shell, args, kind, err := selectShell(ctx, hostEnvironment, p.Command)
 	if err != nil {
@@ -255,6 +285,12 @@ func runForeground(ctx context.Context, p params, cwd, shell string, args []stri
 		return result
 	}
 	defer releaseProcessTree()
+	releaseEnvironment, leaseErr := holdExecutionEnvironments(ctx)
+	if leaseErr != nil {
+		result.Stderr = leaseErr.Error()
+		return result
+	}
+	defer releaseEnvironment()
 	command.Dir = cwd
 	command.Env = append(append([]string(nil), environment.Environment...), "AWAKEN_CWD_RESULT="+markerPath)
 	stdout := newLimitedWriter(maxOutputBytes, observer, "stdout")
@@ -445,7 +481,15 @@ func startBackgroundTask(runContext context.Context, p params, cwd, shell string
 	command.Dir = cwd
 	command.Env = append(append([]string(nil), environment.Environment...), "AWAKEN_CWD_RESULT="+markerPath)
 	command.Stdout, command.Stderr = logFile, logFile
+	releaseEnvironment, leaseErr := holdExecutionEnvironments(runContext)
+	if leaseErr != nil {
+		cancel()
+		releaseProcessTree()
+		_ = logFile.Close()
+		return result{}, leaseErr
+	}
 	if err := command.Start(); err != nil {
+		releaseEnvironment()
 		cancel()
 		releaseProcessTree()
 		_ = logFile.Close()
@@ -455,6 +499,7 @@ func startBackgroundTask(runContext context.Context, p params, cwd, shell string
 	if err := writeBackgroundStatus(statusPath, status); err != nil {
 		cancel()
 		_ = command.Wait()
+		releaseEnvironment()
 		releaseProcessTree()
 		_ = logFile.Close()
 		return result{}, err
@@ -464,6 +509,7 @@ func startBackgroundTask(runContext context.Context, p params, cwd, shell string
 	taskRegistry.tasks[taskID] = task
 	taskRegistry.Unlock()
 	go func() {
+		defer releaseEnvironment()
 		defer close(task.done)
 		defer cancel()
 		err := command.Wait()
@@ -577,3 +623,33 @@ func CancelAllTasks() {
 var _ io.Writer = (*limitedWriter)(nil)
 
 func init() { tool.MustRegisterToolWithMode(&Tool{}, tool.DefinitionValidationStrictBuiltin) }
+
+// Omitted environment_ref preserves shell environment semantics. Existing
+// owner bindings still need process leases when commands use absolute paths.
+func holdExecutionEnvironments(ctx context.Context) (func(), error) {
+	manager := managedenv.FromContext(ctx)
+	if manager == nil {
+		return func() {}, nil
+	}
+	bindings := []managedenv.Binding{}
+	if binding, ok := tool.EnvironmentBindingFromContext(ctx); ok {
+		bindings = append(bindings, binding)
+	} else {
+		bindings = manager.Bindings(tool.ManagedEnvironmentOwner(ctx))
+	}
+	releases := []func(){}
+	release := func() {
+		for _, fn := range releases {
+			fn()
+		}
+	}
+	for _, binding := range bindings {
+		fn, err := manager.HoldProcess(binding, 0)
+		if err != nil {
+			release()
+			return nil, err
+		}
+		releases = append(releases, fn)
+	}
+	return release, nil
+}

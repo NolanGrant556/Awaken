@@ -716,8 +716,10 @@ func TestHardTargetUsesBoundedProjectionForHighVolumeDurableFacts(t *testing.T) 
 			}},
 		)
 	}
+	// Include the newly registered environment tool while keeping the compact
+	// target far below the unbounded durable findings projection.
 	config := AgentConfig{SystemPrompt: "{{.RuntimeInfo}}", ModelConfig: ModelConfig{
-		Model: "kimi-for-coding", Protocol: "anthropic_messages", ContextWindow: 160000,
+		Model: "kimi-for-coding", Protocol: "anthropic_messages", ContextWindow: 180000,
 	}}
 	conversation := convcontext.NewConversation(nil)
 	conversation.Context.SetMessages([]convcontext.Message{

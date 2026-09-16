@@ -213,6 +213,13 @@ type AwakenEvent struct {
 	AuthURL                    string
 	RuntimeName                string
 	RuntimeVersion             string
+	RuntimeOperationID         string
+	RuntimePrepareStatus       string
+	RuntimeComponent           string
+	RuntimeDownloadedBytes     int64
+	RuntimeTotalBytes          int64
+	RuntimeInstallCount        int
+	RuntimeDownloadCount       int
 	QuestionID                 string
 	QuestionAnswer             string
 	QuestionCloseReason        string

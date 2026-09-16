@@ -49,6 +49,10 @@ type contextWindowEventSink interface {
 }
 
 type contextGovernor struct {
+	// Runner owns the post-compact projection (Skill refs, checkpoint and
+	// managed bindings). A preflight must not count replaceable full bodies
+	// as an immutable floor before that projection has been built.
+	projectCompactBudget            func(CompactResult) (bool, CompactBudgetReceipt, error)
 	engine                          ContextEngine
 	rebuildRequest                  func() (LLMRequest, error)
 	applyCompactResult              func(stdcontext.Context, CompactResult) error
@@ -467,6 +471,14 @@ func (g *contextGovernor) evaluateCompactPostcondition(llmReq LLMRequest, preSta
 	if postState.CompactTarget > 0 {
 		target = postState.CompactTarget
 	}
+	if g.projectCompactBudget != nil {
+		if handled, receipt, err := g.projectCompactBudget(result); handled {
+			if err != nil {
+				return err
+			}
+			post, target = receipt.ConservativeProjected, receipt.CompactTargetTokens
+		}
+	}
 	if preState.HardCompactTarget && target > 0 && post > target {
 		return &CompactTargetUnachievableError{
 			Reason: "post_compact_projection_exceeds_target", Projected: post, Target: target, MandatoryFloor: post - estimateMessagesTokens(result.Messages),
@@ -577,6 +589,17 @@ func (g *contextGovernor) preflightCompactTarget(llmReq LLMRequest, state Contex
 	if llmReq.EnvelopeDebug == nil || !state.HardCompactTarget || state.CompactTarget <= 0 {
 		return nil
 	}
+	if g.projectCompactBudget != nil {
+		message := convcontext.Message{Role: convcontext.RoleUser, Content: "compact preflight summary", CompactBoundaryID: "compact-preflight"}
+		result := CompactResult{Mode: CompactModeAuto, BoundaryID: "compact-preflight", SummaryMessage: message, Messages: []convcontext.Message{message}}
+		if handled, _, err := g.projectCompactBudget(result); handled {
+			var budgetErr *CompactTargetUnachievableError
+			if errors.As(err, &budgetErr) && budgetErr.MandatoryFloor <= budgetErr.Target {
+				return nil
+			}
+			return err
+		}
+	}
 	prefixGroups, tailGroups := splitCompactGroups(llmReq.Messages, targetTokens)
 	prefixMessages := flattenCompactGroups(prefixGroups)
 	tailMessages := flattenCompactGroups(tailGroups)
@@ -616,11 +639,16 @@ func (g *contextGovernor) preflightCompactTarget(llmReq LLMRequest, state Contex
 	if projected <= target {
 		return nil
 	}
+	envelope.Messages = []convcontext.Message{preflight}
+	floor := g.engine.Evaluate(envelope).ConservativeProjectedTokens()
+	if floor <= target {
+		return nil
+	}
 	return &CompactTargetUnachievableError{
 		Reason:         "pre_compact_mandatory_floor_exceeds_target",
 		Projected:      projected,
 		Target:         target,
-		MandatoryFloor: projected,
+		MandatoryFloor: floor,
 	}
 }
 

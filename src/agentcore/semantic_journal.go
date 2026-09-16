@@ -285,13 +285,23 @@ func PermissionDecisionSemanticRecord(threadID, runID, turnID, sessionID string,
 
 func RuntimeNoticeSemanticRecord(threadID, runID, turnID, sessionID string, event AwakenEvent) SemanticRecord {
 	record := NewSemanticRecord(SemanticKindRuntimeNotice, threadID, runID, turnID, event.ToolCallID, sessionID, map[string]any{
-		"event_type":      string(event.Type),
-		"tool_call_id":    event.ToolCallID,
-		"tool_name":       event.ToolName,
-		"content":         firstNonEmpty(event.Content, event.Error),
-		"progress":        event.Progress,
-		"runtime_name":    event.RuntimeName,
-		"runtime_version": event.RuntimeVersion,
+		"agent_id":                 event.AgentID,
+		"parent_agent_id":          event.ParentAgentID,
+		"subagent_task_id":         event.SubagentTaskID,
+		"event_type":               string(event.Type),
+		"tool_call_id":             event.ToolCallID,
+		"tool_name":                event.ToolName,
+		"content":                  firstNonEmpty(event.Content, event.Error),
+		"progress":                 event.Progress,
+		"runtime_name":             event.RuntimeName,
+		"runtime_operation_id":     event.RuntimeOperationID,
+		"runtime_prepare_status":   event.RuntimePrepareStatus,
+		"runtime_component":        event.RuntimeComponent,
+		"runtime_downloaded_bytes": event.RuntimeDownloadedBytes,
+		"runtime_total_bytes":      event.RuntimeTotalBytes,
+		"runtime_install_count":    event.RuntimeInstallCount,
+		"runtime_download_count":   event.RuntimeDownloadCount,
+		"runtime_version":          event.RuntimeVersion,
 	})
 	if !event.Timestamp.IsZero() {
 		record.Timestamp = event.Timestamp.UTC()
@@ -382,6 +392,9 @@ func (s *artifactBufferingSink) Emit(event AwakenEvent) {
 		RuntimeRepairFailedEventType,
 		RuntimeMissingEventType:
 		s.semanticFacts = append(s.semanticFacts, event)
+		if event.RuntimeOperationID != "" {
+			s.inner.Emit(event)
+		}
 		return
 	case ACPSessionStartedEventType,
 		ACPSessionClosedEventType,

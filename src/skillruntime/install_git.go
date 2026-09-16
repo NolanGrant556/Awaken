@@ -76,7 +76,11 @@ func runGit(ctx context.Context, args ...string) error {
 		"-c", "credential.helper=",
 	}
 	safeArgs = append(safeArgs, args...)
-	cmd := exec.CommandContext(ctx, "git", safeArgs...)
+	executable := "git"
+	if launch, ok := tool.ManagedExecutable(ctx, "git"); ok {
+		executable = launch.Executable
+	}
+	cmd := exec.CommandContext(ctx, executable, safeArgs...)
 	cmd.Env = safeGitEnvironment()
 	output, err := cmd.CombinedOutput()
 	if err == nil {

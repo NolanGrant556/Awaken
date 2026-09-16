@@ -214,14 +214,20 @@ type CompactCoverageReceipt struct {
 	RepairAttempts       int      `json:"repair_attempts"`
 }
 
+type EnvironmentBindingRef struct {
+	Reference  string `json:"environment_ref"`
+	InstanceID string `json:"instance_id"`
+}
+
 type PostCompactContextBundleV2 struct {
-	SchemaVersion       int    `json:"schema_version"`
-	BoundaryID          string `json:"boundary_id"`
-	ParentBoundaryID    string `json:"parent_boundary_id"`
-	Generation          int    `json:"generation"`
-	Mode                string `json:"mode"`
-	SourceSequenceStart int64  `json:"source_sequence_start"`
-	SourceSequenceEnd   int64  `json:"source_sequence_end"`
+	EnvironmentBindings []EnvironmentBindingRef `json:"environment_bindings,omitempty"`
+	SchemaVersion       int                     `json:"schema_version"`
+	BoundaryID          string                  `json:"boundary_id"`
+	ParentBoundaryID    string                  `json:"parent_boundary_id"`
+	Generation          int                     `json:"generation"`
+	Mode                string                  `json:"mode"`
+	SourceSequenceStart int64                   `json:"source_sequence_start"`
+	SourceSequenceEnd   int64                   `json:"source_sequence_end"`
 
 	ConversationProjection CompactConversationProjectionV2       `json:"conversation_projection"`
 	TaskCheckpoint         MaterializedSection[TaskCheckpointV2] `json:"task_checkpoint"`

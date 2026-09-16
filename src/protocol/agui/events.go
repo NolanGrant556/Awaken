@@ -410,6 +410,13 @@ type Event struct {
 	AuthURL                    string           `json:"authUrl,omitempty"`
 	RuntimeName                string           `json:"runtimeName,omitempty"`
 	RuntimeVersion             string           `json:"runtimeVersion,omitempty"`
+	RuntimeOperationID         string           `json:"runtimeOperationId,omitempty"`
+	RuntimePrepareStatus       string           `json:"runtimePrepareStatus,omitempty"`
+	RuntimeComponent           string           `json:"runtimeComponent,omitempty"`
+	RuntimeDownloadedBytes     int64            `json:"runtimeDownloadedBytes,omitempty"`
+	RuntimeTotalBytes          int64            `json:"runtimeTotalBytes,omitempty"`
+	RuntimeInstallCount        int              `json:"runtimeInstallCount,omitempty"`
+	RuntimeDownloadCount       int              `json:"runtimeDownloadCount,omitempty"`
 	SkillID                    string           `json:"skillId,omitempty"`
 	SkillVersion               string           `json:"skillVersion,omitempty"`
 	SkillSource                string           `json:"skillSource,omitempty"`

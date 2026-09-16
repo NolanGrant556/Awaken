@@ -31,6 +31,7 @@ import (
 	"awaken/src/hookruntime"
 	"awaken/src/instructions"
 	"awaken/src/llm"
+	"awaken/src/managedenv"
 	"awaken/src/mcpclient"
 	"awaken/src/memory"
 	"awaken/src/modelprofile"
@@ -74,6 +75,17 @@ func main() {
 	llm.ConfigureAccountRequestAdmission(*accountRequests)
 	routeManager := networkroute.NewFromEnvironment(os.Environ())
 	networkroute.InstallDefaultHTTPTransport(routeManager)
+	environmentCatalog, envErr := managedenv.LoadCatalog(os.Getenv("AWAKEN_ENVIRONMENT_CATALOG"))
+	var environmentManager *managedenv.Manager
+	if envErr == nil {
+		environmentManager, envErr = managedenv.New(managedenv.Options{Root: desktopdata.AwakenHomeRoot(), Catalog: environmentCatalog})
+	}
+	if envErr != nil {
+		log.Printf("[managed-environments] unavailable: %v", envErr)
+	} else {
+		managedenv.SetDefault(environmentManager)
+		defer environmentManager.Close()
+	}
 
 	addr := os.Getenv("AWAKEN_CORE_ADDR")
 	if addr == "" {
@@ -646,6 +658,9 @@ func main() {
 	cancelCleanup()
 	bashtool.CancelAllTasks()
 	cleanup := []func(context.Context) error{manager.Shutdown, runService.Drain}
+	if environmentManager != nil {
+		cleanup = append(cleanup, func(context.Context) error { return environmentManager.Close() })
+	}
 	if acpManager != nil {
 		cleanup = append(cleanup, acpManager.CloseAll)
 	}

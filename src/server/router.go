@@ -392,6 +392,17 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 			reloadAgentPlanMediaTool: cfg.control.ReloadAgentPlanMediaTool,
 		}
 		controlMux := http.NewServeMux()
+		controlMux.HandleFunc("GET /v1/control/environments/office", handleOfficeEnvironmentStatus)
+		controlMux.HandleFunc("POST /v1/control/environments/office/prepare", handleOfficeEnvironmentAction)
+		controlMux.HandleFunc("POST /v1/control/environments/office/repair", handleOfficeEnvironmentAction)
+		controlMux.HandleFunc("POST /v1/control/environments/prepare", handlePrepareEnvironment)
+		controlMux.HandleFunc("GET /v1/control/environments", handleInspectEnvironments)
+		controlMux.HandleFunc("POST /v1/control/environments/host-leases", handleEnvironmentHostLifecycle)
+		controlMux.HandleFunc("DELETE /v1/control/environments/host-leases/{reference}", handleEnvironmentHostLifecycle)
+		controlMux.HandleFunc("POST /v1/control/environments/components/{component}/removal", handleEnvironmentHostLifecycle)
+		controlMux.HandleFunc("DELETE /v1/control/environments/components/{component}/removal", handleEnvironmentHostLifecycle)
+		controlMux.HandleFunc("GET /v1/control/environments/components/{component}", handleInspectCLIInstallation)
+		controlMux.HandleFunc("DELETE /v1/control/environments/components/{component}", handleRemoveEnvironmentComponent)
 		controlMux.HandleFunc("GET /v1/control/runtime/identity", ctrl.handleRuntimeIdentity)
 		controlMux.HandleFunc("POST /v1/control/leases", ctrl.handleCreateLease)
 		controlMux.HandleFunc("POST /v1/control/leases/{lease_id}/heartbeat", ctrl.handleHeartbeatLease)

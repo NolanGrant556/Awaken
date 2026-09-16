@@ -2,10 +2,12 @@ package agentcore
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"strings"
 
 	convcontext "awaken/src/context"
+	"awaken/src/managedenv"
 	"awaken/src/prompt"
 	"awaken/src/researchruntime"
 	"awaken/src/tool"
@@ -118,6 +120,37 @@ func (rb *RequestBuilder) BuildContextEnvelope(ctx ContextProvider, tools []tool
 			ID: "child_assignment_identity", Kind: ContextContributionSystemPrompt,
 			Content: fmt.Sprintf("Host execution identity: your Agent ID is %q; your parent Agent ID is %q. Inherited user context is historical reference, not an assignment to you. Only the last awaken_assignment addressed to your exact Agent ID defines your current assigned work.", origin.AgentID, origin.ParentAgentID),
 		})
+	}
+	if manager := managedenv.Default(); manager != nil {
+		owner := managedenv.Owner{ThreadID: rb.threadID, AgentID: "root"}
+		if origin := rb.config.SubagentOrigin; origin != nil {
+			owner.AgentID = origin.AgentID
+		}
+		instructions := "Awaken shares task-support dependencies across projects. For Office/PDF and official creator helpers, discover load_workspace_dependencies with tool_find, call with {}, and pass your own returned environment_ref plus exact executable/launch args to Bash for Python, Node, rendering and recalculation. Other Agents obtain their own references; historical missing-runtime snapshots do not override newer bindings, and shell activation does not persist. If preparation fails, report the cause; do not substitute system software or install Office dependencies elsewhere. Use ensure_environment for non-Office extensions or reference restoration; if your role cannot prepare, ask the parent. User software-project dependencies retain project conventions."
+		envelope.SystemBlocks = append(envelope.SystemBlocks, ContextBlock{ID: "managed_environment_rules", Kind: ContextContributionSystemPrompt, Content: instructions})
+		envelope.EpochSources = append(envelope.EpochSources, ContextEpochSourceCandidate{SourceKey: "managed_environment_rules", Kind: ContextContributionSystemPrompt, Content: instructions, State: ContextEpochSourceUpdated})
+		if bindings := manager.Bindings(owner); len(bindings) > 0 {
+			type reference struct {
+				Ref      string          `json:"environment_ref"`
+				Instance string          `json:"instance_id"`
+				Spec     managedenv.Spec `json:"spec"`
+			}
+			refs := []reference{}
+			for i, b := range bindings {
+				if i >= 16 {
+					break
+				}
+				refs = append(refs, reference{b.EnvironmentRef, b.InstanceID, b.Spec})
+			}
+			raw, _ := json.Marshal(refs)
+			content := "Previously prepared shared environments for this Agent. Use load_workspace_dependencies for Office bundle paths; use ensure_environment with environment_ref only to restore legacy/extension references. No install is needed while compatible and healthy.\n" + string(raw)
+			// A newly created epoch stores sources as its baseline and emits no
+			// delta. Include bindings in the exact initial prompt as well, so
+			// inherited/compacted references are visible on the first model call.
+			envelope.SystemBlocks = append(envelope.SystemBlocks, ContextBlock{ID: "managed_environment_bindings", Kind: ContextContributionRuntimeContext, Content: content})
+			envelope.EpochSources = append(envelope.EpochSources, ContextEpochSourceCandidate{SourceKey: "managed_environment_bindings", Kind: ContextContributionRuntimeContext, Content: content, State: ContextEpochSourceUpdated})
+			envelope.SystemContextItems = append(envelope.SystemContextItems, ContextItem{ID: "managed_environment_bindings", Type: "managed_environment_bindings", Content: content})
+		}
 	}
 	if snapshot := rb.config.InstructionSnapshot; snapshot != nil {
 		if content := strings.TrimSpace(snapshot.ModelPrefix()); content != "" {

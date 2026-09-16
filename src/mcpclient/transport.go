@@ -17,6 +17,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"awaken/src/managedenv"
 	"awaken/src/networkroute"
 )
 
@@ -56,6 +57,14 @@ func buildTransport(cfg McpServerConfig, registry *InProcRegistry, authHandler a
 			return nil, TransportStdio, fmt.Errorf("resolve network route: %w", err)
 		}
 		cmd.Env = stdioChildEnv(cfg.Stdio, childEnvironment)
+		if _, ok := managedenv.RecognizePackageCommand(cfg.Stdio.Command, cfg.Stdio.Args); ok {
+			if m := managedenv.Default(); m != nil {
+				// exec.Command may resolve PATH immediately; retain the configured package command for matching.
+				cmd.Path = cfg.Stdio.Command
+				return &managedCommandTransport{command: cmd, manager: m}, TransportStdio, nil
+			}
+			return nil, TransportStdio, fmt.Errorf("environment_manager_unavailable: 共享环境管理器不可用，未启动包管理器")
+		}
 		return &mcp.CommandTransport{Command: cmd}, TransportStdio, nil
 	case TransportHTTP:
 		httpClient := buildHTTPClient(cfg.InsecureSkipVerify, cfg.HTTP.URL, cfg.HTTP.Headers)

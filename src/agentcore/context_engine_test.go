@@ -938,3 +938,44 @@ func TestShouldRetryCompactPostconditionStopsOnMandatoryFloorFailure(t *testing.
 		t.Fatal("retryable postcondition should stop after one lighter-tail retry")
 	}
 }
+
+func TestPreflightDoesNotTreatRetainedTailAsMandatoryFloor(t *testing.T) {
+	messages := []convcontext.Message{{Role: convcontext.RoleUser, Content: strings.Repeat("history ", 4000)}, {Role: convcontext.RoleAssistant, Content: "ack"}, {Role: convcontext.RoleUser, Content: "latest request"}}
+	engine := &fakeContextEngine{evaluateFn: func(envelope ContextEnvelope) ContextWindowState {
+		state := testContextWindowState(9000)
+		state.HardCompactTarget = true
+		if len(envelope.Messages) > 1 {
+			state.EstimatedTokens = 12500
+		}
+		return state
+	}}
+	g := newContextGovernor(engine, nil, nil)
+	state := testContextWindowState(96000)
+	state.HardCompactTarget = true
+	if err := g.preflightCompactTarget(LLMRequest{Messages: messages, EnvelopeDebug: &ContextEnvelope{Messages: messages}}, state, 2000); err != nil {
+		t.Fatal("replaceable tail was treated as mandatory", err)
+	}
+}
+
+func TestRunnerPreflightUsesSkillReferencesWithoutMutatingConversation(t *testing.T) {
+	config := AgentConfig{ModelConfig: ModelConfig{Model: "test-model", Protocol: "openai_responses", ContextWindow: 272000}, SkillContextBlocks: []ContextBlock{{ID: "skill-word", SkillID: "word", SourcePath: "/skills/word/SKILL.md", Content: strings.Repeat("long active skill instructions ", 4000)}}}
+	conversation := convcontext.NewConversation(nil)
+	conversation.Context.SetMessages([]convcontext.Message{{Role: convcontext.RoleUser, Content: "keep the Office binding and continue"}})
+	r := NewRunner(config, conversation, NewRequestBuilder(config))
+	req, err := r.buildLLMRequest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := r.contextGovernor.evaluateRequest(req).ContextWindowState
+	if err := r.contextGovernor.preflightCompactTarget(req, state, 1); err != nil {
+		t.Fatal("preflight retained the full replaceable Skill body", err)
+	}
+	message := convcontext.Message{Role: convcontext.RoleUser, Content: "Office binding retained; continue", CompactBoundaryID: "post-test"}
+	result := CompactResult{Mode: CompactModeAuto, BoundaryID: "post-test", SummaryMessage: message, Messages: []convcontext.Message{message}}
+	if err := r.contextGovernor.evaluateCompactPostcondition(req, state, result); err != nil {
+		t.Fatal("postcondition counted the old full Skill body", err)
+	}
+	if r.config.SkillContextBlocks[0].Compacted || r.config.RestoredContextBundleV2 != nil || conversation.Context.GetMessages()[0].Content != "keep the Office binding and continue" {
+		t.Fatal("preflight installed a draft boundary")
+	}
+}

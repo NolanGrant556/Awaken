@@ -13,6 +13,13 @@ import (
 	"awaken/src/acp"
 )
 
+func TestMissingManagerDoesNotLaunchPackageRunner(t *testing.T) {
+	_, err := NewClient(context.Background(), acp.RunnerSnapshot{ID: "package", Command: "npx", Args: []string{"-y", "example-acp"}}, t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "environment_manager_unavailable") {
+		t.Fatalf("unexpected runner result: %v", err)
+	}
+}
+
 func TestClientProcessOutlivesStartCallContext(t *testing.T) {
 	repoRoot, err := filepath.Abs(filepath.Join("..", "..", ".."))
 	if err != nil {

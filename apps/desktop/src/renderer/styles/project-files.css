@@ -1798,6 +1798,13 @@ body.is-project-file-list-resizing .project-files-workspace__body {
   place-items: center;
   width: 100%;
   min-width: 0;
+  pointer-events: none;
+}
+
+.expanded-file-composer__full,
+.expanded-file-composer__rail,
+.expanded-file-composer__pill {
+  pointer-events: auto;
 }
 
 .expanded-file-composer__full {

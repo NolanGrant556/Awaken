@@ -20,6 +20,17 @@
   min-width: 0;
 }
 
+/* Overlay dock children are 760px for the full composer. Empty stack area must
+   not steal clicks from Excel sheet tabs in the expanded file preview. Visible
+   composer chrome restores pointer events below. */
+.aw-run-stage > .aw-composer-dock > .composer-dock-stack {
+  pointer-events: none;
+}
+
+.composer-dock-stack > *:not(.expanded-file-composer) {
+  pointer-events: auto;
+}
+
 .user-question-card {
   position: relative;
   isolation: isolate;

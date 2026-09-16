@@ -5,6 +5,7 @@ import {
 } from "@awaken/design-system";
 import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { readStyleSource } from "./style-test-source";
 import {
   ExpandedFileComposer,
   expandedFileComposerCompletionKey,
@@ -18,6 +19,34 @@ import {
 } from "./WorkbenchSurfacePolicy";
 
 describe("expanded file workspace shell", () => {
+  it("lets expanded preview clicks pass through empty composer stack without moving the dock", () => {
+    const workbenchStyles = readStyleSource(
+      new URL("./styles/workbench.css", import.meta.url),
+    );
+    const projectFileStyles = readStyleSource(
+      new URL("./styles/project-files.css", import.meta.url),
+    );
+    const shellStyles = readStyleSource(
+      new URL(
+        "../../../../Awaken Design System/src/components/AwakenWorkbenchShell/AwakenWorkbenchShell.css",
+        import.meta.url,
+      ),
+    );
+
+    expect(workbenchStyles).toMatch(
+      /\.aw-run-stage > \.aw-composer-dock > \.composer-dock-stack\s*\{\s*pointer-events:\s*none;/,
+    );
+    expect(projectFileStyles).toMatch(
+      /\.expanded-file-composer\s*\{[^}]*pointer-events:\s*none;/,
+    );
+    expect(projectFileStyles).toMatch(
+      /\.expanded-file-composer__full,\s*\.expanded-file-composer__rail,\s*\.expanded-file-composer__pill\s*\{\s*pointer-events:\s*auto;/,
+    );
+    expect(shellStyles).not.toContain(
+      ".aw-workbench-shell-inspector-expanded .aw-run-stage > .aw-composer-dock",
+    );
+  });
+
   it("gives the expanded file surface the shell while keeping the composer mounted", () => {
     const stage = (
       <AwakenRunStage contentInactive composer={<div>继续输入</div>}>

@@ -137,6 +137,15 @@ describe("ProjectFilesWorkspace", () => {
     );
   });
 
+  it("keeps expanded-file composer chrome clickable while empty stack area is pointer-through", () => {
+    expect(projectFileStyles).toMatch(
+      /\.expanded-file-composer\s*\{[^}]*pointer-events:\s*none;/,
+    );
+    expect(projectFileStyles).toMatch(
+      /\.expanded-file-composer__full,\s*\.expanded-file-composer__rail,\s*\.expanded-file-composer__pill\s*\{\s*pointer-events:\s*auto;/,
+    );
+  });
+
   it("animates the file-list width, content, and divider with reduced-motion fallback", () => {
     expect(projectFileStyles).toContain(
       "transition: grid-template-columns 210ms cubic-bezier(0.2, 0.8, 0.2, 1);",

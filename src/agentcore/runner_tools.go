@@ -328,7 +328,7 @@ func (r *Runner) offloadLargeToolResult(ctx stdcontext.Context, result *ToolExec
 	}
 	result.fullContent = ""
 	projection := fmt.Sprintf(
-		"[TOOL_RESULT_OFFLOADED]\nUse tool_find to load tool_result_read, then read pages using storage_key and next_offset.\nstorage_key=%s\nsha256=%s\nbytes=%d\npreview=%s",
+		"[TOOL_RESULT_OFFLOADED]\nUse tool_find to load tool_result_read, then read only the pages needed with storage_key and next_offset. Do not ingest the entire result. Earlier retrieved pages may be dropped from later requests; re-read the same storage_key and offset if that exact page is needed again.\nstorage_key=%s\nsha256=%s\nbytes=%d\npreview=%s",
 		receipt.StorageKey, receipt.Digest, receipt.ByteSize, receipt.Preview,
 	)
 	result.Content = projection

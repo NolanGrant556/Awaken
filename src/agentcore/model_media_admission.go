@@ -85,6 +85,7 @@ func applyWindowRequestProjection(messages []convcontext.Message, opts requestPr
 		return messages
 	}
 	projected := cloneContextMessages(messages)
+	applyPagedRetrievalProjection(projected)
 	lastStart := lastSafeGroupStart(projected)
 	for i := 0; i < lastStart; i++ {
 		stubOlderMessageMedia(&projected[i], opts.capabilities)

@@ -241,6 +241,30 @@ func TestUsageAnchorFromOlderEstimatorKeepsTruthWithoutOldCalibration(t *testing
 	}
 }
 
+func TestConservativeProjectedTokensFollowsToolResultUnloadShrink(t *testing.T) {
+	state := ContextWindowState{
+		EffectiveWindow:              262144,
+		EstimatedTokens:              80_000,
+		AutoCompactThreshold:         235929,
+		CompactTarget:                26214,
+		LastAPIUsageTokens:           257_716,
+		LastSentEstimatedInputTokens: 242_230,
+		EstimatedDeltaTokens:         200,
+		ProjectionShrinkTokens:       160_000,
+	}
+	got := state.ConservativeProjectedTokens()
+	want := 257_716 - 160_000
+	if got != want {
+		t.Fatalf("ConservativeProjectedTokens=%d, want provider anchor minus unload shrink %d", got, want)
+	}
+	if state.ShouldBlock() {
+		t.Fatal("unload shrink must not keep the stale provider floor on the block line")
+	}
+	if state.ShouldAutoCompactByActualUsage() {
+		t.Fatal("unload shrink must not keep auto-compact latched to the pre-unload request")
+	}
+}
+
 func TestConservativeProjectedTokensAnchorsProviderUsageToCurrentEstimate(t *testing.T) {
 	state := testContextWindowState(14572)
 	state.LastAPIUsageTokens = 20224
@@ -615,7 +639,7 @@ func TestContextGovernorRejectsCompactThatStaysAboveAutoThreshold(t *testing.T) 
 	}
 }
 
-func TestContextGovernorRejectsCompactAboveHardTargetEvenBelowAutoThreshold(t *testing.T) {
+func TestContextGovernorAllowsCompactWhenMandatoryFloorAlreadyExceedsTenPercent(t *testing.T) {
 	envelope := ContextEnvelope{Messages: []convcontext.Message{{Role: convcontext.RoleUser, Content: strings.Repeat("x", 20_000)}}}
 	engine := &fakeContextEngine{
 		evaluateFn: func(value ContextEnvelope) ContextWindowState {
@@ -627,13 +651,36 @@ func TestContextGovernorRejectsCompactAboveHardTargetEvenBelowAutoThreshold(t *t
 	governor := newContextGovernor(engine, nil, nil)
 	preState := testContextWindowState(80_000)
 	preState.HardCompactTarget = true
+	summary := convcontext.Message{Role: convcontext.RoleUser, Content: "summary", CompactBoundaryID: "compact_floor_over_target"}
+	err := governor.evaluateCompactPostcondition(
+		LLMRequest{Messages: envelope.Messages, EnvelopeDebug: &envelope}, preState,
+		CompactResult{Mode: CompactModeAuto, BoundaryID: "compact_floor_over_target", SummaryMessage: summary, Messages: []convcontext.Message{summary}},
+	)
+	if err != nil {
+		t.Fatalf("pinned tools over 10%% must still install a conversation compact below auto/block, got %v", err)
+	}
+}
+
+func TestContextGovernorRejectsCompactAboveHardTargetWhenFloorIsReachable(t *testing.T) {
+	envelope := ContextEnvelope{Messages: []convcontext.Message{{Role: convcontext.RoleUser, Content: strings.Repeat("x", 20_000)}}}
+	engine := &fakeContextEngine{
+		evaluateFn: func(value ContextEnvelope) ContextWindowState {
+			state := testContextWindowState(20_000)
+			state.HardCompactTarget = true
+			return state
+		},
+	}
+	governor := newContextGovernor(engine, nil, nil)
+	preState := testContextWindowState(80_000)
+	preState.HardCompactTarget = true
+	tail := convcontext.Message{Role: convcontext.RoleUser, Content: strings.Repeat("kept tail ", 8_000)}
 	summary := convcontext.Message{Role: convcontext.RoleUser, Content: "summary", CompactBoundaryID: "compact_hard_post"}
 	err := governor.evaluateCompactPostcondition(
 		LLMRequest{Messages: envelope.Messages, EnvelopeDebug: &envelope}, preState,
-		CompactResult{Mode: CompactModeAuto, BoundaryID: "compact_hard_post", SummaryMessage: summary, Messages: []convcontext.Message{summary}},
+		CompactResult{Mode: CompactModeAuto, BoundaryID: "compact_hard_post", SummaryMessage: summary, Messages: []convcontext.Message{summary, tail}},
 	)
 	if err == nil || !errors.Is(err, ErrCompactTargetUnachievable) {
-		t.Fatalf("expected hard-target failure, got %v", err)
+		t.Fatalf("expected hard-target failure while mandatory floor is still reachable, got %v", err)
 	}
 }
 
@@ -671,7 +718,7 @@ func TestPostProjectionTargetFailureUsesBudgetFamilyBeforeCircuit(t *testing.T) 
 	}
 }
 
-func TestContextGovernorPreflightMandatoryFloorSkipsSummaryModelCall(t *testing.T) {
+func TestContextGovernorPreflightMandatoryFloorAboveBlockSkipsSummaryModelCall(t *testing.T) {
 	originalMessages := []convcontext.Message{
 		{Role: convcontext.RoleUser, Content: strings.Repeat("old context ", 4_000)},
 		{Role: convcontext.RoleAssistant, Content: "ack"},
@@ -681,16 +728,16 @@ func TestContextGovernorPreflightMandatoryFloorSkipsSummaryModelCall(t *testing.
 	engine := &fakeContextEngine{
 		evaluateFn: func(envelope ContextEnvelope) ContextWindowState {
 			if len(envelope.Messages) > 0 && envelope.Messages[0].CompactBoundaryID == "compact-preflight" {
-				state := testContextWindowState(12_500)
+				state := testBlockedContextWindowState(98_000)
 				state.HardCompactTarget = true
 				return state
 			}
-			state := testContextWindowState(96_000)
+			state := testBlockedContextWindowState(98_000)
 			state.HardCompactTarget = true
 			return state
 		},
 		compactFn: func(ctx stdcontext.Context, req CompactRequest) (CompactResult, error) {
-			t.Fatalf("compact summary model must not be called when preflight mandatory floor already exceeds target")
+			t.Fatalf("compact summary model must not be called when mandatory floor already exceeds the block line")
 			return CompactResult{}, nil
 		},
 	}
@@ -712,6 +759,58 @@ func TestContextGovernorPreflightMandatoryFloorSkipsSummaryModelCall(t *testing.
 	}
 	if len(sink.blocked) != 1 || !strings.Contains(sink.blocked[0], "COMPACT_TARGET_UNACHIEVABLE") {
 		t.Fatalf("expected context blocked after immediate circuit open, got %+v", sink.blocked)
+	}
+}
+
+func TestContextGovernorPreflightMandatoryFloorAboveTargetStillCompacts(t *testing.T) {
+	originalMessages := []convcontext.Message{
+		{Role: convcontext.RoleUser, Content: strings.Repeat("old context ", 4_000)},
+		{Role: convcontext.RoleAssistant, Content: "ack"},
+		{Role: convcontext.RoleUser, Content: "latest tail"},
+	}
+	compactedMessages := []convcontext.Message{{
+		Role: convcontext.RoleUser, Content: "summary", CompactBoundaryID: "compact-floor",
+	}}
+	originalEnvelope := ContextEnvelope{Messages: originalMessages}
+	compactedEnvelope := ContextEnvelope{Messages: compactedMessages}
+	engine := &fakeContextEngine{
+		evaluateFn: func(envelope ContextEnvelope) ContextWindowState {
+			if len(envelope.Messages) > 0 && envelope.Messages[0].CompactBoundaryID != "" {
+				state := testContextWindowState(12_500)
+				state.HardCompactTarget = true
+				return state
+			}
+			state := testContextWindowState(96_000)
+			state.HardCompactTarget = true
+			return state
+		},
+		compactFn: func(ctx stdcontext.Context, req CompactRequest) (CompactResult, error) {
+			return CompactResult{
+				BoundaryID: "compact-floor", SummaryMessage: compactedMessages[0],
+				Messages: compactedMessages, EstimatedTokens: 12_500,
+			}, nil
+		},
+	}
+	governor := newContextGovernor(engine, func() (LLMRequest, error) {
+		return LLMRequest{Messages: compactedMessages, EnvelopeDebug: &compactedEnvelope}, nil
+	}, func(stdcontext.Context, CompactResult) error { return nil })
+	sink := &fakeContextEventSink{}
+
+	req, err := governor.PrepareRequest(stdcontext.Background(), LLMRequest{
+		Messages:      originalMessages,
+		EnvelopeDebug: &originalEnvelope,
+	}, sink)
+	if err != nil {
+		t.Fatalf("tools over 10%% must still compact conversation, got %v", err)
+	}
+	if engine.compactCalls == 0 {
+		t.Fatal("expected compact summary to run when floor exceeds 10% but not the block line")
+	}
+	if req.ContextWindowState.EstimatedTokens != 12_500 {
+		t.Fatalf("expected rebuilt compact state, got %+v", req.ContextWindowState)
+	}
+	if len(sink.blocked) != 0 {
+		t.Fatalf("must not CONTEXT_BLOCK when conversation compact still fits, got %+v", sink.blocked)
 	}
 }
 

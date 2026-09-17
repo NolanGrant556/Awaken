@@ -11,23 +11,24 @@ import (
 )
 
 type ContextEnvelope struct {
-	SystemBlocks         []ContextBlock
-	UserContextItems     []ContextItem
-	SystemContextItems   []ContextItem
-	Attachments          []ContextAttachment
-	ToolSchemas          []tool.ToolSchema
-	AttributedTools      []AttributedToolSchema
-	RuntimeSnapshot      RuntimeSnapshot
-	ContextWindowState   ContextWindowState
-	CacheKeys            []ContextCacheKey
-	Deltas               []ContextDelta
-	Messages             []convcontext.Message
-	CompactModelConfig   ModelConfig
-	ExecutionModelConfig ModelConfig
-	Model                string
-	Temperature          float64
-	MaxTokens            int
-	EpochSources         []ContextEpochSourceCandidate
+	SystemBlocks           []ContextBlock
+	UserContextItems       []ContextItem
+	SystemContextItems     []ContextItem
+	Attachments            []ContextAttachment
+	ToolSchemas            []tool.ToolSchema
+	AttributedTools        []AttributedToolSchema
+	RuntimeSnapshot        RuntimeSnapshot
+	ContextWindowState     ContextWindowState
+	CacheKeys              []ContextCacheKey
+	Deltas                 []ContextDelta
+	Messages               []convcontext.Message
+	ProjectionShrinkTokens int
+	CompactModelConfig     ModelConfig
+	ExecutionModelConfig   ModelConfig
+	Model                  string
+	Temperature            float64
+	MaxTokens              int
+	EpochSources           []ContextEpochSourceCandidate
 }
 
 // PromptSection is a host-owned contribution wrapper. Content is sent only as

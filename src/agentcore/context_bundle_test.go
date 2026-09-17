@@ -222,16 +222,18 @@ func TestPostCompactContextBundleV2EnforcesExactHardTenPercentWhenModelLimitIsKn
 	unreachableConfig := config
 	unreachableConfig.ModelConfig.ContextWindow = 32_000
 	unreachableRunner := NewRunner(unreachableConfig, conversation, NewRequestBuilder(unreachableConfig))
-	_, err = unreachableRunner.buildPostCompactContextBundleV2(CompactResult{
+	small, err := unreachableRunner.buildPostCompactContextBundleV2(CompactResult{
 		Mode: CompactModeAuto, BoundaryID: "compact_unreachable",
 		Messages: []convcontext.Message{{Role: convcontext.RoleUser, Content: "summary", CompactBoundaryID: "compact_unreachable"}},
 	}, nil)
-	if err == nil || !errors.Is(err, ErrCompactTargetUnachievable) || !strings.Contains(err.Error(), CompactTargetUnachievableCode) {
-		t.Fatalf("mandatory floor did not return typed hard-target error: %v", err)
+	if err != nil {
+		t.Fatalf("tools over 10%% of a small window must still compact conversation: %v", err)
 	}
-	var targetErr *CompactTargetUnachievableError
-	if !errors.As(err, &targetErr) || len(targetErr.CategoryBreakdown) == 0 || !strings.Contains(err.Error(), "category_breakdown=") {
-		t.Fatalf("hard-target error omitted category breakdown: %#v", err)
+	if small.BudgetReceipt.Value == nil || small.BudgetReceipt.Value.MandatoryFloorTokens <= small.BudgetReceipt.Value.CompactTargetTokens {
+		t.Fatalf("expected mandatory floor to exceed 10%% target: %+v", small.BudgetReceipt.Value)
+	}
+	if small.BudgetReceipt.Value.ConservativeProjected >= int(float64(small.BudgetReceipt.Value.EffectiveInputTokens)*0.90) {
+		t.Fatalf("waived 10%% compact still exceeded auto-compact: %+v", small.BudgetReceipt.Value)
 	}
 }
 

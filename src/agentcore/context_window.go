@@ -48,6 +48,7 @@ type ContextWindowState struct {
 	LastAPIUsageTokens           int
 	LastSentEstimatedInputTokens int
 	EstimatedDeltaTokens         int
+	ProjectionShrinkTokens       int
 	LastCompactBoundaryID        string
 	ConsecutiveCompactFailures   int
 	HasAttemptedReactiveCompact  bool
@@ -135,16 +136,17 @@ func NewContextWindowStateWithConfig(envelope ContextEnvelope, config ContextWin
 	}
 
 	state := ContextWindowState{
-		ModelWindow:           modelWindow,
-		OutputReserve:         outputReserve,
-		EffectiveWindow:       effectiveWindow,
-		WarningThreshold:      int(float64(effectiveWindow) * 0.85),
-		AutoCompactThreshold:  autoCompactThreshold,
-		CompactTarget:         int(float64(effectiveWindow) * 0.10),
-		HardCompactTarget:     config.HardCompactTarget,
-		EstimatedTokens:       EstimateContextEnvelopeTokens(envelope),
-		EstimatedDeltaTokens:  estimateContextDeltaTokens(envelope),
-		LastCompactBoundaryID: lastCompactBoundaryID(envelope.Messages),
+		ModelWindow:            modelWindow,
+		OutputReserve:          outputReserve,
+		EffectiveWindow:        effectiveWindow,
+		WarningThreshold:       int(float64(effectiveWindow) * 0.85),
+		AutoCompactThreshold:   autoCompactThreshold,
+		CompactTarget:          int(float64(effectiveWindow) * 0.10),
+		HardCompactTarget:      config.HardCompactTarget,
+		EstimatedTokens:        EstimateContextEnvelopeTokens(envelope),
+		EstimatedDeltaTokens:   estimateContextDeltaTokens(envelope),
+		ProjectionShrinkTokens: envelope.ProjectionShrinkTokens,
+		LastCompactBoundaryID:  lastCompactBoundaryID(envelope.Messages),
 	}
 	projection := contextProjectionRequest(envelope, state)
 	snapshot := buildContextUsageSnapshot(projection, "current_projection", "", "", "", nil)
@@ -231,12 +233,17 @@ func (state ContextWindowState) ConservativeProjectedTokens() int {
 func (state ContextWindowState) actualUsageProjectedTokens() int {
 	delta := state.EstimatedDeltaTokens
 	if state.LastSentEstimatedInputTokens > 0 {
-		if pairedDelta := state.EstimatedTokens - state.LastSentEstimatedInputTokens; pairedDelta > delta {
+		pairedDelta := state.EstimatedTokens - state.LastSentEstimatedInputTokens
+		if pairedDelta > delta || (state.ProjectionShrinkTokens > 0 && pairedDelta < 0) {
 			delta = pairedDelta
 		}
 	}
 	if delta < 0 {
-		delta = 0
+		if state.ProjectionShrinkTokens <= 0 {
+			delta = 0
+		} else if -delta > state.ProjectionShrinkTokens {
+			delta = -state.ProjectionShrinkTokens
+		}
 	}
 	if delta > 0 && state.LastAPIUsageTokens > int(^uint(0)>>1)-delta {
 		return int(^uint(0) >> 1)

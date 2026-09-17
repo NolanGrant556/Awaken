@@ -479,7 +479,7 @@ func (g *contextGovernor) evaluateCompactPostcondition(llmReq LLMRequest, preSta
 			post, target = receipt.ConservativeProjected, receipt.CompactTargetTokens
 		}
 	}
-	if preState.HardCompactTarget && target > 0 && post > target {
+	if preState.HardCompactTarget && target > 0 && post > target && !compactConversationMayMissTenPercent(preState, result, post, target) {
 		return &CompactTargetUnachievableError{
 			Reason: "post_compact_projection_exceeds_target", Projected: post, Target: target, MandatoryFloor: post - estimateMessagesTokens(result.Messages),
 		}
@@ -644,12 +644,26 @@ func (g *contextGovernor) preflightCompactTarget(llmReq LLMRequest, state Contex
 	if floor <= target {
 		return nil
 	}
+	if !compactFloorExceedsBlockingThreshold(floor, state) {
+		return nil
+	}
 	return &CompactTargetUnachievableError{
 		Reason:         "pre_compact_mandatory_floor_exceeds_target",
 		Projected:      projected,
 		Target:         target,
 		MandatoryFloor: floor,
 	}
+}
+
+func compactConversationMayMissTenPercent(state ContextWindowState, result CompactResult, post, target int) bool {
+	floor := post - estimateMessagesTokens(result.Messages)
+	if floor < 0 {
+		floor = 0
+	}
+	if floor <= target {
+		return false
+	}
+	return !compactFloorExceedsBlockingThreshold(floor, state)
 }
 
 func compactFailureReason(err error) string {

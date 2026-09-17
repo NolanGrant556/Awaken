@@ -369,7 +369,10 @@ func (bundle PostCompactContextBundleV2) Validate() error {
 	if bundle.BudgetReceipt.State == MaterializationMaterialized && bundle.BudgetReceipt.Value != nil {
 		receipt := *bundle.BudgetReceipt.Value
 		if receipt.EffectiveInputTokens <= 0 || receipt.CompactTargetTokens != int(float64(receipt.EffectiveInputTokens)*0.10) ||
-			receipt.CalibrationRatio < 1 || receipt.ConservativeProjected > receipt.CompactTargetTokens || receipt.LocalProjectedTokens < 0 || receipt.MandatoryFloorTokens < 0 {
+			receipt.CalibrationRatio < 1 || receipt.LocalProjectedTokens < 0 || receipt.MandatoryFloorTokens < 0 {
+			return fmt.Errorf("budget_receipt hard target gate failed")
+		}
+		if receipt.MandatoryFloorTokens <= receipt.CompactTargetTokens && receipt.ConservativeProjected > receipt.CompactTargetTokens {
 			return fmt.Errorf("budget_receipt hard target gate failed")
 		}
 	}

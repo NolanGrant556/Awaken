@@ -4,25 +4,37 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	convcontext "awaken/src/context"
 )
 
-const toolResultPageUnloadedPrefix = "[TOOL_RESULT_PAGE_UNLOADED]"
+const (
+	priorToolResultUnloadedPrefix = "[PRIOR_TOOL_RESULT_UNLOADED]"
+	toolResultPageUnloadedPrefix  = "[TOOL_RESULT_PAGE_UNLOADED]"
+	priorToolResultKeepRunes      = 512
+	priorToolResultArgsKeepRunes  = 500
+)
 
-// applyPagedRetrievalProjection drops older retrieved pages from the request
-// clone. Durable conversation and SemanticJournal keep the full page; the next
-// turn re-reads with the same tool arguments. This matches the near-tail media
-// rule: only the latest safe group stays in the provider-visible request.
-func applyPagedRetrievalProjection(messages []convcontext.Message) {
+// applyPriorToolResultProjection drops older tool bodies from the request
+// clone. Durable conversation and SemanticJournal keep the full text. Only the
+// near-tail safe group stays provider-visible, matching media projection.
+// Earlier results become a short pointer so the next turn can re-run the tool
+// or read thread_history_read instead of stacking every prepare/execute JSON
+// until compact's 10% floor is already unreachable.
+func applyPriorToolResultProjection(messages []convcontext.Message) {
 	if len(messages) == 0 {
 		return
 	}
 	lastStart := lastSafeGroupStart(messages)
 	calls := indexToolCallsByID(messages)
 	for i := 0; i < lastStart; i++ {
-		unloadPagedRetrievalMessage(&messages[i], calls)
+		unloadPriorToolResultMessage(&messages[i], calls)
 	}
+}
+
+func applyPagedRetrievalProjection(messages []convcontext.Message) {
+	applyPriorToolResultProjection(messages)
 }
 
 func indexToolCallsByID(messages []convcontext.Message) map[string]convcontext.FunctionCall {
@@ -38,51 +50,60 @@ func indexToolCallsByID(messages []convcontext.Message) map[string]convcontext.F
 	return calls
 }
 
-func unloadPagedRetrievalMessage(message *convcontext.Message, calls map[string]convcontext.FunctionCall) {
-	if message == nil || message.Role != convcontext.RoleTool || message.IsError {
+func unloadPriorToolResultMessage(message *convcontext.Message, calls map[string]convcontext.FunctionCall) {
+	if message == nil || message.Role != convcontext.RoleTool {
 		return
 	}
-	if !isPagedRetrievalToolName(message.Name) {
+	if message.IsError && utf8.RuneCountInString(message.Content) <= priorToolResultKeepRunes {
 		return
 	}
-	if strings.Contains(message.Content, toolResultPageUnloadedPrefix) {
+	if alreadyUnloadedToolResult(message.Content) {
+		return
+	}
+	if utf8.RuneCountInString(message.Content) <= priorToolResultKeepRunes {
 		return
 	}
 	fn := calls[message.ToolCallID]
-	stub := pagedRetrievalUnloadStub(message.Name, message.ToolCallID, fn.Arguments)
-	message.Content = rewritePagedRetrievalContent(message.Content, stub)
-}
-
-func isPagedRetrievalToolName(name string) bool {
-	switch strings.TrimSpace(name) {
-	case "tool_result_read", "thread_history_read", "archived_history":
-		return true
-	default:
-		return false
+	name := strings.TrimSpace(message.Name)
+	if name == "" {
+		name = strings.TrimSpace(fn.Name)
 	}
+	stub := priorToolResultUnloadStub(name, message.ToolCallID, fn.Arguments)
+	message.Content = rewriteUnloadedToolResultContent(message.Content, stub)
 }
 
-func pagedRetrievalUnloadStub(toolName, toolCallID, arguments string) string {
+func alreadyUnloadedToolResult(content string) bool {
+	return strings.Contains(content, priorToolResultUnloadedPrefix) ||
+		strings.Contains(content, toolResultPageUnloadedPrefix) ||
+		strings.Contains(content, "[TOOL_RESULT_OFFLOADED]") ||
+		strings.Contains(content, mediaStubPrefix)
+}
+
+func priorToolResultUnloadStub(toolName, toolCallID, arguments string) string {
 	var b strings.Builder
-	b.WriteString(toolResultPageUnloadedPrefix)
+	b.WriteString(priorToolResultUnloadedPrefix)
 	b.WriteByte('\n')
-	b.WriteString("This retrieved page was dropped from the live request to keep the context window usable. Durable storage is unchanged. Call ")
-	if strings.TrimSpace(toolName) == "" {
-		b.WriteString("the same retrieval tool")
-	} else {
-		b.WriteString(toolName)
+	b.WriteString("This earlier tool result was dropped from the live request to keep the context window usable. Durable journal is unchanged. Re-run the tool for current state, or use thread_history_read for the exact previous text.\n")
+	if name := strings.TrimSpace(toolName); name != "" {
+		fmt.Fprintf(&b, "tool_name=%s\n", name)
 	}
-	b.WriteString(" again with the same arguments if this exact page is needed.\n")
 	if id := strings.TrimSpace(toolCallID); id != "" {
 		fmt.Fprintf(&b, "tool_call_id=%s\n", id)
 	}
-	if args := strings.TrimSpace(arguments); args != "" {
+	if args := boundRunes(strings.TrimSpace(arguments), priorToolResultArgsKeepRunes); args != "" {
 		fmt.Fprintf(&b, "arguments=%s\n", args)
 	}
 	return b.String()
 }
 
-func rewritePagedRetrievalContent(raw, stub string) string {
+func boundRunes(value string, limit int) string {
+	if limit <= 0 || utf8.RuneCountInString(value) <= limit {
+		return value
+	}
+	return string([]rune(value)[:limit]) + "…"
+}
+
+func rewriteUnloadedToolResultContent(raw, stub string) string {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" || !strings.HasPrefix(trimmed, "{") {
 		return stub
@@ -100,11 +121,15 @@ func rewritePagedRetrievalContent(raw, stub string) string {
 	if details == nil {
 		details = map[string]any{}
 	}
-	details["page_unloaded"] = true
+	details["prior_result_unloaded"] = true
 	payload["details"] = details
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return stub
 	}
 	return string(encoded)
+}
+
+func rewritePagedRetrievalContent(raw, stub string) string {
+	return rewriteUnloadedToolResultContent(raw, stub)
 }

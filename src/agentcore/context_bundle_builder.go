@@ -159,7 +159,50 @@ func (r *Runner) evaluatePostCompactBudgetWithRecentTurnAllocation(
 		}
 		receipt, err = r.evaluatePostCompactBudget(bundle, result, nil)
 	}
+	if err != nil && (bundle == nil || bundle.ProviderOpaqueState.State != MaterializationMaterialized) {
+		if waived, waiveErr := r.waiveUnreachableTenPercentBudget(receipt, err); waiveErr != nil {
+			return CompactBudgetReceipt{}, waiveErr
+		} else if waived {
+			return receipt, nil
+		}
+	}
 	return receipt, err
+}
+
+func (r *Runner) waiveUnreachableTenPercentBudget(receipt CompactBudgetReceipt, err error) (bool, error) {
+	var targetErr *CompactTargetUnachievableError
+	if !errors.As(err, &targetErr) || targetErr == nil || r == nil {
+		return false, err
+	}
+	if targetErr.Target <= 0 || targetErr.MandatoryFloor <= targetErr.Target {
+		return false, err
+	}
+	projected := receipt.ConservativeProjected
+	if projected <= 0 {
+		projected = targetErr.Projected
+	}
+	floor := receipt.MandatoryFloorTokens
+	if floor <= 0 {
+		floor = targetErr.MandatoryFloor
+	}
+	headroom := targetErr.Target
+	if headroom < 4096 {
+		headroom = 4096
+	}
+	if projected > floor+headroom {
+		return false, err
+	}
+	state := NewContextWindowStateWithConfig(ContextEnvelope{}, contextWindowConfigFromModelConfig(r.config.ModelConfig))
+	if compactFloorExceedsBlockingThreshold(floor, state) {
+		return false, err
+	}
+	if state.AutoCompactThreshold > 0 && projected >= state.AutoCompactThreshold {
+		return false, err
+	}
+	if compactFloorExceedsBlockingThreshold(projected, state) {
+		return false, err
+	}
+	return true, nil
 }
 
 func deferPostCompactSkillProjection(bundle *PostCompactContextBundleV2) error {

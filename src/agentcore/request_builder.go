@@ -274,6 +274,7 @@ func (rb *RequestBuilder) BuildContextEnvelope(ctx ContextProvider, tools []tool
 		State:     ContextEpochSourceUpdated,
 	})
 	envelope.ContextWindowState = NewContextEngine(contextWindowConfigFromModelConfig(rb.config.ModelConfig)).Evaluate(envelope)
+	beforeProjection := estimateMessagesTokens(envelope.Messages)
 	envelope.Messages = applyWindowRequestProjection(envelope.Messages, requestProjectionOptions{
 		capabilities: rb.config.ModelConfig.Capabilities,
 		windowConfig: contextWindowConfigFromModelConfig(rb.config.ModelConfig),
@@ -281,6 +282,9 @@ func (rb *RequestBuilder) BuildContextEnvelope(ctx ContextProvider, tools []tool
 		threadID:     rb.threadID,
 		store:        rb.config.ModelContentStore,
 	})
+	if shrink := beforeProjection - estimateMessagesTokens(envelope.Messages); shrink > 0 {
+		envelope.ProjectionShrinkTokens = shrink
+	}
 	envelope.ContextWindowState = NewContextEngine(contextWindowConfigFromModelConfig(rb.config.ModelConfig)).Evaluate(envelope)
 	return envelope
 }

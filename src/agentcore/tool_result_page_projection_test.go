@@ -24,19 +24,19 @@ func TestRequestProjectionUnloadsOlderRetrievedPagesAndKeepsNearTail(t *testing.
 	original := cloneContextMessages(messages)
 
 	projected := applyWindowRequestProjection(messages, requestProjectionOptions{})
-	if projected[2].Content == messages[2].Content || !strings.Contains(projected[2].Content, toolResultPageUnloadedPrefix) {
+	if projected[2].Content == messages[2].Content || !strings.Contains(projected[2].Content, priorToolResultUnloadedPrefix) {
 		t.Fatalf("older page 0 should unload, got %q", projected[2].Content)
 	}
-	if !strings.Contains(projected[2].Content, `"page_unloaded":true`) {
-		t.Fatalf("unloaded JSON should keep a page_unloaded receipt, got %q", projected[2].Content)
+	if !strings.Contains(projected[2].Content, `"prior_result_unloaded":true`) {
+		t.Fatalf("unloaded JSON should keep a prior_result_unloaded receipt, got %q", projected[2].Content)
 	}
 	if strings.Contains(projected[2].Content, "PAGE-ZERO-") {
 		t.Fatal("unloaded page 0 leaked original body into the request")
 	}
-	if !strings.Contains(projected[4].Content, toolResultPageUnloadedPrefix) || strings.Contains(projected[4].Content, "PAGE-ONE--") {
+	if !strings.Contains(projected[4].Content, priorToolResultUnloadedPrefix) || strings.Contains(projected[4].Content, "PAGE-ONE--") {
 		t.Fatalf("older page 1 should unload, got %q", projected[4].Content)
 	}
-	if strings.Contains(projected[6].Content, toolResultPageUnloadedPrefix) || !strings.Contains(projected[6].Content, "PAGE-TWO--") {
+	if strings.Contains(projected[6].Content, priorToolResultUnloadedPrefix) || !strings.Contains(projected[6].Content, "PAGE-TWO--") {
 		t.Fatalf("near-tail page should stay, got %q", projected[6].Content)
 	}
 	if original[2].Content != messages[2].Content || !strings.Contains(original[2].Content, "PAGE-ZERO-") {
@@ -56,7 +56,7 @@ func TestNewUserTurnUnloadsPreviousRetrievedPages(t *testing.T) {
 		{Role: convcontext.RoleUser, Content: "full outbound now"},
 	}
 	projected := applyWindowRequestProjection(messages, requestProjectionOptions{})
-	if !strings.Contains(projected[2].Content, toolResultPageUnloadedPrefix) {
+	if !strings.Contains(projected[2].Content, priorToolResultUnloadedPrefix) {
 		t.Fatalf("previous-turn page should unload when a new user turn starts, got %q", projected[2].Content)
 	}
 	if strings.Contains(projected[2].Content, "INBOUND-JSON-") {
@@ -109,10 +109,10 @@ func TestBuildLLMRequestUnloadsOlderToolResultReadPages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(req.Messages[2].Content, toolResultPageUnloadedPrefix) || strings.Contains(req.Messages[2].Content, "RECEIPT-LINE-") {
+	if !strings.Contains(req.Messages[2].Content, priorToolResultUnloadedPrefix) || strings.Contains(req.Messages[2].Content, "RECEIPT-LINE-") {
 		t.Fatalf("previous-turn retrieved page should leave the live request, got %q", req.Messages[2].Content)
 	}
-	if strings.Contains(req.Messages[5].Content, toolResultPageUnloadedPrefix) || !strings.Contains(req.Messages[5].Content, "NOTICE-LINE-") {
+	if strings.Contains(req.Messages[5].Content, priorToolResultUnloadedPrefix) || !strings.Contains(req.Messages[5].Content, "NOTICE-LINE-") {
 		t.Fatalf("current-turn page should stay, got %q", req.Messages[5].Content)
 	}
 	durable := conv.Context.GetMessages()
@@ -130,8 +130,99 @@ func TestThreadHistoryReadPagesUnloadLikeToolResultRead(t *testing.T) {
 		{Role: convcontext.RoleUser, Content: "continue outbound"},
 	}
 	projected := applyWindowRequestProjection(messages, requestProjectionOptions{})
-	if !strings.Contains(projected[2].Content, toolResultPageUnloadedPrefix) || strings.Contains(projected[2].Content, "JOURNAL-ITEM-") {
+	if !strings.Contains(projected[2].Content, priorToolResultUnloadedPrefix) || strings.Contains(projected[2].Content, "JOURNAL-ITEM-") {
 		t.Fatalf("older thread_history_read page should unload, got %q", projected[2].Content)
+	}
+}
+
+func TestNewUserTurnUnloadsPreviousInlineMCPResults(t *testing.T) {
+	old := strings.Repeat("PO-260917007-PREPARE-JSON-", 80)
+	latest := strings.Repeat("PO-260917012-EXECUTE-JSON-", 40)
+	messages := []convcontext.Message{
+		{Role: convcontext.RoleUser, Content: "出采购单"},
+		{
+			Role: convcontext.RoleAssistant,
+			ToolCalls: []convcontext.ToolCall{{
+				ID: "prep", Function: convcontext.FunctionCall{Name: "tianhui_material_receipt", Arguments: `{"action":"prepare","bill_num":"PO-260917007"}`},
+			}},
+		},
+		{Role: convcontext.RoleTool, ToolCallID: "prep", Name: "tianhui_material_receipt", Content: old},
+		{Role: convcontext.RoleUser, Content: "全量入仓"},
+		{
+			Role: convcontext.RoleAssistant,
+			ToolCalls: []convcontext.ToolCall{{
+				ID: "exec", Function: convcontext.FunctionCall{Name: "tianhui_material_receipt", Arguments: `{"action":"execute","plan_id":"abc"}`},
+			}},
+		},
+		{Role: convcontext.RoleTool, ToolCallID: "exec", Name: "tianhui_material_receipt", Content: latest},
+	}
+	projected := applyWindowRequestProjection(messages, requestProjectionOptions{})
+	if !strings.Contains(projected[2].Content, priorToolResultUnloadedPrefix) || strings.Contains(projected[2].Content, "PO-260917007-PREPARE-JSON-") {
+		t.Fatalf("previous-turn MCP body should unload, got %q", projected[2].Content)
+	}
+	if !strings.Contains(projected[2].Content, "tool_name=tianhui_material_receipt") || !strings.Contains(projected[2].Content, "PO-260917007") {
+		t.Fatalf("unload stub should name the tool and keep bounded arguments, got %q", projected[2].Content)
+	}
+	if strings.Contains(projected[5].Content, priorToolResultUnloadedPrefix) || !strings.Contains(projected[5].Content, "PO-260917012-EXECUTE-JSON-") {
+		t.Fatalf("current-turn MCP body should stay, got %q", projected[5].Content)
+	}
+	if utf8Count := len([]rune(old)); utf8Count <= priorToolResultKeepRunes {
+		t.Fatal("fixture too small to exercise unload")
+	}
+}
+
+func TestSameUserTurnUnloadsEarlierInlineMCPPairings(t *testing.T) {
+	first := strings.Repeat("PO-260917007-PREPARE-JSON-", 80)
+	second := strings.Repeat("PO-260917007-EXECUTE-JSON-", 80)
+	latest := strings.Repeat("PO-260917008-PREPARE-JSON-", 40)
+	messages := []convcontext.Message{
+		{Role: convcontext.RoleUser, Content: "全量入仓"},
+		{
+			Role: convcontext.RoleAssistant,
+			ToolCalls: []convcontext.ToolCall{{
+				ID: "prep-7", Function: convcontext.FunctionCall{Name: "tianhui_material_receipt", Arguments: `{"action":"prepare","bill_num":"PO-260917007"}`},
+			}},
+		},
+		{Role: convcontext.RoleTool, ToolCallID: "prep-7", Name: "tianhui_material_receipt", Content: first},
+		{
+			Role: convcontext.RoleAssistant,
+			ToolCalls: []convcontext.ToolCall{{
+				ID: "exec-7", Function: convcontext.FunctionCall{Name: "tianhui_material_receipt", Arguments: `{"action":"execute","plan_id":"plan-7"}`},
+			}},
+		},
+		{Role: convcontext.RoleTool, ToolCallID: "exec-7", Name: "tianhui_material_receipt", Content: second},
+		{
+			Role: convcontext.RoleAssistant,
+			ToolCalls: []convcontext.ToolCall{{
+				ID: "prep-8", Function: convcontext.FunctionCall{Name: "tianhui_material_receipt", Arguments: `{"action":"prepare","bill_num":"PO-260917008"}`},
+			}},
+		},
+		{Role: convcontext.RoleTool, ToolCallID: "prep-8", Name: "tianhui_material_receipt", Content: latest},
+	}
+	projected := applyWindowRequestProjection(messages, requestProjectionOptions{})
+	if !strings.Contains(projected[2].Content, priorToolResultUnloadedPrefix) || strings.Contains(projected[2].Content, "PO-260917007-PREPARE-JSON-") {
+		t.Fatalf("earlier prepare in the same user turn should unload, got %q", projected[2].Content)
+	}
+	if !strings.Contains(projected[4].Content, priorToolResultUnloadedPrefix) || strings.Contains(projected[4].Content, "PO-260917007-EXECUTE-JSON-") {
+		t.Fatalf("earlier execute in the same user turn should unload, got %q", projected[4].Content)
+	}
+	if strings.Contains(projected[6].Content, priorToolResultUnloadedPrefix) || !strings.Contains(projected[6].Content, "PO-260917008-PREPARE-JSON-") {
+		t.Fatalf("latest pairing should stay, got %q", projected[6].Content)
+	}
+}
+
+func TestProjectionKeepsShortPriorToolResults(t *testing.T) {
+	messages := []convcontext.Message{
+		{Role: convcontext.RoleUser, Content: "run"},
+		{Role: convcontext.RoleAssistant, ToolCalls: []convcontext.ToolCall{{
+			ID: "ok", Function: convcontext.FunctionCall{Name: "Bash", Arguments: `{"command":"true"}`},
+		}}},
+		{Role: convcontext.RoleTool, ToolCallID: "ok", Name: "Bash", Content: "ok"},
+		{Role: convcontext.RoleUser, Content: "next"},
+	}
+	projected := applyWindowRequestProjection(messages, requestProjectionOptions{})
+	if projected[2].Content != "ok" {
+		t.Fatalf("short prior results should stay, got %q", projected[2].Content)
 	}
 }
 
@@ -174,7 +265,7 @@ func pagePayload(page string, offset int) string {
 
 func TestRewritePagedRetrievalContentKeepsDetails(t *testing.T) {
 	raw := pagePayload("BODY", 2048)
-	got := rewritePagedRetrievalContent(raw, toolResultPageUnloadedPrefix+"\nstub")
+	got := rewritePagedRetrievalContent(raw, priorToolResultUnloadedPrefix+"\nstub")
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(got), &payload); err != nil {
 		t.Fatal(err)
@@ -183,7 +274,7 @@ func TestRewritePagedRetrievalContentKeepsDetails(t *testing.T) {
 		t.Fatalf("truncated=%v", payload["truncated"])
 	}
 	details, _ := payload["details"].(map[string]any)
-	if details["page_unloaded"] != true || details["offset"].(float64) != 2048 {
+	if details["prior_result_unloaded"] != true || details["offset"].(float64) != 2048 {
 		t.Fatalf("details=%v", details)
 	}
 }

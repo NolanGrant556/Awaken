@@ -101,6 +101,11 @@ func (r *Runner) evaluatePostCompactBudget(bundle *PostCompactContextBundleV2, r
 	}
 }
 
+func compactFloorExceedsBlockingThreshold(floor int, state ContextWindowState) bool {
+	block := state.blockingThreshold()
+	return block > 0 && floor >= block
+}
+
 func (r *Runner) projectConfigTokens(config AgentConfig, messages []convcontext.Message) (int, map[string]int, error) {
 	conversation := convcontext.NewConversation(nil)
 	conversation.Context.SetMessages(stripProviderOpaqueCompactionState(messages))

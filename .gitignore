@@ -30,6 +30,7 @@ apps/*/*.tsbuildinfo
 # IDE files
 .vscode/
 .idea/
+.obsidian/
 *.swp
 *.swo
 *~

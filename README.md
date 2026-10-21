@@ -6,6 +6,69 @@ Awaken 是一个本地优先的桌面智能体产品。它以 Awaken Desktop 为
 
 本仓库中的文档只描述当前实现、当前 Desktop 行为、仍有效的产品设计和当前验收结论。详细事实按功能域进入 `docs/`；本 README 只承担项目总入口。
 
+## 界面与功能
+
+以下截图来自 macOS 上实际运行的 Awaken Desktop 开发版。文件交付示例使用豆包 Doubao-Seed-Evolving 和虚构销售数据；截图中的模型、插件与技能取决于本机配置。
+
+### 项目与任务工作台
+
+在工作台中描述任务、选择模型，并按需加入技能与插件。左侧按项目组织会话，中间查看执行过程和结果，右侧打开文件与交付物。
+
+![Awaken 项目与任务工作台](apps/desktop/resources/readme-screenshots/01-workbench.jpg)
+
+### 从任务到文件交付
+
+把数据整理成 Excel 分析表和 Markdown 经营简报，完成后从交付卡片打开文件，在同一工作台查看结果。
+
+本例生成了销售明细、汇总分析和图表，使用的销售数据均为虚构数据。演示过程中补充了本机 Python 路径后完成生成；文件生成所需环境及当前限制见[本机依赖与文件生成](docs/03_运行时与本地服务/本机依赖与文件生成/需求文档.md)。
+
+![任务完成后的文件交付卡片](apps/desktop/resources/readme-screenshots/06-task-delivery.jpg)
+
+![Excel 汇总分析与图表预览](apps/desktop/resources/readme-screenshots/07-excel-preview.jpg)
+
+<details>
+<summary>查看经营简报与任务执行过程</summary>
+
+![Markdown 经营简报预览](apps/desktop/resources/readme-screenshots/08-report-preview.jpg)
+
+![豆包调用工具生成文件的执行过程](apps/desktop/resources/readme-screenshots/09-task-execution.jpg)
+
+</details>
+
+### 内置技能与项目技能
+
+通过 Skills 为任务提供操作方法和配套资源。内置 Word、Excel、PowerPoint、PDF 等技能，也支持安装自己的 Skill 包。项目视图按项目组织技能，可以查看数量并进入管理；其他来源通过 Awaken Skills、全局 Skills 和 Agents Skills 页签查看。
+
+![Awaken 内置技能](apps/desktop/resources/readme-screenshots/02-skills.jpg)
+
+![按项目组织与管理 Skills](apps/desktop/resources/readme-screenshots/10-project-skills.jpg)
+
+### 办公插件
+
+在插件页配置 Outlook、钉钉和飞书，完成相应服务的安装与授权后，在任务中选择使用。更多外部工具可通过 MCP 连接，具体范围见[连接器](#07_连接器)与[插件](#14_插件)。
+
+![Outlook、钉钉与飞书插件入口](apps/desktop/resources/readme-screenshots/03-plugins.jpg)
+
+### 模型选择与推理强度
+
+在输入框中切换已配置的模型。对支持推理强度的模型，还可以选择对应档位；可选档位随模型而定。文件交付示例使用豆包，下方推理强度界面展示 Kimi 的 low、high 和 max。
+
+![选择已配置的模型](apps/desktop/resources/readme-screenshots/05-model-selection.jpg)
+
+![调整模型推理强度](apps/desktop/resources/readme-screenshots/11-reasoning-effort.jpg)
+
+### API 与套餐用量
+
+在应用内查询已配置供应商的用量或余额。下图展示 DeepSeek 的可用余额、赠送额度和充值余额；可查询内容及是否可用取决于供应商接口和账号配置，截图数值仅代表拍摄时的状态。
+
+![DeepSeek 余额与额度查询](apps/desktop/resources/readme-screenshots/12-provider-usage.jpg)
+
+### 定时任务
+
+从模板创建循环任务、指定时间的任务或固定提醒，管理执行时间并查看运行记录。定时任务依赖 Awaken 运行，应用完全退出后不会执行。
+
+![定时任务模板](apps/desktop/resources/readme-screenshots/04-automation-templates.jpg)
+
 ## 当前产品形态
 
 当前主产品是 Electron + React 的 Awaken Desktop，主界面为 Run Workbench：

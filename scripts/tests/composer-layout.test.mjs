@@ -62,18 +62,27 @@ app.whenReady().then(async () => {
     delete env.ELECTRON_RUN_AS_NODE;
     const electronArgs = [join(temp, "main.cjs")];
     if (process.platform === "linux") {
+      // The setuid chrome-sandbox cannot open xvfb's X socket, so the window never paints.
       env.ELECTRON_OZONE_PLATFORM_HINT = "x11";
-      electronArgs.unshift("--disable-gpu", "--ozone-platform=x11");
+      env.DBUS_SESSION_BUS_ADDRESS = "/dev/null";
+      electronArgs.unshift("--no-sandbox", "--disable-gpu", "--ozone-platform=x11");
     }
     child = spawn(require("electron"), electronArgs, { env, stdio: ["ignore", "pipe", "pipe"] });
     let output = "";
     child.stdout.on("data", chunk => { output += chunk; });
     child.stderr.on("data", chunk => { output += chunk; });
-    const timer = setTimeout(() => child.kill(), 30000);
+    const timer = setTimeout(() => child.kill("SIGKILL"), 45000);
     const [code] = await once(child, "exit");
     clearTimeout(timer);
     assert.equal(code, 0, output);
-    const results = JSON.parse(await readFile(join(temp, "results.json"), "utf8"));
+    const resultsPath = join(temp, "results.json");
+    let raw;
+    try {
+      raw = await readFile(resultsPath, "utf8");
+    } catch (error) {
+      assert.fail(`${error instanceof Error ? error.message : error}\n${output}`);
+    }
+    const results = JSON.parse(raw);
     for (const result of results) {
       await t.test(result.name, () => assert.equal(result.passed, true, result.error));
     }

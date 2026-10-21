@@ -65,14 +65,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Configure the Electron sandbox helper
-        run: |
-          set -euo pipefail
-          node node_modules/electron/install.js
-          sandbox="node_modules/electron/dist/chrome-sandbox"
-          test -f "$sandbox"
-          sudo chown root:root "$sandbox"
-          sudo chmod 4755 "$sandbox"
+      - name: Install the Electron binary
+        run: node node_modules/electron/install.js
 
       - name: Typecheck Design System and Desktop
         run: |

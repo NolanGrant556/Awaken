@@ -60,7 +60,12 @@ app.whenReady().then(async () => {
 `);
     const env = { ...process.env };
     delete env.ELECTRON_RUN_AS_NODE;
-    child = spawn(require("electron"), [join(temp, "main.cjs")], { env, stdio: ["ignore", "pipe", "pipe"] });
+    const electronArgs = [join(temp, "main.cjs")];
+    if (process.platform === "linux") {
+      env.ELECTRON_OZONE_PLATFORM_HINT = "x11";
+      electronArgs.unshift("--disable-gpu", "--ozone-platform=x11");
+    }
+    child = spawn(require("electron"), electronArgs, { env, stdio: ["ignore", "pipe", "pipe"] });
     let output = "";
     child.stdout.on("data", chunk => { output += chunk; });
     child.stderr.on("data", chunk => { output += chunk; });

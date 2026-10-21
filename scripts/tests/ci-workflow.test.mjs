@@ -57,7 +57,7 @@ describe("GitHub CI", () => {
     const script = runs(ci.jobs.unit);
     assert.match(script, /typecheck:desktop/);
     assert.match(script, /@awaken\/desktop run test/);
-    assert.match(script, /test:scripts/);
+    assert.match(script, /xvfb-run -a --server-args="-screen 0 1280x1024x24" npm run test:scripts/);
     assert.match(script, /node node_modules\/electron\/install\.js/);
     assert.match(script, /node_modules\/electron\/dist\/chrome-sandbox/);
     assert.match(script, /chmod 4755/);

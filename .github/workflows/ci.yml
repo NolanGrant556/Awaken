@@ -89,8 +89,11 @@ jobs:
       - name: Design System unit tests
         run: npm --workspace @awaken/design-system run test
 
+      - name: Install a virtual display
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
       - name: Script and release-contract tests
-        run: npm run test:scripts
+        run: xvfb-run -a --server-args="-screen 0 1280x1024x24" npm run test:scripts
 
       - name: Python skill and resource tests
         run: |

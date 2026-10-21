@@ -134,10 +134,14 @@ export const PATH_RULES = [
 // never reported.
 export const SECRET_RULES = [
   { id: "github-token", pattern: /ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}/ },
-  { id: "openai-api-key", pattern: /sk-(?!ant-)(?:proj-)?[A-Za-z0-9_-]{20,}/ },
+  // `task-…` class names and GFM anchors contain the letters `sk-`. A key is a
+  // separate token, so the `sk-` must not continue an identifier.
+  { id: "openai-api-key", pattern: /(?<![A-Za-z0-9])sk-(?!ant-)(?:proj-)?[A-Za-z0-9_-]{20,}/ },
   { id: "anthropic-api-key", pattern: /sk-ant-[A-Za-z0-9_-]{20,}/ },
   { id: "aws-access-key", pattern: /AKIA[0-9A-Z]{16}/ },
-  { id: "private-key", pattern: /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/ },
+  // A quoted header or a short placeholder is not key material. Require a
+  // base64 body; the checked fixture body is 18 characters.
+  { id: "private-key", pattern: /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----(?:\\n|\s)*[A-Za-z0-9+/=]{16,}/ },
 ];
 
 export function isTextContent(buffer) {

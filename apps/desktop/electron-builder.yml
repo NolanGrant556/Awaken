@@ -27,6 +27,12 @@ files:
   - "!dist/**/*.map"
   - "!dist/**/__tests__/**"
   - "!dist/**/fixtures/**"
+  # Production dependencies are copied with only the negative patterns above.
+  # One-level node_modules ignores do not reach scoped packages or nested tests.
+  - "!**/*.map"
+  - "!**/*.{test,spec}.*"
+  - "!**/__tests__{,/**}"
+  - "!**/{playwright-tests,tests-examples}{,/**}"
   - "!**/node_modules/*/{CHANGELOG.md,README.md,readme.md,readme}"
   - "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}"
   - "!**/.{idea,git,cache,vscode,DS_Store}"
@@ -55,6 +61,8 @@ extraResources:
       - "!node/include/**/*"
       - "!node/share/doc/**/*"
       - "!node/share/man/**/*"
+      - "!node/node_modules/npm/docs/**/*"
+      - "!node/node_modules/npm/man/**/*"
       - "!node/README.md"
       - "!node/CHANGELOG.md"
       - "!**/*.map"

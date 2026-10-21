@@ -286,6 +286,28 @@ describe("audit-package-contents", () => {
     assert.equal(report.includes("ghp_abcdefghijklmnopqrstuvwxyz0123456789"), false);
   });
 
+  it("does not treat task-class names or PEM header examples as secrets", () => {
+    const root = makeTree({
+      "dist/renderer/assets/app.css":
+        ".aw-scheduled-task-editor__picker-trigger { color: red; }\n",
+      "dist/renderer/assets/markdown.js":
+        "see https://github.github.com/gfm/#task-list-items-extension-here\n",
+      "node/npm/definitions.js":
+        'key="-----BEGIN PRIVATE KEY-----\\n<key>\\n-----END PRIVATE KEY-----"',
+      "dist/main/real-key.js": `const apiKey = "sk-${"a".repeat(24)}";`,
+    });
+    const inventory = buildInventory(root);
+    const violations = auditInventory(inventory, (entry) =>
+      readFileSync(join(root, ...entry.path.split("/"))),
+    );
+    const rulesByPath = new Map(violations.map((v) => [v.path, v.rule]));
+    assert.equal(rulesByPath.get("dist/renderer/assets/app.css"), undefined);
+    assert.equal(rulesByPath.get("dist/renderer/assets/markdown.js"), undefined);
+    assert.equal(rulesByPath.get("node/npm/definitions.js"), undefined);
+    assert.equal(rulesByPath.get("dist/main/real-key.js"), "openai-api-key");
+    assert.equal(JSON.stringify(violations).includes("a".repeat(24)), false);
+  });
+
   it("diffs inventories path by path", () => {
     const rootA = makeTree({ "keep.js": "same", "change.js": "old", "gone.js": "x" });
     const rootB = makeTree({ "keep.js": "same", "change.js": "new!", "added.js": "y" });
@@ -418,6 +440,10 @@ describe("release config contract", () => {
       "!dist/**/*.map",
       "!dist/**/__tests__/**",
       "!dist/**/fixtures/**",
+      "!**/*.map",
+      "!**/*.{test,spec}.*",
+      "!**/__tests__{,/**}",
+      "!**/{playwright-tests,tests-examples}{,/**}",
     ]) {
       assert.equal(config.files.includes(exclusion), true, `files excludes ${exclusion}`);
     }
@@ -429,6 +455,8 @@ describe("release config contract", () => {
       "!node/include/**/*",
       "!node/share/doc/**/*",
       "!node/share/man/**/*",
+      "!node/node_modules/npm/docs/**/*",
+      "!node/node_modules/npm/man/**/*",
       "!node/README.md",
       "!node/CHANGELOG.md",
       "!**/*.map",

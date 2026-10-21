@@ -670,7 +670,9 @@ func TestExecutorTimeout(t *testing.T) {
 
 func TestExecutorCancel(t *testing.T) {
 	f := newExecutorFixture(t)
+	started := make(chan struct{})
 	f.probe.setRun(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+		close(started)
 		<-ctx.Done()
 		return "", ctx.Err()
 	})
@@ -684,14 +686,28 @@ func TestExecutorCancel(t *testing.T) {
 		runID, _, execErr := f.executor.ExecuteAgent(context.Background(), task, Execution{ExecutionID: "exec_1"})
 		done <- outcome{runID: runID, execErr: execErr}
 	}()
-	// Wait until the run is active on the thread; registerActive lands right
-	// after StartScheduledRun returns, so retry the no-op early cancels.
+
+	// ActiveRunID is cleared as soon as the cancelled run finishes, so the
+	// id has to be latched while the probe is still blocked. registerActive
+	// happens after StartScheduledRun returns and can lag this signal by one
+	// statement; Cancel before that is a no-op and must be retried.
+	select {
+	case <-started:
+	case result := <-done:
+		t.Fatalf("ExecuteAgent finished before the run blocked: runID=%s execErr=%+v", result.runID, result.execErr)
+	case <-time.After(15 * time.Second):
+		t.Fatal("run never started")
+	}
+
 	deadline := time.Now().Add(15 * time.Second)
+	var runID string
 	for {
-		runID := ""
-		for _, snapshot := range f.service.ListThreads(runtime.ThreadListViewActive) {
-			if snapshot.ActiveRunID != "" {
-				runID = snapshot.ActiveRunID
+		if runID == "" {
+			for _, snapshot := range f.service.ListThreads(runtime.ThreadListViewActive) {
+				if snapshot.ActiveRunID != "" {
+					runID = snapshot.ActiveRunID
+					break
+				}
 			}
 		}
 		if runID != "" {
@@ -700,8 +716,18 @@ func TestExecutorCancel(t *testing.T) {
 				break
 			}
 		}
+		select {
+		case result := <-done:
+			if result.execErr != nil && result.execErr.Code == ErrorCodeRunCancelled && result.execErr.Cancelled {
+				waitForServiceRunStatus(t, f.service, result.runID, runtime.RunStatusCancelled)
+				return
+			}
+			t.Fatalf("ExecuteAgent finished before cancel: runID=%s execErr=%+v", result.runID, result.execErr)
+		default:
+		}
 		if time.Now().After(deadline) {
-			t.Fatalf("run never took the cancel")
+			run, err := f.service.GetRun(runID)
+			t.Fatalf("run never took the cancel: runID=%q err=%v status=%s cancelRequested=%v", runID, err, run.Status, run.CancelRequested)
 		}
 		f.executor.Cancel(task.TaskID)
 		time.Sleep(10 * time.Millisecond)

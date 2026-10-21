@@ -310,6 +310,13 @@ jobs:
     permissions:
       contents: write
     steps:
+      # gh release create resolves the repository through git. Downloaded
+      # artifacts alone are not a checkout, so this step is required.
+      - name: Checkout the published commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
       - name: Download macOS package
         uses: actions/download-artifact@v4
         with:
@@ -325,6 +332,7 @@ jobs:
       - name: Publish prerelease in this repository
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           tag="ci-${GITHUB_SHA}"

@@ -109,6 +109,11 @@ describe("GitHub CI", () => {
     assert.match(script, /--prerelease/);
     assert.match(script, /--latest=false/);
     assert.equal(publishStep.env.GH_TOKEN, "${{ github.token }}");
+    assert.equal(publishStep.env.GH_REPO, "${{ github.repository }}");
+    assert.ok(
+      publish.steps.some((step) => step.uses === "actions/checkout@v4"),
+      "gh release create needs a git checkout",
+    );
   });
 
   it("still blocks the signed release workflow until the installed-app upgrade smoke exists", () => {

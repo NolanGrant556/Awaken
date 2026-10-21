@@ -58,6 +58,8 @@ describe("GitHub CI", () => {
     assert.match(script, /typecheck:desktop/);
     assert.match(script, /@awaken\/desktop run test/);
     assert.match(script, /test:scripts/);
+    assert.match(script, /node_modules\/electron\/dist\/chrome-sandbox/);
+    assert.match(script, /chmod 4755/);
     assert.match(script, /python -m pip install --disable-pip-version-check 'lxml==6\.1\.3' 'openpyxl==3\.1\.5'/);
     assert.match(script, /test:python/);
     assert.match(script, /check:builtin-plugins/);

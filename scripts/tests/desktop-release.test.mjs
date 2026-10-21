@@ -32,6 +32,7 @@ import {
   compareInventories,
   extractAsar,
   inventoriesEqual,
+  writeReceipt,
 } from "../release/audit-package-contents.mjs";
 import {
   filterDmgArtifacts,
@@ -211,6 +212,18 @@ describe("verify-update-artifacts", () => {
 // --- audit-package-contents --------------------------------------------------
 
 describe("audit-package-contents", () => {
+  it("creates a missing receipt directory", () => {
+    const root = mkdtempSync(join(tmpdir(), "awaken-audit-receipt-"));
+    const receipt = join(root, "smoke-evidence", "audit-receipt-windows.json");
+    try {
+      writeReceipt(receipt, { violations: [], artifacts: [] });
+      assert.equal(existsSync(receipt), true);
+      assert.deepEqual(JSON.parse(readFileSync(receipt, "utf8")).artifacts, []);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("builds a sorted path/size/sha256 inventory", () => {
     const root = makeTree({
       "b/second.js": "two",

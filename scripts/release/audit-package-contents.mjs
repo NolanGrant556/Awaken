@@ -22,6 +22,7 @@ import {
   cpSync,
   existsSync,
   lstatSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -30,7 +31,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const LOG_PREFIX = "[audit-package-contents]";
@@ -386,6 +387,15 @@ export function auditArtifactDir(dir) {
   return report;
 }
 
+// CI passes a receipt under smoke-evidence/, which does not exist until the
+// first evidence file is written. Create the parent so a finished audit is
+// not reported as ENOENT.
+export function writeReceipt(receiptPath, report) {
+  const target = resolve(receiptPath);
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, `${JSON.stringify(report, null, 2)}\n`);
+}
+
 export function parseCliArgs(argv) {
   const args = { dir: undefined, receipt: undefined };
   for (let index = 0; index < argv.length; index += 1) {
@@ -413,7 +423,7 @@ if (resolve(process.argv[1] || "") === fileURLToPath(import.meta.url)) {
     const args = parseCliArgs(process.argv.slice(2));
     report = auditArtifactDir(args.dir);
     if (args.receipt) {
-      writeFileSync(args.receipt, `${JSON.stringify(report, null, 2)}\n`);
+      writeReceipt(args.receipt, report);
       log(`receipt written: ${args.receipt}`);
     }
   } catch (error) {

@@ -109,6 +109,9 @@ jobs:
           npm run check:docs-links
           python3 -B .codex/skills/llm-provider-management/scripts/check_provider_docs.py
 
+      - name: Install the CUA host dependencies
+        run: node scripts/prepare-cua-driver.mjs
+
       - name: Go unit tests
         run: go test -count=1 ./...
 

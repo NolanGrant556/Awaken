@@ -72,6 +72,7 @@ describe("GitHub CI", () => {
     assert.match(script, /check:builtin-plugins/);
     assert.match(script, /check-docs\.mjs/);
     assert.match(script, /check_provider_docs\.py/);
+    assert.match(script, /prepare-cua-driver\.mjs/);
     assert.match(script, /go test -count=1 \.\/\.\.\./);
     assert.equal(ci.jobs.unit["runs-on"], "ubuntu-latest");
   });

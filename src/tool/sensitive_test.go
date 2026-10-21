@@ -107,13 +107,14 @@ func TestSensitivePathMatcherDeniesAgentMetadataDir(t *testing.T) {
 }
 
 func TestSensitivePathMatcherDeniesRuntimeConfigDir(t *testing.T) {
-	ctx, matcher := withIsolatedHome(t)
-	if matcher.ConfigDir == "" {
+	ctx, _ := withIsolatedHome(t)
+	configDir, err := os.UserConfigDir()
+	if err != nil || configDir == "" {
 		t.Skip("os.UserConfigDir not available in this environment")
 	}
 
 	for _, name := range []string{"awaken", "Awaken"} {
-		configPath := filepath.Join(matcher.ConfigDir, name, "config.toml")
+		configPath := filepath.Join(configDir, name, "config.toml")
 		if !ctx.IsSensitivePath(configPath) {
 			t.Fatalf("expected %q to be sensitive", configPath)
 		}

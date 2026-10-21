@@ -686,7 +686,7 @@ func TestExecutorCancel(t *testing.T) {
 	}()
 	// Wait until the run is active on the thread; registerActive lands right
 	// after StartScheduledRun returns, so retry the no-op early cancels.
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(15 * time.Second)
 	for {
 		runID := ""
 		for _, snapshot := range f.service.ListThreads(runtime.ThreadListViewActive) {

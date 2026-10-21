@@ -539,6 +539,9 @@ func TestValidateManagerArgvRequiresNodeLifecycleScriptClosure(t *testing.T) {
 }
 
 func TestDependencyInstallToolRuntimeStrictSuccess(t *testing.T) {
+	if sandbox.DefaultAdapter().SupportLevel() != sandbox.SandboxFull {
+		t.Skip("strict dependency install requires a full platform sandbox")
+	}
 	fixture := newInstallFixture(t, successfulManagerScript(), nil, nil)
 	runtime := agentcore.NewToolRuntimeWithConfig(nil, agentcore.ToolRuntimeConfig{
 		PermissionContext: fixture.permission, ToolAvailabilitySnapshot: &fixture.snapshot,

@@ -57,7 +57,7 @@ describe("GitHub CI", () => {
     const script = runs(ci.jobs.unit);
     assert.match(script, /typecheck:desktop/);
     assert.match(script, /@awaken\/desktop run test/);
-    assert.match(script, /xvfb xauth/);
+    assert.match(script, /xvfb xauth ripgrep/);
     assert.match(script, /kernel\.apparmor_restrict_unprivileged_userns=0/);
     assert.match(script, /xvfb-run -a -s '-screen 0 1280x900x24' npm run test:scripts/);
     assert.match(script, /node node_modules\/electron\/install\.js/);
@@ -73,7 +73,7 @@ describe("GitHub CI", () => {
     assert.match(script, /check-docs\.mjs/);
     assert.match(script, /check_provider_docs\.py/);
     assert.match(script, /prepare-cua-driver\.mjs/);
-    assert.match(script, /go test -count=1 \.\/\.\.\./);
+    assert.match(script, /xvfb-run -a -s '-screen 0 1280x900x24' go test -count=1 \.\/\.\.\./);
     assert.equal(ci.jobs.unit["runs-on"], "ubuntu-latest");
   });
 

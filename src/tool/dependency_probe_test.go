@@ -20,7 +20,15 @@ func (s *degradedProbeSandbox) ApplySandbox(*exec.Cmd, string, string) (sandbox.
 	return sandbox.SandboxResult{Support: sandbox.SandboxDegraded, Method: "degraded", Applied: false}, nil
 }
 
+func skipWithoutFullPlatformSandbox(t *testing.T) {
+	t.Helper()
+	if sandbox.DefaultAdapter().SupportLevel() != sandbox.SandboxFull {
+		t.Skip("language package probe requires a full platform sandbox")
+	}
+}
+
 func TestLanguagePackageProbeUsesExplicitBoundedProviderProbe(t *testing.T) {
+	skipWithoutFullPlatformSandbox(t)
 	workspace := t.TempDir()
 	environment := ProbeExecutionEnvironment(t.Context(), ExecutionEnvironmentProbeOptions{
 		WorkspaceRoot: workspace, WorkingDirectory: workspace,
@@ -61,6 +69,7 @@ func TestLanguagePackageProbeUsesExplicitBoundedProviderProbe(t *testing.T) {
 }
 
 func TestNodePackageProbeResolvesWithoutExecutingPackageCode(t *testing.T) {
+	skipWithoutFullPlatformSandbox(t)
 	workspace := t.TempDir()
 	environment := ProbeExecutionEnvironment(t.Context(), ExecutionEnvironmentProbeOptions{
 		WorkspaceRoot: workspace, WorkingDirectory: workspace,
@@ -78,6 +87,7 @@ func TestNodePackageProbeResolvesWithoutExecutingPackageCode(t *testing.T) {
 }
 
 func TestNodePackageProbeTreatsUnexportedPackageJSONAsInstalled(t *testing.T) {
+	skipWithoutFullPlatformSandbox(t)
 	workspace := t.TempDir()
 	packageRoot := filepath.Join(workspace, "node_modules", "exports-only")
 	if err := os.MkdirAll(packageRoot, 0o755); err != nil {

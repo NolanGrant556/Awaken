@@ -139,6 +139,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install the Electron binary
+        run: node node_modules/electron/install.js
+
       - name: Exercise Mermaid in an isolated Electron window
         run: npm run test:mermaid-electron -- --artifacts smoke-evidence/mermaid
 

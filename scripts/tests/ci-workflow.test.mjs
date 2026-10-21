@@ -79,6 +79,7 @@ describe("GitHub CI", () => {
 
   it("runs the Electron functional acceptance on macOS and Windows", () => {
     assert.deepEqual(ci.jobs.acceptance.strategy.matrix.os, ["macos-latest", "windows-latest"]);
+    assert.match(runs(ci.jobs.acceptance), /node node_modules\/electron\/install\.js/);
     assert.match(runs(ci.jobs.acceptance), /test:mermaid-electron/);
   });
 

@@ -1,3 +1,5 @@
+![Awaken](apps/desktop/resources/readme-banner.png)
+
 # Awaken
 
 Awaken 是一个本地优先的桌面智能体产品。它以 Awaken Desktop 为唯一产品使用面，在用户选择的工作区中组织多轮任务，由本地 `awaken-core` 完成模型调用、工具执行、事件记录与恢复，再把可验证的过程和交付物投影到桌面工作台。

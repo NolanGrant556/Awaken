@@ -461,8 +461,12 @@ func TestRunServiceCompletesWhenExecutorReturnsWithoutTerminalEvent(t *testing.T
 
 	var got []Event
 	got = append(got, sub.History...)
-	for event := range sub.Events {
-		got = append(got, event)
+	// A run that finishes before Subscribe closes the bus and leaves Events
+	// nil. Ranging a nil channel blocks forever.
+	if sub.Events != nil {
+		for event := range sub.Events {
+			got = append(got, event)
+		}
 	}
 
 	if len(got) != 2 {

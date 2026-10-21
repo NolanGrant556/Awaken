@@ -409,9 +409,12 @@ func (m *Manager) connectLoop(parentCtx context.Context, server *managedServer) 
 		session, capability, err := connectAndInitialize(ctx, transport, m.clientImpl, onToolListChanged, onPromptListChanged, onResourceListChanged, onElicitation)
 		if err == nil {
 			m.mu.Lock()
-			if m.closing || m.servers[server.name] != server {
+			if m.closing || m.servers[server.name] != server || server.state == StateDisabled {
 				m.mu.Unlock()
-				_ = session.Close()
+				// A disable or shutdown can win the handshake. Do not block
+				// this operation on Close: an idle in-proc session can fail
+				// to finish, and Shutdown waits for the operation to leave.
+				go func() { _ = session.Close() }()
 				return
 			}
 			server.session = session
@@ -430,12 +433,26 @@ func (m *Manager) connectLoop(parentCtx context.Context, server *managedServer) 
 				m.onToolsChanged(server.name)
 			}
 			m.emitEvent(ServerEvent{Type: EventConnected, ServerName: server.name})
-			// Block until the session terminates.
-			_ = session.Wait()
+			// session.Wait does not observe ctx. Disable cancels this loop
+			// before Close; staying here would pin Shutdown's operation wait
+			// even after the manager has already dropped the session.
+			sessionEnded := make(chan struct{})
+			go func() {
+				_ = session.Wait()
+				close(sessionEnded)
+			}()
+			leftBecauseCancel := false
+			select {
+			case <-sessionEnded:
+			case <-ctx.Done():
+				leftBecauseCancel = true
+			}
 			m.mu.Lock()
 			current, isCurrent := m.servers[server.name]
 			isCurrent = isCurrent && current == server
+			var abandoned Session
 			if isCurrent {
+				abandoned = server.session
 				server.session = nil
 				server.tools = nil
 				server.toolsLoaded = false
@@ -445,6 +462,9 @@ func (m *Manager) connectLoop(parentCtx context.Context, server *managedServer) 
 				}
 			}
 			m.mu.Unlock()
+			if leftBecauseCancel && abandoned != nil {
+				go func() { _ = abandoned.Close() }()
+			}
 			if isCurrent {
 				m.unregisterTools(server.name)
 				if m.onToolsChanged != nil {

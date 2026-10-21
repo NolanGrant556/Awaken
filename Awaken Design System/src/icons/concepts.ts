@@ -66,6 +66,7 @@ export const AWAKEN_ICON_CONCEPTS = {
   "settings-memory": "brain",
   "settings-appearance": "color-mode",
   "settings-pets": "paw",
+  "settings-environment": "package",
   "settings-acp": "robot",
 
   // 主题三选

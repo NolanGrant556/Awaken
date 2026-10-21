@@ -84,10 +84,14 @@ jobs:
         run: npm --workspace @awaken/design-system run test
 
       - name: Install a virtual display
-        run: sudo apt-get update && sudo apt-get install -y xvfb
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb xauth
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
       - name: Script and release-contract tests
-        run: xvfb-run -a --server-args="-screen 0 1280x1024x24" npm run test:scripts
+        run: xvfb-run -a -s '-screen 0 1280x900x24' npm run test:scripts
 
       - name: Python skill and resource tests
         run: |

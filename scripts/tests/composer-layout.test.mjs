@@ -47,8 +47,11 @@ const { app, BrowserWindow } = require('electron');
 const fs = require('node:fs');
 app.setPath('userData', ${JSON.stringify(join(temp, "userData"))});
 app.whenReady().then(async () => {
-  const win = new BrowserWindow({ show: false, width: 1000, height: 760, webPreferences: { backgroundThrottling: false, sandbox: true, contextIsolation: true, nodeIntegration: false } });
-  win.webContents.on('console-message', (_event, details) => console.error(details.message));
+  const win = new BrowserWindow({ show: ${process.platform === "linux" ? "true" : "false"}, width: 1000, height: 760, webPreferences: { backgroundThrottling: false, sandbox: ${process.platform === "linux" ? "false" : "true"}, contextIsolation: true, nodeIntegration: false } });
+  win.webContents.on('console-message', (event, _level, message) => {
+    const text = typeof message === 'string' ? message : event && event.message;
+    if (typeof text === 'string' && text) console.error(text);
+  });
   await win.loadFile(${JSON.stringify(join(temp, "index.html"))});
   const result = await win.webContents.executeJavaScript('window.runComposerLayoutRegression()');
   await win.webContents.debugger.attach('1.3');
@@ -62,10 +65,10 @@ app.whenReady().then(async () => {
     delete env.ELECTRON_RUN_AS_NODE;
     const electronArgs = [join(temp, "main.cjs")];
     if (process.platform === "linux") {
-      // The setuid chrome-sandbox cannot open xvfb's X socket, so the window never paints.
+      // Match kun: xvfb plus these switches. The setuid chrome-sandbox cannot
+      // open xvfb's X socket, so CI uses kun's explicit --no-sandbox fallback.
       env.ELECTRON_OZONE_PLATFORM_HINT = "x11";
-      env.DBUS_SESSION_BUS_ADDRESS = "/dev/null";
-      electronArgs.unshift("--no-sandbox", "--disable-gpu", "--ozone-platform=x11");
+      electronArgs.unshift("--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--ozone-platform=x11");
     }
     child = spawn(require("electron"), electronArgs, { env, stdio: ["ignore", "pipe", "pipe"] });
     let output = "";

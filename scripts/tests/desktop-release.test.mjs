@@ -1,4 +1,16 @@
 import assert from "node:assert/strict";
+
+import { test } from "node:test";
+test("unsigned release DMGs are signed and notarized when Developer ID is explicit", async () => {
+  const calls = [];
+  await notarizeMacosArtifacts({ artifactPaths: ["test.dmg"] }, {
+    env: { AWAKEN_CODESIGN_IDENTITY: "Developer ID Application: Test (TEAM)", APPLE_API_KEY: "test.p8", APPLE_API_KEY_ID: "KEY", APPLE_API_ISSUER: "ISSUER" },
+    classifySignature: () => "unsigned",
+    runCommand: (command, args) => { calls.push([command, ...args]); return command === "xcrun" && args[0] === "notarytool" ? "id: abc-def\nstatus: Accepted\n" : ""; },
+  });
+  assert.ok(calls.some(([command, flag]) => command === "codesign" && flag === "--force"));
+  assert.ok(calls.some(([command, tool, action]) => command === "xcrun" && tool === "stapler" && action === "staple"));
+});
 import { createHash } from "node:crypto";
 import {
   existsSync,
@@ -23,6 +35,7 @@ import {
 } from "../release/audit-package-contents.mjs";
 import {
   filterDmgArtifacts,
+  notarizeMacosArtifacts,
 } from "../release/notarize-macos-artifacts.mjs";
 import {
   isAdhocSignature,
@@ -109,6 +122,13 @@ function makeTree(files) {
 // --- verify-update-artifacts ------------------------------------------------
 
 describe("verify-update-artifacts", () => {
+  it("accepts both architecture DMGs when electron-builder includes them in the feed", () => {
+    const { dir, macZips } = makeArtifactDir("1.2.3");
+    const dmgs = ["Awaken-1.2.3-arm64.dmg", "Awaken-1.2.3-x64.dmg"];
+    for (const name of dmgs) writeFile(dir, name, "fixture dmg");
+    writeFile(dir, "latest-mac.yml", renderFeed("1.2.3", [...macZips, ...dmgs].map((name) => feedEntry(dir, name))));
+    assert.equal(verifyUpdateArtifacts({ dir, version: "1.2.3" }).assets.length, 5);
+  });
   it("accepts a consistent artifact directory and reports hashed assets", () => {
     const { dir, macZips, winExe } = makeArtifactDir("1.2.3");
     writeFile(dir, "builder-debug.yml", "electron-builder local diagnostics");

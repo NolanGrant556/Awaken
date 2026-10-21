@@ -24,7 +24,7 @@ export const SEMVER_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
 const MAC_FEED = "latest-mac.yml";
 const WIN_FEED = "latest.yml";
-const LOCAL_BUILD_DIAGNOSTICS = new Set(["builder-debug.yml", "builder-effective-config.yaml"]);
+const LOCAL_BUILD_DIAGNOSTICS = new Set(["builder-debug.yml", "builder-effective-config.yaml", "update-artifacts-receipt.json", "package-audit-receipt.json"]);
 
 function log(message) {
   console.log(`${LOG_PREFIX} ${message}`);
@@ -157,9 +157,10 @@ export function verifyUpdateArtifacts({ dir, version }) {
         `${MAC_FEED} version ${feed.version} does not match expected ${version}`,
       );
     }
+    const includesDmg = feed.files.some((entry) => entry.url.endsWith(".dmg"));
     assertExactNameSet(
       feed.files.map((entry) => entry.url),
-      expectedMacZipNames(version),
+      [...expectedMacZipNames(version), ...(includesDmg ? expectedMacDmgNames(version) : [])],
       MAC_FEED,
     );
     assets.push(...verifyFeedEntries(feed, MAC_FEED, resolvedDir));

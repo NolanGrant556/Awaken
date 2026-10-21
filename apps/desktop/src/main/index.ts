@@ -2629,6 +2629,7 @@ app.whenReady().then(async () => {
     supervisor,
   });
   createMainWindow();
+  console.info("desktop_main_window_created");
   if (petStore.getSettings().overlayOpen) {
     void petWindowManager.show().catch((error: unknown) => {
       console.error("[awaken-desktop] failed to restore pet overlay", error);

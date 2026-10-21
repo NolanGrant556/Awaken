@@ -80,6 +80,9 @@ extraResources:
   - from: build/icon.png
     to: icon.png
 mac:
+  # Data assets are sealed by their enclosing bundle, not individually signed.
+  # osx-sign's binary heuristic otherwise signs encoding tables and locale packs.
+  signIgnore: '\.(json|pak|png|jpg|jpeg|gif|webp|ico|icns|woff|woff2|ttf|otf|pdf)$'
   icon: build/icon.icns
   category: public.app-category.developer-tools
   artifactName: "Awaken-${version}-${arch}.${ext}"

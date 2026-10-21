@@ -124,12 +124,16 @@ export async function notarizeMacosArtifacts(context, options = {}) {
   const run = options.runCommand ?? runCommand;
   const env = options.env ?? process.env;
 
-  const kinds = dmgPaths.map((dmgPath) => classifyDmgSignature(dmgPath, run));
-  if (kinds.every((kind) => kind !== "release")) {
+  const classify = options.classifySignature ?? classifyDmgSignature;
+  const kinds = dmgPaths.map((dmgPath) => classify(dmgPath, run));
+  // electron-builder creates unsigned DMG wrappers even for signed Apps.
+  // An explicitly supplied Developer ID wrapper identity requests release signing.
+  const explicitRelease = /^Developer ID Application:/.test(env.AWAKEN_CODESIGN_IDENTITY ?? "");
+  if (kinds.every((kind) => kind !== "release") && !explicitRelease) {
     log("ad-hoc/unsigned DMGs detected, skipping notarization (local build)");
     return [];
   }
-  if (kinds.some((kind) => kind !== "release")) {
+  if (kinds.some((kind) => kind === "adhoc") || (!explicitRelease && kinds.some((kind) => kind !== "release"))) {
     throw new Error(
       "mixed signed and unsigned DMGs in one build; refusing to notarize a partial set",
     );

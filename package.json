@@ -35,7 +35,10 @@
     "capture:workbench": "node scripts/capture-workbench-acceptance.mjs",
     "capture:workbench:vrt": "node scripts/capture-workbench-vrt.mjs",
     "acceptance:desktop-hardening": "node scripts/accept-desktop-hardening.mjs",
-    "test:composer-layout": "node --test scripts/tests/composer-layout.test.mjs"
+    "test:composer-layout": "node --test scripts/tests/composer-layout.test.mjs",
+    "test:scripts": "node --test scripts/tests/*.test.mjs",
+    "test:python": "python3 -B -m unittest discover -s scripts/tests -p '*_test.py'",
+    "smoke:packaged-desktop": "node scripts/smoke-packaged-desktop.mjs"
   },
   "devDependencies": {
     "@electron/asar": "^4.3.0",

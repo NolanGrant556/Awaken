@@ -289,6 +289,8 @@ npm run dev:desktop
 
 该脚本是当前 Windows 开发入口，但本仓库当前可复核的真实 Desktop 验收基线只覆盖 macOS；脚本存在不能替代 Windows 实机与 CI 验收。
 
+推送到 `main` 或更新 pull request 时，[GitHub 持续集成](docs/01_桌面工作台/应用生命周期与更新/实现方案.md#github-持续集成)会运行单元测试、macOS/Windows 的 Electron 功能验收，以及 ad-hoc macOS 与未签名 Windows 客户端打包。`main` 打包成功后，安装包出现在本仓库的 `ci-<commit>` prerelease。正式签名发布仍只在推送 `vX.Y.Z` tag 后由 `desktop-release.yml` 编排。CI 启动检查和 Gallery 都不能代替本页正式入口的真实 Desktop 验收。
+
 不要把以下路径当成独立产品入口：
 
 - 单独启动 `cmd/awaken-core`；

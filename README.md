@@ -2,6 +2,8 @@
 
 Awaken 是一个本地优先的桌面智能体产品。它以 Awaken Desktop 为唯一产品使用面，在用户选择的工作区中组织多轮任务，由本地 `awaken-core` 完成模型调用、工具执行、事件记录与恢复，再把可验证的过程和交付物投影到桌面工作台。
 
+除另有声明的内容外，Awaken 采用 [MIT 许可证](LICENSE)，允许使用、修改、分发和商业使用，需保留版权及许可证声明。第三方组件和资源继续遵循各自许可证，参见 [Design System 第三方声明](Awaken%20Design%20System/THIRD_PARTY_NOTICES.md)和 [Desktop 第三方许可证](apps/desktop/resources/licenses/)。
+
 本仓库中的文档只描述当前实现、当前 Desktop 行为、仍有效的产品设计和当前验收结论。详细事实按功能域进入 `docs/`；本 README 只承担项目总入口。
 
 ## 当前产品形态

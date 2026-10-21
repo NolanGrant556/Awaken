@@ -1,5 +1,6 @@
 {
   "name": "awaken",
+  "license": "MIT",
   "private": true,
   "workspaces": [
     "Awaken Design System",

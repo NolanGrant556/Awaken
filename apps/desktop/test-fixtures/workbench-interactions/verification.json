@@ -66,7 +66,7 @@
       "limits": [
         "The author website returned web_fetch_network_failed and was excluded; the official httpbin homepage succeeded instead.",
         "This is a macOS development Desktop acceptance. Windows/Linux and packaged release were not exercised.",
-        "Repeated live foreground navigation was not requested by this research; same-batch tab reuse is covered by reducer and real-hook composition tests."
+        "Foreground concurrent navigation is covered separately by browser-concurrent-navigation; it reuses one visible page and may overwrite another navigation."
       ],
       "previous_attempt": {
         "status": "partial",
@@ -181,6 +181,230 @@
       "limits": [
         "No multi-hour endurance test was run.",
         "Windows and Linux Desktop were not exercised."
+      ]
+    },
+    {
+      "id": "browser-concurrent-navigation",
+      "status": "passed_with_scope",
+      "scope": "One shared foreground browser tab under overlapping navigation from two general subagents; not independent page sessions.",
+      "base_commit": "c7bc9e5116a898ac58ff5e4548c4fb2105992122",
+      "thread_id": "thread_1792658339183569000_5",
+      "run_id": "run_1792658339183565000_4",
+      "model": "doubao-seed-evolving",
+      "composer_model_label": "Doubao-Seed-Evolving · high",
+      "model_changed": false,
+      "steps": [
+        "Create a fresh task in the isolated UI verification project using the default model",
+        "Ask two general subagents to navigate A1-A3 and B1-B3 concurrently without WebFetch or other browser mechanisms",
+        "Observe the single browser tab and its HTML page while navigation calls overlap"
+      ],
+      "screenshots": [
+        "browser-concurrent-start.jpg",
+        "browser-concurrent-running.jpg",
+        "browser-concurrent-summary-network-wait.jpg",
+        "browser-concurrent-ended.jpg"
+      ],
+      "observed": {
+        "initial_browser_tabs": 0,
+        "maximum_observed_browser_tabs": 1,
+        "successful_browser_calls": 6,
+        "blocked_initial_calls": 6,
+        "overlap_pairs": [
+          {
+            "call_seqs": [
+              187,
+              192
+            ],
+            "overlap_ms": 1038.51
+          }
+        ],
+        "final_visible_url": "https://httpbin.org/html?awaken_probe=B3",
+        "final_visible_heading": "Herman Melville - Moby-Dick"
+      },
+      "calls": [
+        {
+          "call_seq": 52,
+          "result_seq": 55,
+          "agent_id": "subagent_a91e08f175449ba65674f11d",
+          "task_id": "subtask_17d7ac6856fe8dbf4bed4920",
+          "profile": "workspace_read_only",
+          "requested_url": "https://httpbin.org/html?awaken_probe=A1",
+          "returned_url": null,
+          "started_at": "2026-10-22T08:40:04.355365Z",
+          "finished_at": "2026-10-22T08:40:04.361827Z",
+          "status": "denied",
+          "error_code": "read_only_violation",
+          "is_error": true
+        },
+        {
+          "call_seq": 63,
+          "result_seq": 66,
+          "agent_id": "subagent_8c30950005b4753599911716",
+          "task_id": "subtask_7142fcee619202b8b32eaa2f",
+          "profile": "workspace_read_only",
+          "requested_url": "https://httpbin.org/html?awaken_probe=B1",
+          "returned_url": null,
+          "started_at": "2026-10-22T08:40:09.695664Z",
+          "finished_at": "2026-10-22T08:40:09.701201Z",
+          "status": "denied",
+          "error_code": "read_only_violation",
+          "is_error": true
+        },
+        {
+          "call_seq": 77,
+          "result_seq": 80,
+          "agent_id": "subagent_8c30950005b4753599911716",
+          "task_id": "subtask_7142fcee619202b8b32eaa2f",
+          "profile": "workspace_read_only",
+          "requested_url": "https://httpbin.org/html?awaken_probe=B2",
+          "returned_url": null,
+          "started_at": "2026-10-22T08:40:14.890683Z",
+          "finished_at": "2026-10-22T08:40:14.896983Z",
+          "status": "denied",
+          "error_code": "read_only_violation",
+          "is_error": true
+        },
+        {
+          "call_seq": 89,
+          "result_seq": 92,
+          "agent_id": "subagent_a91e08f175449ba65674f11d",
+          "task_id": "subtask_17d7ac6856fe8dbf4bed4920",
+          "profile": "workspace_read_only",
+          "requested_url": "https://httpbin.org/html?awaken_probe=A2",
+          "returned_url": null,
+          "started_at": "2026-10-22T08:40:17.637853Z",
+          "finished_at": "2026-10-22T08:40:17.645135Z",
+          "status": "denied",
+          "error_code": "read_only_violation",
+          "is_error": true
+        },
+        {
+          "call_seq": 101,
+          "result_seq": 104,
+          "agent_id": "subagent_8c30950005b4753599911716",
+          "task_id": "subtask_7142fcee619202b8b32eaa2f",
+          "profile": "workspace_read_only",
+          "requested_url": "https://httpbin.org/html?awaken_probe=B3",
+          "returned_url": null,
+          "started_at": "2026-10-22T08:40:30.163095Z",
+          "finished_at": "2026-10-22T08:40:30.168988Z",
+          "status": "denied",
+          "error_code": "read_only_violation",
+          "is_error": true
+        },
+        {
+          "call_seq": 113,
+          "result_seq": 116,
+          "agent_id": "subagent_a91e08f175449ba65674f11d",
+          "task_id": "subtask_17d7ac6856fe8dbf4bed4920",
+          "profile": "workspace_read_only",
+          "requested_url": "https://httpbin.org/html?awaken_probe=A3",
+          "returned_url": null,
+          "started_at": "2026-10-22T08:40:30.597268Z",
+          "finished_at": "2026-10-22T08:40:30.604609Z",
+          "status": "denied",
+          "error_code": "read_only_violation",
+          "is_error": true
+        },
+        {
+          "call_seq": 177,
+          "result_seq": 180,
+          "agent_id": "subagent_bcfbef9e222a58d4c7593fa9",
+          "task_id": "subtask_b90720a29182e868b71bd819",
+          "profile": "workspace_write",
+          "requested_url": "https://httpbin.org/html?awaken_probe=A1",
+          "returned_url": "https://httpbin.org/html?awaken_probe=A1",
+          "started_at": "2026-10-22T08:41:45.187032Z",
+          "finished_at": "2026-10-22T08:41:47.572328Z",
+          "status": "succeeded",
+          "error_code": null,
+          "is_error": false
+        },
+        {
+          "call_seq": 187,
+          "result_seq": 195,
+          "agent_id": "subagent_39a528bbec2a49d104532a92",
+          "task_id": "subtask_a46afe6aaa1645d6a650f9c9",
+          "profile": "workspace_write",
+          "requested_url": "https://httpbin.org/html?awaken_probe=B1",
+          "returned_url": "https://httpbin.org/html?awaken_probe=A2",
+          "started_at": "2026-10-22T08:41:56.030689Z",
+          "finished_at": "2026-10-22T08:41:58.383323Z",
+          "status": "succeeded",
+          "error_code": null,
+          "is_error": false
+        },
+        {
+          "call_seq": 192,
+          "result_seq": 198,
+          "agent_id": "subagent_bcfbef9e222a58d4c7593fa9",
+          "task_id": "subtask_b90720a29182e868b71bd819",
+          "profile": "workspace_write",
+          "requested_url": "https://httpbin.org/html?awaken_probe=A2",
+          "returned_url": "https://httpbin.org/html?awaken_probe=A2",
+          "started_at": "2026-10-22T08:41:57.344736Z",
+          "finished_at": "2026-10-22T08:41:58.383246Z",
+          "status": "succeeded",
+          "error_code": null,
+          "is_error": false
+        },
+        {
+          "call_seq": 207,
+          "result_seq": 210,
+          "agent_id": "subagent_bcfbef9e222a58d4c7593fa9",
+          "task_id": "subtask_b90720a29182e868b71bd819",
+          "profile": "workspace_write",
+          "requested_url": "https://httpbin.org/html?awaken_probe=A3",
+          "returned_url": "https://httpbin.org/html?awaken_probe=A3",
+          "started_at": "2026-10-22T08:42:14.815484Z",
+          "finished_at": "2026-10-22T08:42:15.154744Z",
+          "status": "succeeded",
+          "error_code": null,
+          "is_error": false
+        },
+        {
+          "call_seq": 217,
+          "result_seq": 220,
+          "agent_id": "subagent_39a528bbec2a49d104532a92",
+          "task_id": "subtask_a46afe6aaa1645d6a650f9c9",
+          "profile": "workspace_write",
+          "requested_url": "https://httpbin.org/html?awaken_probe=B2",
+          "returned_url": "https://httpbin.org/html?awaken_probe=B2",
+          "started_at": "2026-10-22T08:42:15.51954Z",
+          "finished_at": "2026-10-22T08:42:17.349959Z",
+          "status": "succeeded",
+          "error_code": null,
+          "is_error": false
+        },
+        {
+          "call_seq": 227,
+          "result_seq": 230,
+          "agent_id": "subagent_39a528bbec2a49d104532a92",
+          "task_id": "subtask_a46afe6aaa1645d6a650f9c9",
+          "profile": "workspace_write",
+          "requested_url": "https://httpbin.org/html?awaken_probe=B3",
+          "returned_url": "https://httpbin.org/html?awaken_probe=B3",
+          "started_at": "2026-10-22T08:42:23.252787Z",
+          "finished_at": "2026-10-22T08:42:23.666884Z",
+          "status": "succeeded",
+          "error_code": null,
+          "is_error": false
+        }
+      ],
+      "initial_dispatch": "The default model explicitly selected shared_readonly for the first two general agents. Six calls were rejected before transport with read_only_violation. The parent then independently spawned two new general agents using shared; host permission settings and model selection were not changed.",
+      "limits": [
+        "B1 overlapped A2; B1 returned the current A2 address with status succeeded. Tab reuse works, but shared-page concurrent navigation does not provide per-agent URL isolation or request-target consistency.",
+        "A successful browser tool receipt is recorded separately from observed rendered content. The final B3 HTML page was visible in the real Desktop.",
+        "macOS development Desktop only; no packaged or other-platform test."
+      ],
+      "root_status": "cancelled",
+      "root_terminal_seq": 265,
+      "root_completion_note": "All six actual navigation calls and both shared-mode children finished before the root summary entered repeated default-provider network recovery. The test runner stopped only that remaining summary through Desktop; no fallback model was selected. This is not evidence of a normally completed root run.",
+      "subagent_terminal_seqs": [
+        129,
+        137,
+        240,
+        247
       ]
     }
   ],

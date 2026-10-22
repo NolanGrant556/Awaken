@@ -1251,7 +1251,7 @@ export class CliConnectorManager {
     signal?.throwIfAborted();
     const release = await this.holdExecutable(executable);
     try {
-      const result = await runCommand(executable, args, cwd, timeoutMs, this.commandEnvironment(), signal);
+      const result = await runCliCommand(executable, args, cwd, timeoutMs, this.commandEnvironment(), signal);
       if (looksLikeNetworkTransportFailure(`${result.stderr}\n${result.stdout}`)) {
         this.options.onTransportFailure?.("cli-command");
       }
@@ -1446,7 +1446,7 @@ async function isRegularFile(value: string): Promise<boolean> {
   }
 }
 
-async function runCommand(
+export async function runCliCommand(
   executable: string,
   args: string[],
   cwd: string,
@@ -1462,16 +1462,18 @@ async function runCommand(
   child.stderr?.on("data", (chunk: Buffer) => { if (stderr.length < commandOutputLimit) stderr += chunk.toString("utf8"); });
   const timeout = setTimeout(() => child.kill(), timeoutMs);
   try {
-    return { exitCode: await childExit(child), stdout: stdout.slice(0, commandOutputLimit), stderr: stderr.slice(0, commandOutputLimit) };
+    // Process exit can precede the last stdout/stderr chunks. Version and auth
+    // JSON must be parsed only after the pipes close, while retaining the lease.
+    return { exitCode: await childExit(child, "close"), stdout: stdout.slice(0, commandOutputLimit), stderr: stderr.slice(0, commandOutputLimit) };
   } finally {
     clearTimeout(timeout);
   }
 }
 
-function childExit(child: ChildProcess): Promise<number> {
+function childExit(child: ChildProcess, event: "exit" | "close" = "exit"): Promise<number> {
   return new Promise((resolve, reject) => {
     child.once("error", reject);
-    child.once("exit", (code) => resolve(code ?? 1));
+    child.once(event, (code) => resolve(code ?? 1));
   });
 }
 

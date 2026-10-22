@@ -3,8 +3,12 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { c as createTar } from "tar";
-import { expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { CliConnectorManager } from "./manager.js";
+
+// Discovery must not probe a developer's real dws/lark-cli from their PATH.
+beforeEach(() => vi.stubEnv("PATH", "/usr/bin:/bin"));
+afterEach(() => vi.unstubAllEnvs());
 
 it("leaves shared binaries with Core and rejects uninstall before changing an in-use installation", async () => {
   if (process.platform === "win32") return;

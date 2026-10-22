@@ -110,6 +110,11 @@ describe("GitHub CI", () => {
     assert.match(script, /--latest=false/);
     assert.equal(publishStep.env.GH_TOKEN, "${{ github.token }}");
     assert.equal(publishStep.env.GH_REPO, "${{ github.repository }}");
+    const uploaded = publishStep.run.match(/find release-assets[\s\S]*?-exec cp/)?.[0] ?? "";
+    assert.match(uploaded, /-name '\*\.dmg'/);
+    assert.match(uploaded, /-name '\*\.exe'/);
+    assert.doesNotMatch(uploaded, /blockmap/);
+    assert.doesNotMatch(uploaded, /\.zip/);
     assert.ok(
       publish.steps.some((step) => step.uses === "actions/checkout@v4"),
       "gh release create needs a git checkout",

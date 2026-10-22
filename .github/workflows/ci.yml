@@ -339,7 +339,7 @@ jobs:
           short="${GITHUB_SHA:0:7}"
           mkdir -p upload
           find release-assets -type f \
-            \( -name '*.dmg' -o -name '*.zip' -o -name '*.exe' -o -name '*.blockmap' \) \
+            \( -name '*.dmg' -o -name '*.exe' \) \
             -exec cp {} upload/ \;
           mapfile -d '' files < <(find upload -type f -print0 | sort -z)
           if [[ "${#files[@]}" -eq 0 ]]; then

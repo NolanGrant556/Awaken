@@ -142,6 +142,9 @@ jobs:
       - name: Install the Electron binary
         run: node node_modules/electron/install.js
 
+      - name: Test Mermaid readiness and cleanup contracts
+        run: npm run test:mermaid-electron:contract
+
       - name: Exercise Mermaid in an isolated Electron window
         run: npm run test:mermaid-electron -- --artifacts smoke-evidence/mermaid
 

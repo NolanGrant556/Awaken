@@ -146,17 +146,54 @@ function childOutput(processHandle) {
   return processHandle.output.join("").trim();
 }
 
-async function terminateChild(processHandle) {
-  if (!processHandle?.child || processHandle.child.exitCode !== null) {
+function childHasExited(child) {
+  return child.exitCode !== null || child.signalCode !== null;
+}
+
+function waitForChildExit(child, timeoutMs) {
+  if (childHasExited(child)) return Promise.resolve(true);
+  return new Promise((resolveExit) => {
+    const finish = (exited) => {
+      clearTimeout(timer);
+      child.removeListener("exit", onExit);
+      resolveExit(exited);
+    };
+    const onExit = () => finish(true);
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    child.once("exit", onExit);
+  });
+}
+
+export async function terminateChild(processHandle, {
+  platform = process.platform,
+  killWindowsTree = spawnSync,
+  exitTimeoutMs = 5_000,
+} = {}) {
+  if (!processHandle?.child || childHasExited(processHandle.child)) {
     return;
   }
 
   const { child } = processHandle;
-  if (process.platform === "win32") {
-    spawnSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+  // Only the isolated Electron fixture has an IPC channel. Give Chromium a
+  // chance to flush and close its databases before using process-tree signals.
+  if (child.connected) {
+    child.send({ type: "awaken-mermaid-quit" }, () => {});
+    if (await waitForChildExit(child, exitTimeoutMs)) return;
+  }
+
+  if (platform === "win32") {
+    const killed = killWindowsTree("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
       stdio: "ignore",
       windowsHide: true,
+      timeout: exitTimeoutMs,
     });
+    if (killed.error) throw killed.error;
+    if (killed.status !== 0 && !childHasExited(child)) {
+      throw new Error(`Could not stop fixture process tree ${child.pid}: taskkill exited ${killed.status}`);
+    }
+    if (!(await waitForChildExit(child, exitTimeoutMs))) {
+      throw new Error(`Fixture process ${child.pid} did not exit after taskkill.`);
+    }
     return;
   }
 
@@ -166,11 +203,9 @@ async function terminateChild(processHandle) {
     if (error?.code !== "ESRCH") {
       throw error;
     }
-    return;
   }
 
-  await Promise.race([once(child, "exit"), delay(3_000)]);
-  if (child.exitCode === null) {
+  if (!(await waitForChildExit(child, exitTimeoutMs))) {
     try {
       process.kill(-child.pid, "SIGKILL");
     } catch (error) {
@@ -178,7 +213,50 @@ async function terminateChild(processHandle) {
         throw error;
       }
     }
+    if (!(await waitForChildExit(child, exitTimeoutMs))) {
+      throw new Error(`Fixture process ${child.pid} did not exit after SIGKILL.`);
+    }
   }
+}
+
+export async function cleanupFixture({ cdp, electron, vite, userDataDir }, {
+  terminate = terminateChild,
+  remove = rm,
+} = {}) {
+  const errors = [];
+  const attempt = async (stage, action) => {
+    try {
+      await action();
+      return true;
+    } catch (error) {
+      errors.push({ stage, message: String(error.message ?? error), code: error.code ?? null });
+      return false;
+    }
+  };
+  await attempt("close-cdp", () => cdp?.close());
+  await attempt("stop-electron", () => terminate(electron));
+  await attempt("stop-vite", () => terminate(vite));
+  // Windows may keep a Chromium database handle briefly after process exit.
+  // Node retries EBUSY/EPERM/ENOTEMPTY with bounded linear backoff.
+  const temporaryUserDataRemoved = await attempt("remove-user-data", () =>
+    remove(userDataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }),
+  );
+  return { status: errors.length ? "failed" : "passed", temporaryUserDataRemoved, errors };
+}
+
+export async function writeRegressionResult(resultPath, result, failure, cleanup) {
+  const report = {
+    ...result,
+    status: failure || cleanup.status !== "passed" ? "failed" : "passed",
+    isolation: { ...result.isolation, temporaryUserDataRemoved: cleanup.temporaryUserDataRemoved },
+    cleanup,
+    failure: failure
+      ? { message: failure.message, stack: failure.stack, ...result.failureOutput }
+      : null,
+  };
+  delete report.failureOutput;
+  await writeFile(resultPath, `${JSON.stringify(report, null, 2)}\n`);
+  return report;
 }
 
 async function waitForHttp(url, processHandle, timeoutMs) {
@@ -381,20 +459,41 @@ function stateButtonRect(stateLabel, ariaLabel) {
   if (!article) {
     return null;
   }
-  article.scrollIntoView({ block: "center", inline: "nearest" });
+  if (!article.querySelector(".assistant-mermaid-diagram-svg svg")) {
+    return null;
+  }
   const button = [...article.querySelectorAll("button")].find(
     (candidate) => candidate.getAttribute("aria-label") === ariaLabel,
   );
-  if (!button) {
+  if (!button || button.disabled) {
     return null;
   }
+  button.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" });
   const rect = button.getBoundingClientRect();
+  const style = getComputedStyle(button);
+  const x = rect.x + rect.width / 2;
+  const y = rect.y + rect.height / 2;
+  if (style.visibility !== "visible" || !button.contains(document.elementFromPoint(x, y))) {
+    return null;
+  }
   return {
-    x: rect.x + rect.width / 2,
-    y: rect.y + rect.height / 2,
+    x,
+    y,
     width: rect.width,
     height: rect.height,
   };
+}
+
+export async function clickStateButton(cdp, stateLabel, ariaLabel, timeoutMs) {
+  const rect = await pollValue(
+    cdp,
+    stateButtonRect,
+    [stateLabel, ariaLabel],
+    (value) => value?.width > 0 && value?.height > 0,
+    `${stateLabel}: ${ariaLabel}`,
+    timeoutMs,
+  );
+  await nativeClick(cdp, rect);
 }
 
 function globalButtonRect(ariaLabel) {
@@ -592,24 +691,12 @@ async function runInteraction(cdp, artifactsDir, targetUrl, timeoutMs) {
   checks.push({ name: "inline-no-double-scrollbar", status: "passed", evidence: inline });
   await captureScreenshot(cdp, join(artifactsDir, "01-inline.png"));
 
-  await evaluateFunction(
+  await clickStateButton(
     cdp,
-    (stateLabel) => {
-      const article = [...document.querySelectorAll(".ads-component-demo-state")].find(
-        (candidate) => candidate.querySelector("h3")?.textContent?.trim() === stateLabel,
-      );
-      article?.scrollIntoView({ block: "center", inline: "nearest" });
-    },
-    MERMAID_ELECTRON_FIXTURE.largeStateLabel,
-  );
-  await delay(250);
-  const expandRect = await evaluateFunction(
-    cdp,
-    stateButtonRect,
     MERMAID_ELECTRON_FIXTURE.largeStateLabel,
     "Expand diagram",
+    timeoutMs,
   );
-  await nativeClick(cdp, expandRect);
   let expanded = await pollValue(
     cdp,
     expandedSnapshot,
@@ -706,13 +793,12 @@ async function runInteraction(cdp, artifactsDir, targetUrl, timeoutMs) {
     timeoutMs,
   );
 
-  const reopenRect = await evaluateFunction(
+  await clickStateButton(
     cdp,
-    stateButtonRect,
     MERMAID_ELECTRON_FIXTURE.largeStateLabel,
     "Expand diagram",
+    timeoutMs,
   );
-  await nativeClick(cdp, reopenRect);
   expanded = await pollValue(
     cdp,
     expandedSnapshot,
@@ -766,12 +852,9 @@ async function main() {
   let interaction = null;
   let failure = null;
 
-  const cleanup = async () => {
-    cdp?.close();
-    await terminateChild(electron);
-    await terminateChild(vite);
-    await rm(userDataDir, { recursive: true, force: true });
-  };
+  let cleanupPromise = null;
+  const cleanup = () => (cleanupPromise ??= cleanupFixture({ cdp, electron, vite, userDataDir }));
+  let cleanupResult;
 
   const handleSignal = (signal) => {
     void cleanup().finally(() => {
@@ -800,7 +883,7 @@ async function main() {
         `--remote-debugging-port=${cdpPort}`,
         fixtureMainPath,
       ],
-      { env: electronEnv },
+      { env: electronEnv, stdio: ["ignore", "pipe", "pipe", "ipc"] },
     );
 
     const target = await waitForCdpTarget(debugOrigin, targetUrl, electron, args.timeoutMs);
@@ -819,12 +902,12 @@ async function main() {
   } finally {
     process.removeListener("SIGINT", handleSignal);
     process.removeListener("SIGTERM", handleSignal);
-    await cleanup();
+    cleanupResult = await cleanup();
   }
 
-  const result = {
+  const resultPath = join(artifactsDir, "result.json");
+  const result = await writeRegressionResult(resultPath, {
     schemaVersion: 1,
-    status: failure ? "failed" : "passed",
     startedAt,
     completedAt: new Date().toISOString(),
     fixture: {
@@ -839,29 +922,25 @@ async function main() {
     isolation: {
       cdpHost: loopbackHost,
       rendererHost: loopbackHost,
-      temporaryUserDataRemoved: true,
     },
     interaction,
-    failure: failure
-      ? {
-          message: failure.message,
-          stack: failure.stack,
-          viteOutput: childOutput(vite),
-          electronOutput: childOutput(electron),
-        }
-      : null,
-  };
-  const resultPath = join(artifactsDir, "result.json");
-  await writeFile(resultPath, `${JSON.stringify(result, null, 2)}\n`);
+    failureOutput: {
+      viteOutput: vite ? childOutput(vite) : "",
+      electronOutput: electron ? childOutput(electron) : "",
+    },
+  }, failure, cleanupResult);
 
   console.log("Mermaid Electron regression");
   console.log(`- status: ${result.status}`);
   console.log(`- fixture: ${MERMAID_ELECTRON_FIXTURE.route}`);
-  console.log(`- userData: isolated temporary directory removed`);
+  console.log(`- userData removed: ${result.isolation.temporaryUserDataRemoved}`);
   console.log(`- artifacts: ${artifactsDir}`);
   console.log(`- result: ${resultPath}`);
   if (failure) {
     throw failure;
+  }
+  if (cleanupResult.status !== "passed") {
+    throw new Error(`Mermaid fixture cleanup failed: ${JSON.stringify(cleanupResult.errors)}`);
   }
 }
 

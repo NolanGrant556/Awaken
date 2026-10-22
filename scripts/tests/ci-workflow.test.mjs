@@ -81,6 +81,7 @@ describe("GitHub CI", () => {
     assert.deepEqual(ci.jobs.acceptance.strategy.matrix.os, ["macos-latest", "windows-latest"]);
     assert.match(runs(ci.jobs.acceptance), /node node_modules\/electron\/install\.js/);
     assert.match(runs(ci.jobs.acceptance), /test:mermaid-electron/);
+    assert.match(runs(ci.jobs.acceptance), /test:mermaid-electron:contract/);
   });
 
   it("builds ad-hoc macOS and unsigned Windows packages, then audits and smokes them", () => {

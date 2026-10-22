@@ -22,6 +22,10 @@ app.setPath("userData", userDataDir);
 
 let fixtureWindow = null;
 
+process.on("message", (message) => {
+  if (message?.type === "awaken-mermaid-quit") app.quit();
+});
+
 app.whenReady().then(async () => {
   fixtureWindow = new BrowserWindow({
     width: 1440,

@@ -1,6 +1,7 @@
 package agentcore
 
 import (
+	"awaken/src/browserhost"
 	"awaken/src/context"
 	"awaken/src/hookruntime"
 	"awaken/src/llm"
@@ -99,6 +100,11 @@ func (r *Runner) waitForActiveSubagents(ctx stdcontext.Context, events *runEvent
 	if len(ids) == 0 {
 		return false, nil
 	}
+	browserAgentID := "root"
+	if r.config.SubagentOrigin != nil {
+		browserAgentID = r.config.SubagentOrigin.AgentID
+	}
+	browserhost.ReleaseOwner(r.threadID, r.runID, browserAgentID, r.config.SubagentTaskID, false)
 	if candidate != nil && candidate.Content != "" {
 		r.conversation.AssistantOutputWithProviderState(candidate.Content, nil, candidate.ProviderOpaqueState)
 	}

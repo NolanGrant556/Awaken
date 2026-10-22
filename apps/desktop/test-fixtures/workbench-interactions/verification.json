@@ -406,6 +406,446 @@
         240,
         247
       ]
+    },
+    {
+      "thread_id": "thread_1792661010515047000_2",
+      "run_id": "run_1792661010515045000_1",
+      "terminal_seq": 311,
+      "terminal": {
+        "status": "finished",
+        "terminal_reason": "completed"
+      },
+      "records": [
+        {
+          "tool": "browser_navigate",
+          "call_id": "call_9y6hvjhk12w3lw0916d216nw",
+          "agent_id": "subagent_5a9979df54e3a6c914dc4cb0",
+          "call_seq": 59,
+          "result_seq": 62,
+          "started_at": "2026-10-22T09:25:16.064152Z",
+          "finished_at": "2026-10-22T09:25:18.107343Z",
+          "arguments": {
+            "url": "https://httpbin.org/forms/post?awaken_guard=A1"
+          },
+          "status": "succeeded",
+          "error_code": null,
+          "returned_url": "https://httpbin.org/forms/post?awaken_guard=A1",
+          "receipt_request_id": "call_9y6hvjhk12w3lw0916d216nw",
+          "content_excerpt": ""
+        },
+        {
+          "tool": "browser_snapshot",
+          "call_id": "call_fpc859vx6kqzugqt4ss1zqxp",
+          "agent_id": "subagent_5a9979df54e3a6c914dc4cb0",
+          "call_seq": 73,
+          "result_seq": 76,
+          "started_at": "2026-10-22T09:25:37.896767Z",
+          "finished_at": "2026-10-22T09:25:37.904934Z",
+          "arguments": {},
+          "status": "succeeded",
+          "error_code": null,
+          "returned_url": "https://httpbin.org/forms/post?awaken_guard=A1",
+          "receipt_request_id": "call_fpc859vx6kqzugqt4ss1zqxp",
+          "content_excerpt": "[1] input custname\n[2] input custtel\n[3] input custemail\n[4] input size\n[5] input size\n[6] input size\n[7] input topping\n[8] input topping\n[9] input to"
+        },
+        {
+          "tool": "browser_type",
+          "call_id": "call_jsqpd3z244o6xseg4rc7jwuo",
+          "agent_id": "subagent_5a9979df54e3a6c914dc4cb0",
+          "call_seq": 83,
+          "result_seq": 86,
+          "started_at": "2026-10-22T09:26:00.526184Z",
+          "finished_at": "2026-10-22T09:26:00.533646Z",
+          "arguments": {
+            "ref": "1",
+            "text": "AWAKEN_A"
+          },
+          "status": "succeeded",
+          "error_code": null,
+          "returned_url": "https://httpbin.org/forms/post?awaken_guard=A1",
+          "receipt_request_id": "call_jsqpd3z244o6xseg4rc7jwuo",
+          "content_excerpt": ""
+        },
+        {
+          "tool": "browser_extract",
+          "call_id": "call_hqkvr8e7h84opm35zz2gm3ev",
+          "agent_id": "subagent_5a9979df54e3a6c914dc4cb0",
+          "call_seq": 98,
+          "result_seq": 101,
+          "started_at": "2026-10-22T09:26:07.768446Z",
+          "finished_at": "2026-10-22T09:26:07.775085Z",
+          "arguments": {},
+          "status": "succeeded",
+          "error_code": null,
+          "returned_url": "https://httpbin.org/forms/post?awaken_guard=A1",
+          "receipt_request_id": "call_hqkvr8e7h84opm35zz2gm3ev",
+          "content_excerpt": "Customer name: \n\nTelephone: \n\nE-mail address: \n\nPizza Size\n\n Small\n\n Medium\n\n Large\n\nPizza Toppings\n\n Bacon\n\n Extra Cheese\n\n Onion\n\n Mushroom\n\nPreferr"
+        },
+        {
+          "tool": "browser_snapshot",
+          "call_id": "call_il4ogzb6l2lfyfyvtzq1mqkl",
+          "agent_id": "subagent_5a9979df54e3a6c914dc4cb0",
+          "call_seq": 108,
+          "result_seq": 111,
+          "started_at": "2026-10-22T09:26:19.65114Z",
+          "finished_at": "2026-10-22T09:26:19.659735Z",
+          "arguments": {},
+          "status": "succeeded",
+          "error_code": null,
+          "returned_url": "https://httpbin.org/forms/post?awaken_guard=A1",
+          "receipt_request_id": "call_il4ogzb6l2lfyfyvtzq1mqkl",
+          "content_excerpt": "[1] input custname\n[2] input custtel\n[3] input custemail\n[4] input size\n[5] input size\n[6] input size\n[7] input topping\n[8] input topping\n[9] input to"
+        },
+        {
+          "tool": "browser_navigate",
+          "call_id": "call_5gmmqbgwczlo4i76b23ft7w2",
+          "agent_id": "subagent_4639d51dccf77152820582de",
+          "call_seq": 93,
+          "result_seq": 116,
+          "started_at": "2026-10-22T09:26:01.612372Z",
+          "finished_at": "2026-10-22T09:26:31.624353Z",
+          "arguments": {
+            "url": "https://httpbin.org/forms/post?awaken_guard=B1"
+          },
+          "status": "failed",
+          "error_code": "browser_busy",
+          "returned_url": null,
+          "receipt_request_id": "call_5gmmqbgwczlo4i76b23ft7w2",
+          "content_excerpt": ""
+        },
+        {
+          "tool": "browser_navigate",
+          "call_id": "call_5cziuf8hnjsbbb0mqmqbui2c",
+          "agent_id": "subagent_5a9979df54e3a6c914dc4cb0",
+          "call_seq": 123,
+          "result_seq": 126,
+          "started_at": "2026-10-22T09:26:35.812942Z",
+          "finished_at": "2026-10-22T09:26:37.017733Z",
+          "arguments": {
+            "url": "https://httpbin.org/html?awaken_guard=A2"
+          },
+          "status": "succeeded",
+          "error_code": null,
+          "returned_url": "https://httpbin.org/html?awaken_guard=A2",
+          "receipt_request_id": "call_5cziuf8hnjsbbb0mqmqbui2c",
+          "content_excerpt": ""
+        },
+        {
+          "tool": "browser_wait",
+          "call_id": "call_fxg3zxhr2nszgruue16h9fb1",
+          "agent_id": "subagent_4639d51dccf77152820582de",
+          "call_seq": 136,
+          "result_seq": 139,
+          "started_at": "2026-10-22T09:26:43.044994Z",
+          "finished_at": "2026-10-22T09:26:43.051958Z",
+          "arguments": {
+            "seconds": 5
+          },
+          "status": "failed",
+          "error_code": "browser_busy",
+          "returned_url": null,
+          "receipt_request_id": "call_fxg3zxhr2nszgruue16h9fb1",
+          "content_excerpt": ""
+        },
+        {
+          "tool": "browser_extract",
+          "call_id": "call_mlcote57r67yyw1lqmcqnzx6",
+          "agent_id": "subagent_5a9979df54e3a6c914dc4cb0",
+          "call_seq": 148,
+          "result_seq": 151,
+          "started_at": "2026-10-22T09:26:51.912607Z",
+          "finished_at": "2026-10-22T09:26:51.921004Z",
+          "arguments": {},
+          "status": "succeeded",
+          "error_code": null,
+          "returned_url": "https://httpbin.org/html?awaken_guard=A2",
+          "receipt_request_id": "call_mlcote57r67yyw1lqmcqnzx6",
+          "content_excerpt": "Herman Melville - Moby-Dick\n\nAvailing himself of the mild, summer-cool weather that now reigned in these latitudes, and in preparation for the peculia"
+        },
+        {
+          "tool": "browser_release",
+          "call_id": "call_iidkmdagmievg6s7u3tde7oo",
+          "agent_id": "subagent_5a9979df54e3a6c914dc4cb0",
+          "call_seq": 164,
+          "result_seq": 167,
+          "started_at": "2026-10-22T09:27:03.79331Z",
+          "finished_at": "2026-10-22T09:27:03.800498Z",
+          "arguments": {},
+          "status": "succeeded",
+          "error_code": null,
+          "returned_url": "",
+          "receipt_request_id": "call_iidkmdagmievg6s7u3tde7oo",
+          "content_excerpt": ""
+        },
+        {
+          "tool": "browser_navigate",
+          "call_id": "call_bela8bphnhxt1fkmcplx8ucs",
+          "agent_id": "subagent_4639d51dccf77152820582de",
+          "call_seq": 159,
+          "result_seq": 172,
+          "started_at": "2026-10-22T09:26:59.890995Z",
+          "finished_at": "2026-10-22T09:27:04.082256Z",
+          "arguments": {
+            "url": "https://httpbin.org/forms/post?awaken_guard=B1"
+          },
+          "status": "succeeded",
+          "error_code": null,
+          "returned_url": "https://httpbin.org/forms/post?awaken_guard=B1",
+          "receipt_request_id": "call_bela8bphnhxt1fkmcplx8ucs",
+          "content_excerpt": ""
+        },
+        {
+          "tool": "browser_snapshot",
+          "call_id": "call_zv9szvo5i72ast89w6yjwxc2",
+          "agent_id": "subagent_4639d51dccf77152820582de",
+          "call_seq": 180,
+          "result_seq": 183,
+          "started_at": "2026-10-22T09:27:15.098744Z",
+          "finished_at": "2026-10-22T09:27:15.106051Z",
+          "arguments": {},
+          "status": "succeeded",
+          "error_code": null,
+          "returned_url": "https://httpbin.org/forms/post?awaken_guard=B1",
+          "receipt_request_id": "call_zv9szvo5i72ast89w6yjwxc2",
+          "content_excerpt": "[1] input custname\n[2] input custtel\n[3] input custemail\n[4] input size\n[5] input size\n[6] input size\n[7] input topping\n[8] input topping\n[9] input to"
+        },
+        {
+          "tool": "browser_type",
+          "call_id": "call_nvmgwjiwq9hm9rvjl5dpcono",
+          "agent_id": "subagent_4639d51dccf77152820582de",
+          "call_seq": 191,
+          "result_seq": 194,
+          "started_at": "2026-10-22T09:27:29.384213Z",
+          "finished_at": "2026-10-22T09:27:29.391161Z",
+          "arguments": {
+            "ref": "1",
+            "text": "AWAKEN_B"
+          },
+          "status": "succeeded",
+          "error_code": null,
+          "returned_url": "https://httpbin.org/forms/post?awaken_guard=B1",
+          "receipt_request_id": "call_nvmgwjiwq9hm9rvjl5dpcono",
+          "content_excerpt": ""
+        },
+        {
+          "tool": "browser_extract",
+          "call_id": "call_jnzg8qb2jph1jjawonzvpzwg",
+          "agent_id": "subagent_4639d51dccf77152820582de",
+          "call_seq": 202,
+          "result_seq": 205,
+          "started_at": "2026-10-22T09:27:36.88166Z",
+          "finished_at": "2026-10-22T09:27:36.888465Z",
+          "arguments": {},
+          "status": "succeeded",
+          "error_code": null,
+          "returned_url": "https://httpbin.org/forms/post?awaken_guard=B1",
+          "receipt_request_id": "call_jnzg8qb2jph1jjawonzvpzwg",
+          "content_excerpt": "Customer name: \n\nTelephone: \n\nE-mail address: \n\nPizza Size\n\n Small\n\n Medium\n\n Large\n\nPizza Toppings\n\n Bacon\n\n Extra Cheese\n\n Onion\n\n Mushroom\n\nPreferr"
+        },
+        {
+          "tool": "browser_snapshot",
+          "call_id": "call_n57hjzc3xd07wzs61yfvj3od",
+          "agent_id": "subagent_4639d51dccf77152820582de",
+          "call_seq": 220,
+          "result_seq": 223,
+          "started_at": "2026-10-22T09:27:47.003617Z",
+          "finished_at": "2026-10-22T09:27:47.010034Z",
+          "arguments": {},
+          "status": "succeeded",
+          "error_code": null,
+          "returned_url": "https://httpbin.org/forms/post?awaken_guard=B1",
+          "receipt_request_id": "call_n57hjzc3xd07wzs61yfvj3od",
+          "content_excerpt": "[1] input custname\n[2] input custtel\n[3] input custemail\n[4] input size\n[5] input size\n[6] input size\n[7] input topping\n[8] input topping\n[9] input to"
+        },
+        {
+          "tool": "browser_navigate",
+          "call_id": "call_3rgpdpllziczwbadvjfslo2m",
+          "agent_id": "subagent_4639d51dccf77152820582de",
+          "call_seq": 231,
+          "result_seq": 234,
+          "started_at": "2026-10-22T09:27:54.827182Z",
+          "finished_at": "2026-10-22T09:27:55.40571Z",
+          "arguments": {
+            "url": "https://httpbin.org/html?awaken_guard=B2"
+          },
+          "status": "succeeded",
+          "error_code": null,
+          "returned_url": "https://httpbin.org/html?awaken_guard=B2",
+          "receipt_request_id": "call_3rgpdpllziczwbadvjfslo2m",
+          "content_excerpt": ""
+        },
+        {
+          "tool": "browser_extract",
+          "call_id": "call_w67u58rrurhq9piw9hda9ufp",
+          "agent_id": "subagent_4639d51dccf77152820582de",
+          "call_seq": 242,
+          "result_seq": 245,
+          "started_at": "2026-10-22T09:28:03.803969Z",
+          "finished_at": "2026-10-22T09:28:03.812099Z",
+          "arguments": {},
+          "status": "succeeded",
+          "error_code": null,
+          "returned_url": "https://httpbin.org/html?awaken_guard=B2",
+          "receipt_request_id": "call_w67u58rrurhq9piw9hda9ufp",
+          "content_excerpt": "Herman Melville - Moby-Dick\n\nAvailing himself of the mild, summer-cool weather that now reigned in these latitudes, and in preparation for the peculia"
+        }
+      ],
+      "tasks": [
+        {
+          "seq": 215,
+          "agent_id": "subagent_5a9979df54e3a6c914dc4cb0",
+          "task_id": "subtask_03217ea59c23bc698b653ebc",
+          "status": "completed",
+          "model_id": "doubao-seed-evolving",
+          "model_binding_source": "inherited",
+          "reasoning_effort": "max",
+          "started_at": "2026-10-22T09:25:03.711329Z",
+          "finished_at": "2026-10-22T09:27:38.483461Z"
+        },
+        {
+          "seq": 255,
+          "agent_id": "subagent_4639d51dccf77152820582de",
+          "task_id": "subtask_d44a5b77987d6287b4964ed9",
+          "status": "completed",
+          "model_id": "doubao-seed-evolving",
+          "model_binding_source": "inherited",
+          "reasoning_effort": "max",
+          "started_at": "2026-10-22T09:25:03.755475Z",
+          "finished_at": "2026-10-22T09:28:25.947029Z"
+        }
+      ],
+      "id": "browser-concurrency-protection",
+      "status": "passed_with_scope",
+      "source_base_commit": "b51b8026cc12ced42948be29e8bcb4b3cce5f2ba",
+      "model_ui": "Doubao-Seed-Evolving · high",
+      "model_override": false,
+      "steps": [
+        "Start two general/shared agents before waiting, using the default model.",
+        "Both immediately request the same visible browser and perform navigation, snapshot, typing and extraction.",
+        "A explicitly releases; B completes without an explicit release.",
+        "Verify tool request IDs, returned URLs, ownership during contention and successful root/child terminal records."
+      ],
+      "observed_browser_tabs": 1,
+      "findings": [
+        "All four successful navigations returned their own requested URLs.",
+        "B first navigation waited 30.012 seconds and returned browser_busy while A kept reading its own page.",
+        "B repeated navigation at 09:26:59.890995Z waited for A release at 09:27:03.800498Z, then returned B1 at 09:27:04.082256Z.",
+        "B browser_wait without ownership returned browser_busy without reading or changing A page.",
+        "Both children and root completed normally."
+      ],
+      "scope_limits": [
+        "Typing succeeded with correctly owned page receipts; the snapshot/extract tools do not return input values.",
+        "Automatic owner cleanup is covered by Runner and Desktop cancellation tests; no separate immediate reacquisition after B terminal was performed in this live run.",
+        "The model summary incorrectly described the first busy navigation as immediate; journal timings above are authoritative."
+      ],
+      "screenshots": [
+        "browser-guard-retest-default-model.jpg",
+        "browser-guard-retest-running.jpg",
+        "browser-guard-retest-completed.jpg"
+      ],
+      "automated": {
+        "desktop_browser_tests": 30,
+        "desktop_browser_test_files": 4,
+        "desktop_typecheck": "passed",
+        "core_owner_cleanup": "root/child success and cancellation passed",
+        "research_guard": "root, child, grandchild; exposed and guessed browser calls rejected before Host"
+      },
+      "initial_run": {
+        "thread_id": "thread_1792660753663713000_2",
+        "run_id": "run_1792660753663712000_1",
+        "status": "stopped_after_detecting_initial_mount_bug",
+        "failure": "Empty-slot renderer cleanup was incorrectly treated as taking control. Fixed and reproduced in lifecycle.test.ts before the successful retest.",
+        "screenshot": "browser-guard-initial-mount-failure.jpg",
+        "model_screenshot": "browser-guard-default-model.jpg"
+      }
+    },
+    {
+      "id": "research-background-browser-guard",
+      "status": "passed",
+      "source_base_commit": "b51b8026cc12ced42948be29e8bcb4b3cce5f2ba",
+      "entry": "Composer @ → 深度研究, default model unchanged",
+      "model_ui": "Doubao-Seed-Evolving · high",
+      "thread_id": "thread_1792661681812094000_2",
+      "run_id": "run_1792661681812093000_1",
+      "research_accepted_seq": 8,
+      "root_terminal": {
+        "seq": 102,
+        "status": "finished",
+        "reason": "completed"
+      },
+      "tasks": [
+        {
+          "seq": 68,
+          "agent_id": "subagent_6219b44782511d6f0a99781e",
+          "task_id": "subtask_49bc887b920807774c9121b8",
+          "status": "completed",
+          "model_id": "doubao-seed-evolving",
+          "model_binding_source": "inherited",
+          "reasoning_effort": "max"
+        },
+        {
+          "seq": 90,
+          "agent_id": "subagent_1c461c59e166a125076b54b5",
+          "task_id": "subtask_f5bc5d94802f72fd13d06704",
+          "status": "completed",
+          "model_id": "doubao-seed-evolving",
+          "model_binding_source": "inherited",
+          "reasoning_effort": "max"
+        }
+      ],
+      "web_fetch_results": [
+        {
+          "seq": 11,
+          "tool_call_id": "call_7b6b01437b06c3f27b79132e79e19639",
+          "agent_id": "root",
+          "status": "succeeded",
+          "final_url": "https://httpbin.org/html",
+          "http_status": 200,
+          "content_type": "text/html"
+        },
+        {
+          "seq": 15,
+          "tool_call_id": "call_b91f69fa63733a2f8602186d6ddbfbd9",
+          "agent_id": "root",
+          "status": "succeeded",
+          "final_url": "https://httpbin.org/json",
+          "http_status": 200,
+          "content_type": "application/json"
+        },
+        {
+          "seq": 52,
+          "tool_call_id": "call_4ganae4ojflabpheeavvms9u",
+          "agent_id": "subagent_6219b44782511d6f0a99781e",
+          "status": "succeeded",
+          "final_url": "https://httpbin.org/json",
+          "http_status": 200,
+          "content_type": "application/json"
+        },
+        {
+          "seq": 79,
+          "tool_call_id": "call_0xv50wcna0c85ufavg0nu6rk",
+          "agent_id": "subagent_1c461c59e166a125076b54b5",
+          "status": "succeeded",
+          "final_url": "https://httpbin.org/html",
+          "http_status": 200,
+          "content_type": "text/html"
+        }
+      ],
+      "browser_tool_calls": 0,
+      "observed_browser_tabs": 0,
+      "inspector_observations": [
+        "Collapsed before submission",
+        "Collapsed while both child assignments ran",
+        "Collapsed at normal root completion"
+      ],
+      "screenshots": [
+        "research-background-guard-start.jpg",
+        "research-background-guard-running.jpg",
+        "research-background-guard-children.jpg",
+        "research-background-guard-completed.jpg"
+      ],
+      "automated_negative_case": "TestResearchBrowserRestrictionSurvivesDescendantsAndStaleToolCalls: root/child/grandchild hide browser tools; guessed calls are rejected before reaching Desktop Host.",
+      "scope": "Verifies successful HTML/JSON background collection and no automatic browser/sidebar opening; no report publication was requested in this smoke."
     }
   ],
   "automated": {

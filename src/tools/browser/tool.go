@@ -18,23 +18,24 @@ const (
 	ToolType     = "browser_type"
 	ToolWait     = "browser_wait"
 	ToolExtract  = "browser_extract"
+	ToolRelease  = "browser_release"
 )
 
 type browserTool struct {
-	name        string
-	action      string
-	displayName string
-	description string
-	purpose     string
-	readOnly    bool
-	interact    bool
-	parameters  []tool.ToolParameter
-	inputSchema tool.ToolParametersSchema
-	outputDesc  string
-	whenToUse   []string
+	name         string
+	action       string
+	displayName  string
+	description  string
+	purpose      string
+	readOnly     bool
+	interact     bool
+	parameters   []tool.ToolParameter
+	inputSchema  tool.ToolParametersSchema
+	outputDesc   string
+	whenToUse    []string
 	whenNotToUse []string
-	examples    []tool.ToolExample
-	failures    []tool.ToolFailureMode
+	examples     []tool.ToolExample
+	failures     []tool.ToolFailureMode
 }
 
 func (t *browserTool) Name() string { return t.name }
@@ -106,6 +107,12 @@ func (t *browserTool) ExecuteOutcome(ctx context.Context, input string, _ tool.T
 		outcome := tool.FailedOutcome(err.Error(), "browser_invalid_input", tool.ErrorCategoryValidation, false)
 		return outcome.WithTiming(started, time.Now().UTC()), nil
 	}
+	identity, ok := tool.ToolExecutionIdentityFromContext(ctx)
+	if !ok || strings.TrimSpace(identity.AgentID) == "" || strings.TrimSpace(identity.TurnID) == "" {
+		return tool.FailedOutcome("Browser tools require host-owned execution identity.", "browser_identity_required", tool.ErrorCategoryValidation, false).WithTiming(started, time.Now().UTC()), nil
+	}
+	request.RunID, request.AgentID, request.TaskID = identity.RunID, identity.AgentID, identity.SubagentTaskID
+	request.TurnID, request.RequestID = identity.TurnID, identity.ToolCallID
 	result, err := browserhost.Call(ctx, request)
 	if err != nil {
 		outcome := tool.FailedOutcome(err.Error(), "browser_host_unreachable", tool.ErrorCategoryRuntime, true)
@@ -122,23 +129,34 @@ func (t *browserTool) ExecuteOutcome(ctx context.Context, input string, _ tool.T
 		case "browser_view_not_visible", "browser_not_shown", "browser_host_unavailable":
 			category = tool.ErrorCategoryUnsupported
 			retryable = true
+		case "browser_busy":
+			retryable = true
+		case "browser_control_required", "browser_control_lost", "browser_navigation_interrupted", "browser_snapshot_expired":
+			retryable = true
 		case "origin_lease_expired":
 			category = tool.ErrorCategoryPolicy
 		case "unsupported_scheme", "element_ref_required", "thread_id_required":
 			category = tool.ErrorCategoryValidation
 		}
 		outcome := tool.FailedOutcome("Browser action failed: "+code, code, category, retryable)
-		outcome.Diagnostic = map[string]any{"url": result.URL, "title": result.Title}
+		outcome.Diagnostic = map[string]any{"url": result.URL, "title": result.Title, "request_id": result.RequestID}
+		if code == "browser_busy" {
+			outcome.Content += ". Another agent is using the shared visible page. Wait for it to call browser_release or finish; do not take over or open extra tabs."
+			outcome.RecoveryOptions = []string{"wait_for_browser_owner"}
+		} else if code == "browser_control_required" || code == "browser_control_lost" || code == "browser_snapshot_expired" {
+			outcome.RecoveryOptions = []string{"browser_navigate", "browser_snapshot"}
+		}
 		return outcome.WithTiming(started, time.Now().UTC()), nil
 	}
 	content := formatResult(result)
 	outcome := tool.SucceededOutcome(content)
 	outcome.Details = map[string]any{
-		"url":       result.URL,
-		"title":     result.Title,
-		"snapshot":  result.Snapshot,
-		"text":      result.Text,
-		"truncated": result.Truncated,
+		"request_id": result.RequestID,
+		"url":        result.URL,
+		"title":      result.Title,
+		"snapshot":   result.Snapshot,
+		"text":       result.Text,
+		"truncated":  result.Truncated,
 	}
 	return outcome.WithTiming(started, time.Now().UTC()), nil
 }
@@ -213,15 +231,25 @@ func formatResult(result browserhost.Result) string {
 
 func init() {
 	tool.MustRegisterToolWithMode(&browserTool{
+		name: ToolRelease, action: "release", displayName: "Browser Release", readOnly: true,
+		description: "Release this agent's shared visible browser page after finishing a navigation/read/click sequence or before waiting for another agent. Leaves the page open; subsequent operations require browser_navigate.",
+		purpose:     "Let another agent use the shared page without interrupting a browser sequence.",
+		inputSchema: tool.ToolParametersSchema{Type: "object", Properties: map[string]tool.ToolParam{}, AdditionalProperties: tool.BoolPtr(false)},
+		outputDesc:  "Release acknowledgement.", whenToUse: []string{"After finishing visible browser work", "Before waiting for another browser agent"},
+		whenNotToUse: []string{"Do not release another agent's page"},
+		examples:     []tool.ToolExample{{Scenario: "Finish browsing", Input: map[string]any{}, Outcome: "Releases ownership and keeps the page open"}},
+		failures:     []tool.ToolFailureMode{{Code: "browser_host_unavailable", Cause: "Desktop host is unavailable", Retryable: true}},
+	}, tool.DefinitionValidationStrictBuiltin)
+	tool.MustRegisterToolWithMode(&browserTool{
 		name: ToolNavigate, action: "navigate", displayName: "Browser Navigate", interact: true,
-		description: "Open a visible browser tab only when the user asks to view a website or you need live page interaction. This changes the user's foreground panel. For background research, citations or JSON/API data use WebSearch and WebFetch instead. Do not use Bash/curl to drive the visible page.",
-		purpose:     "Navigate the Desktop embedded browser to a public http(s) URL and admit that origin.",
-		parameters:  []tool.ToolParameter{{Name: "url", Description: "http(s) URL or host to open.", Type: "string", Required: true}},
-		inputSchema: tool.ToolParametersSchema{Type: "object", Properties: map[string]tool.ToolParam{"url": {Type: "string", Description: "http(s) URL or host."}}, Required: []string{"url"}, AdditionalProperties: tool.BoolPtr(false)},
-		outputDesc:  "Loaded URL and title.",
-		whenToUse:   []string{"The user asked to open a website in Awaken", "A later click or type needs a live page"},
+		description:  "Open a visible browser tab only when the user asks to view a website or you need live page interaction. This changes the user's foreground panel and acquires the shared page for this agent until browser_release or assignment completion. Other agents wait; release before waiting for delegated browser work. For background research, citations or JSON/API data use WebSearch and WebFetch instead. Do not use Bash/curl to drive the visible page.",
+		purpose:      "Navigate the Desktop embedded browser to a public http(s) URL and admit that origin.",
+		parameters:   []tool.ToolParameter{{Name: "url", Description: "http(s) URL or host to open.", Type: "string", Required: true}},
+		inputSchema:  tool.ToolParametersSchema{Type: "object", Properties: map[string]tool.ToolParam{"url": {Type: "string", Description: "http(s) URL or host."}}, Required: []string{"url"}, AdditionalProperties: tool.BoolPtr(false)},
+		outputDesc:   "Loaded URL and title.",
+		whenToUse:    []string{"The user asked to open a website in Awaken", "A later click or type needs a live page"},
 		whenNotToUse: []string{"Use WebFetch to read page text without a visible tab", "Use WebSearch to discover URLs", "Do not open local HTML, file:, or javascript: URLs"},
-		examples:    []tool.ToolExample{{Scenario: "Open a docs site", Input: map[string]any{"url": "example.com"}, Outcome: "The browser tab loads https://example.com/"}},
+		examples:     []tool.ToolExample{{Scenario: "Open a docs site", Input: map[string]any{"url": "example.com"}, Outcome: "The browser tab loads https://example.com/"}},
 		failures: []tool.ToolFailureMode{
 			{Code: "browser_host_unavailable", Cause: "Desktop browser host is not registered", Retryable: true},
 			{Code: "unsupported_scheme", Cause: "URL is not http(s)", Retryable: false},
@@ -230,13 +258,13 @@ func init() {
 	}, tool.DefinitionValidationStrictBuiltin)
 	tool.MustRegisterToolWithMode(&browserTool{
 		name: ToolSnapshot, action: "snapshot", displayName: "Browser Snapshot", readOnly: true,
-		description: "Read numbered interactive elements from the visible Awaken browser tab. Do not use this for local HTML preview.",
-		purpose:     "Capture a bounded accessibility snapshot of the visible public webpage.",
-		inputSchema: tool.ToolParametersSchema{Type: "object", Properties: map[string]tool.ToolParam{}, AdditionalProperties: tool.BoolPtr(false)},
-		outputDesc:  "Page URL, title, and numbered element refs.",
-		whenToUse:   []string{"Before clicking or typing in the embedded browser", "To inspect the current public page"},
+		description:  "Read numbered interactive elements from the visible Awaken browser tab. Do not use this for local HTML preview.",
+		purpose:      "Capture a bounded accessibility snapshot of the visible public webpage.",
+		inputSchema:  tool.ToolParametersSchema{Type: "object", Properties: map[string]tool.ToolParam{}, AdditionalProperties: tool.BoolPtr(false)},
+		outputDesc:   "Page URL, title, and numbered element refs.",
+		whenToUse:    []string{"Before clicking or typing in the embedded browser", "To inspect the current public page"},
 		whenNotToUse: []string{"Use WebFetch for a static text extract", "Use computer_observe for the OS desktop", "Do not snapshot project HTML preview"},
-		examples:    []tool.ToolExample{{Scenario: "List clickable controls", Input: map[string]any{}, Outcome: "Returns [1] a Home and other numbered refs"}},
+		examples:     []tool.ToolExample{{Scenario: "List clickable controls", Input: map[string]any{}, Outcome: "Returns [1] a Home and other numbered refs"}},
 		failures: []tool.ToolFailureMode{
 			{Code: "browser_host_unavailable", Cause: "Desktop browser host is not registered", Retryable: true},
 			{Code: "browser_not_shown", Cause: "The browser tab is not the visible surface", Retryable: true},
@@ -244,14 +272,14 @@ func init() {
 	}, tool.DefinitionValidationStrictBuiltin)
 	tool.MustRegisterToolWithMode(&browserTool{
 		name: ToolClick, action: "click", displayName: "Browser Click", interact: true,
-		description: "Click a numbered element from the latest browser_snapshot on the visible public page.",
-		purpose:     "Activate one snapshot ref in the current origin lease.",
-		parameters:  []tool.ToolParameter{{Name: "ref", Description: "Element ref such as 1 or [1].", Type: "string", Required: true}},
-		inputSchema: tool.ToolParametersSchema{Type: "object", Properties: map[string]tool.ToolParam{"ref": {Type: "string", Description: "Snapshot element ref."}}, Required: []string{"ref"}, AdditionalProperties: tool.BoolPtr(false)},
-		outputDesc:  "URL after the click.",
-		whenToUse:   []string{"After browser_snapshot when a visible control must be activated"},
+		description:  "Click a numbered element from the latest browser_snapshot on the visible public page.",
+		purpose:      "Activate one snapshot ref in the current origin lease.",
+		parameters:   []tool.ToolParameter{{Name: "ref", Description: "Element ref such as 1 or [1].", Type: "string", Required: true}},
+		inputSchema:  tool.ToolParametersSchema{Type: "object", Properties: map[string]tool.ToolParam{"ref": {Type: "string", Description: "Snapshot element ref."}}, Required: []string{"ref"}, AdditionalProperties: tool.BoolPtr(false)},
+		outputDesc:   "URL after the click.",
+		whenToUse:    []string{"After browser_snapshot when a visible control must be activated"},
 		whenNotToUse: []string{"Use computer_act for OS UI", "Do not click after a cross-origin navigation without a new snapshot"},
-		examples:    []tool.ToolExample{{Scenario: "Click the first link", Input: map[string]any{"ref": "[1]"}, Outcome: "Clicks the element tagged data-awaken-ref=1"}},
+		examples:     []tool.ToolExample{{Scenario: "Click the first link", Input: map[string]any{"ref": "[1]"}, Outcome: "Clicks the element tagged data-awaken-ref=1"}},
 		failures: []tool.ToolFailureMode{
 			{Code: "browser_view_not_visible", Cause: "The page is not painted", Retryable: true},
 			{Code: "origin_lease_expired", Cause: "The page origin changed after admission", Retryable: true, Recovery: []string{"browser_navigate", "browser_snapshot"}},
@@ -270,10 +298,10 @@ func init() {
 			"ref":  {Type: "string", Description: "Snapshot element ref."},
 			"text": {Type: "string", Description: "Non-secret text."},
 		}, Required: []string{"ref", "text"}, AdditionalProperties: tool.BoolPtr(false)},
-		outputDesc:  "URL after typing.",
-		whenToUse:   []string{"After browser_snapshot when a visible text field must be filled"},
+		outputDesc:   "URL after typing.",
+		whenToUse:    []string{"After browser_snapshot when a visible text field must be filled"},
 		whenNotToUse: []string{"Do not type passwords, OTP, or API keys", "Use computer_act for OS inputs"},
-		examples:    []tool.ToolExample{{Scenario: "Fill a search box", Input: map[string]any{"ref": "2", "text": "awaken"}, Outcome: "Sets the input value and dispatches input"}},
+		examples:     []tool.ToolExample{{Scenario: "Fill a search box", Input: map[string]any{"ref": "2", "text": "awaken"}, Outcome: "Sets the input value and dispatches input"}},
 		failures: []tool.ToolFailureMode{
 			{Code: "browser_view_not_visible", Cause: "The page is not painted", Retryable: true},
 			{Code: "origin_lease_expired", Cause: "The page origin changed after admission", Retryable: true},
@@ -282,28 +310,28 @@ func init() {
 	}, tool.DefinitionValidationStrictBuiltin)
 	tool.MustRegisterToolWithMode(&browserTool{
 		name: ToolWait, action: "wait", displayName: "Browser Wait", readOnly: true,
-		description: "Wait on the visible Awaken browser tab while a public page settles.",
-		purpose:     "Pause briefly so a live page can finish loading before the next snapshot.",
-		parameters:  []tool.ToolParameter{{Name: "seconds", Description: "Seconds to wait, between 0.2 and 120.", Type: "number"}},
-		inputSchema: tool.ToolParametersSchema{Type: "object", Properties: map[string]tool.ToolParam{"seconds": {Type: "number", Description: "Seconds to wait."}}, AdditionalProperties: tool.BoolPtr(false)},
-		outputDesc:  "URL and title after waiting.",
-		whenToUse:   []string{"After navigate or click when the page is still loading"},
+		description:  "Wait on the visible Awaken browser tab while a public page settles.",
+		purpose:      "Pause briefly so a live page can finish loading before the next snapshot.",
+		parameters:   []tool.ToolParameter{{Name: "seconds", Description: "Seconds to wait, between 0.2 and 120.", Type: "number"}},
+		inputSchema:  tool.ToolParametersSchema{Type: "object", Properties: map[string]tool.ToolParam{"seconds": {Type: "number", Description: "Seconds to wait."}}, AdditionalProperties: tool.BoolPtr(false)},
+		outputDesc:   "URL and title after waiting.",
+		whenToUse:    []string{"After navigate or click when the page is still loading"},
 		whenNotToUse: []string{"Do not use as a substitute for a snapshot", "Use computer_act wait for OS UI"},
-		examples:    []tool.ToolExample{{Scenario: "Wait one second", Input: map[string]any{"seconds": 1}, Outcome: "Returns after the delay"}},
+		examples:     []tool.ToolExample{{Scenario: "Wait one second", Input: map[string]any{"seconds": 1}, Outcome: "Returns after the delay"}},
 		failures: []tool.ToolFailureMode{
 			{Code: "browser_not_shown", Cause: "The browser tab is hidden", Retryable: true},
 		},
 	}, tool.DefinitionValidationStrictBuiltin)
 	tool.MustRegisterToolWithMode(&browserTool{
 		name: ToolExtract, action: "extract", displayName: "Browser Extract", readOnly: true,
-		description: "Read bounded visible text from the current public page. Use WebFetch when no visible tab is needed.",
-		purpose:     "Extract a slice of the painted page body text.",
-		parameters:  []tool.ToolParameter{{Name: "start", Description: "Character offset into the page text.", Type: "integer"}},
-		inputSchema: tool.ToolParametersSchema{Type: "object", Properties: map[string]tool.ToolParam{"start": {Type: "integer", Description: "Character offset."}}, AdditionalProperties: tool.BoolPtr(false)},
-		outputDesc:  "URL, title, text slice, and truncation flag.",
-		whenToUse:   []string{"The visible page text is needed after interacting with it"},
+		description:  "Read bounded visible text from the current public page. Use WebFetch when no visible tab is needed.",
+		purpose:      "Extract a slice of the painted page body text.",
+		parameters:   []tool.ToolParameter{{Name: "start", Description: "Character offset into the page text.", Type: "integer"}},
+		inputSchema:  tool.ToolParametersSchema{Type: "object", Properties: map[string]tool.ToolParam{"start": {Type: "integer", Description: "Character offset."}}, AdditionalProperties: tool.BoolPtr(false)},
+		outputDesc:   "URL, title, text slice, and truncation flag.",
+		whenToUse:    []string{"The visible page text is needed after interacting with it"},
 		whenNotToUse: []string{"Use WebFetch for a fresh independent fetch", "Do not extract project HTML preview"},
-		examples:    []tool.ToolExample{{Scenario: "Read the article body", Input: map[string]any{"start": 0}, Outcome: "Returns up to 16000 characters"}},
+		examples:     []tool.ToolExample{{Scenario: "Read the article body", Input: map[string]any{"start": 0}, Outcome: "Returns up to 16000 characters"}},
 		failures: []tool.ToolFailureMode{
 			{Code: "browser_not_shown", Cause: "The browser tab is hidden", Retryable: true},
 		},

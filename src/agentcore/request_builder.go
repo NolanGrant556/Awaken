@@ -500,6 +500,10 @@ func (rb *RequestBuilder) attributeToolSchemas(schemas []tool.ToolSchema) []Attr
 	return result
 }
 
+func (rb *RequestBuilder) researchBlocksBrowser(name string) bool {
+	return (rb.config.BackgroundResearch || rb.config.ResearchIntent != nil) && strings.HasPrefix(name, "browser_")
+}
+
 func (rb *RequestBuilder) getTools() []tool.ToolSchema {
 	toolStatus := strings.TrimSpace(rb.config.ModelConfig.Capabilities.SupportsTools)
 	if toolStatus != "" && toolStatus != "ready" {
@@ -511,7 +515,7 @@ func (rb *RequestBuilder) getTools() []tool.ToolSchema {
 		entries := rb.config.ToolAvailabilitySnapshot.Entries()
 		definitions := make([]tool.ToolSchema, 0, len(entries))
 		for _, entry := range entries {
-			if entry.Runtime == nil || !tool.IsToolExposed(entry.Definition.Name, rb.toolExposurePolicy()) {
+			if entry.Runtime == nil || rb.researchBlocksBrowser(entry.Definition.Name) || !tool.IsToolExposed(entry.Definition.Name, rb.toolExposurePolicy()) {
 				continue
 			}
 			if isComputerToolDefinition(entry.Definition) && entry.Readiness.Readiness != tool.ProviderReady {
@@ -555,6 +559,9 @@ func (rb *RequestBuilder) getTools() []tool.ToolSchema {
 
 	for _, t := range tools {
 		definition := requestToolDefinition(t)
+		if rb.researchBlocksBrowser(definition.Name) {
+			continue
+		}
 		// Progressive disclosure requires a pinned run snapshot; the registry
 		// fallback path never offers the search tool.
 		if definition.Name == tool.ToolFindToolName {

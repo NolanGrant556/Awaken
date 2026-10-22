@@ -63,7 +63,11 @@ export class EmbeddedBrowserHost {
         return;
       }
       const body = (await readJson(request)) as BrowserHostRequest;
-      const result = await runBrowserAutomation(this.manager, body);
+      const abort = new AbortController();
+      const onClose = () => { if (!response.writableEnded) abort.abort(); };
+      response.on("close", onClose);
+      const result = await runBrowserAutomation(this.manager, body, abort.signal);
+      response.removeListener("close", onClose);
       this.write(response, result.ok ? 200 : 409, result);
     } catch (error) {
       this.write(response, 500, {

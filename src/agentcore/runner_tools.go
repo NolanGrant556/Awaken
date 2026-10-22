@@ -61,6 +61,7 @@ func toolRuntimeConfigFromAgentConfig(config AgentConfig) ToolRuntimeConfig {
 		config.MediaArtifactReferences...,
 	)
 	cfg := ToolRuntimeConfig{
+		BackgroundResearch:           config.BackgroundResearch || config.ResearchIntent != nil,
 		PermissionContext:            permissionContext.Normalize(),
 		AutoToolPolicy:               config.AutoToolPolicy,
 		Profile:                      config.ExecutionProfile,

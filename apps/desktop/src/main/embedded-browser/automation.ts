@@ -1,3 +1,6 @@
+import { setTimeout as delay } from "node:timers/promises";
+import { randomUUID } from "node:crypto";
+import { BrowserControlGate, type BrowserControl, type BrowserIdentity } from "./control.js";
 import {
   type EmbeddedBrowserActionKind,
   type EmbeddedBrowserState,
@@ -7,6 +10,8 @@ import {
 import type { EmbeddedBrowserViewController } from "./controller.js";
 
 export type BrowserHostAction =
+  | "release"
+  | "end_owner"
   | "navigate"
   | "snapshot"
   | "click"
@@ -14,7 +19,7 @@ export type BrowserHostAction =
   | "wait"
   | "extract";
 
-export type BrowserHostRequest = {
+export type BrowserHostRequest = BrowserIdentity & {
   action: BrowserHostAction;
   threadId: string;
   url?: string;
@@ -25,7 +30,8 @@ export type BrowserHostRequest = {
 };
 
 export type BrowserAutomationHost = {
-  navigateForAgent(threadId: string, url: string): Promise<EmbeddedBrowserState>;
+  agentControl: BrowserControlGate;
+  navigateForAgent(threadId: string, url: string, control?: BrowserControl): Promise<EmbeddedBrowserState>;
   viewForAction(
     threadId: string,
     kind: EmbeddedBrowserActionKind,
@@ -57,6 +63,7 @@ const EXTRACT_SCRIPT = `(() => {
 
 export type BrowserHostResult = {
   ok: boolean;
+  requestId?: string;
   error?: string;
   url?: string;
   title?: string;
@@ -68,14 +75,48 @@ export type BrowserHostResult = {
 export async function runBrowserAutomation(
   manager: BrowserAutomationHost,
   request: BrowserHostRequest,
+  signal?: AbortSignal,
 ): Promise<BrowserHostResult> {
+  const receipt = { requestId: request?.requestId };
+  if (!request?.threadId?.trim()) return { ...receipt, ok: false, error: "thread_id_required" };
+  if (![request.runId, request.agentId].every((value) => typeof value === "string" && value.trim())) {
+    return { ...receipt, ok: false, error: "browser_identity_required" };
+  }
+  if (request.action === "release" || request.action === "end_owner") {
+    manager.agentControl.release(request, request.action === "end_owner");
+    return { ...receipt, ok: true };
+  }
+  if (![request.turnId, request.requestId].every((value) => typeof value === "string" && value.trim())) {
+    return { ...receipt, ok: false, error: "browser_identity_required" };
+  }
+  if (!["navigate", "snapshot", "extract", "wait", "click", "type"].includes(request.action)) {
+    return { ...receipt, ok: false, error: "browser_invalid_action" };
+  }
+  try {
+    const result = await manager.agentControl.run(request, request.action, async (control) => {
+      const result = await executeBrowserAction(manager, request, control);
+      if (!result.ok) throw new Error(result.error ?? "browser_action_failed");
+      return result;
+    }, signal);
+    return { ...result, ...receipt };
+  } catch (error) {
+    return { ...receipt, ok: false, error: error instanceof Error ? error.message : "browser_action_failed" };
+  }
+}
+
+async function executeBrowserAction(manager: BrowserAutomationHost, request: BrowserHostRequest, control: BrowserControl): Promise<BrowserHostResult> {
   const threadId = request.threadId?.trim();
   if (!threadId) return { ok: false, error: "thread_id_required" };
 
   if (request.action === "navigate") {
     const url = parseNavigable(request.url ?? "");
     if (!url) return { ok: false, error: "unsupported_scheme" };
-    const state = await manager.navigateForAgent(threadId, url);
+    control.snapshotToken = undefined;
+    const state = await manager.navigateForAgent(threadId, url, control);
+    control.assertCurrent();
+    control.controller = manager.viewForAction(threadId, "observe") ?? undefined;
+    if (!control.controller) throw new Error("browser_view_not_visible");
+    control.documentRevision = control.controller.documentRevision;
     return { ok: true, url: state.url, title: state.title };
   }
 
@@ -85,19 +126,39 @@ export async function runBrowserAutomation(
     return { ok: false, error: kind === "mutate" ? "browser_view_not_visible" : "browser_not_shown" };
   }
 
+  if (control.documentRevision !== controller.documentRevision) throw new Error("browser_navigation_interrupted");
+  if (controller !== control.controller) throw new Error("browser_control_lost");
+  control.assertCurrent();
+  const revision = controller.documentRevision;
+  const assertDocument = () => {
+    control.assertCurrent();
+    if (manager.viewForAction(threadId, kind) !== controller || controller.documentRevision !== revision) {
+      throw new Error("browser_navigation_interrupted");
+    }
+  };
+
   if (request.action === "wait") {
     const seconds = Math.min(Math.max(Number(request.seconds) || 1, 0.2), 120);
-    await new Promise((resolve) => setTimeout(resolve, seconds * 1000));
+    try {
+      await delay(seconds * 1000, undefined, { signal: control.cancellation.signal });
+    } catch {
+      control.assertCurrent();
+      throw new Error("browser_action_cancelled");
+    }
+    assertDocument();
     const state = controller.state();
     return { ok: true, url: state.url, title: state.title };
   }
 
   if (request.action === "snapshot") {
+    const token = randomUUID();
     const snapshot = await controller.executeJavaScript<{
       url: string;
       title: string;
       items: string[];
-    }>(SNAPSHOT_SCRIPT);
+    }>(`globalThis.__awakenSnapshotToken = ${JSON.stringify(token)}; ${SNAPSHOT_SCRIPT}`);
+    assertDocument();
+    control.snapshotToken = token;
     return {
       ok: true,
       url: snapshot.url,
@@ -112,6 +173,7 @@ export async function runBrowserAutomation(
       title: string;
       text: string;
     }>(EXTRACT_SCRIPT);
+    assertDocument();
     const start = Math.max(0, Math.floor(Number(request.start) || 0));
     const slice = extracted.text.slice(start, start + 16_000);
     return {
@@ -123,6 +185,8 @@ export async function runBrowserAutomation(
     };
   }
 
+  if (!control.snapshotToken) throw new Error("browser_snapshot_expired");
+  const snapshotGuard = `if (globalThis.__awakenSnapshotToken !== ${JSON.stringify(control.snapshotToken)}) throw new Error("browser_snapshot_expired");`;
   const ref = normalizeRef(request.ref ?? "");
   if (!ref) return { ok: false, error: "element_ref_required" };
   if (!originStillAdmitted(controller)) {
@@ -131,8 +195,9 @@ export async function runBrowserAutomation(
 
   if (request.action === "click") {
     const clicked = await controller.executeJavaScript<boolean>(
-      `(() => { const node = document.querySelector('[data-awaken-ref="${ref}"]'); if (!(node instanceof HTMLElement)) return false; node.click(); return true; })()`,
+      `(() => { ${snapshotGuard} const node = document.querySelector('[data-awaken-ref="${ref}"]'); if (!(node instanceof HTMLElement)) return false; node.click(); return true; })()`,
     );
+    control.assertCurrent();
     if (!clicked) return { ok: false, error: "element_not_found" };
     return { ok: true, url: controller.currentURL() };
   }
@@ -140,6 +205,7 @@ export async function runBrowserAutomation(
   const text = request.text ?? "";
   const typed = await controller.executeJavaScript<boolean>(
     `(() => {
+      ${snapshotGuard}
       const node = document.querySelector('[data-awaken-ref="${ref}"]');
       if (!(node instanceof HTMLElement)) return false;
       node.focus();
@@ -152,6 +218,7 @@ export async function runBrowserAutomation(
       return true;
     })()`,
   );
+  assertDocument();
   if (!typed) return { ok: false, error: "element_not_found" };
   return { ok: true, url: controller.currentURL() };
 }

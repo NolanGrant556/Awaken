@@ -15,6 +15,7 @@ class Guest extends EventEmitter {
   getURL = () => this.url;
   getTitle = () => "Test page";
   isLoading = () => false;
+  stop = vi.fn();
   setWindowOpenHandler = vi.fn();
   loadURL = vi.fn(async (url: string) => {
     this.url = url;
@@ -25,6 +26,7 @@ class Guest extends EventEmitter {
     return { url: this.url, title: "Test page", items: ["[1] button Test"] };
   });
 }
+const identity = { runId: "run-a", agentId: "root", turnId: "turn-a", requestId: "call-a" };
 const window = { isDestroyed: () => false } as BrowserWindow;
 const rect = { x: 0, y: 0, width: 300, height: 200 };
 const ref = { threadId: "thread-a", viewId: "slot-1" };
@@ -71,12 +73,13 @@ describe("browser guest lifecycle and Agent admission", () => {
     const manager = managerWithState();
     const guest = new Guest();
     attach(manager, guest);
-    await manager.navigate(ref, "https://example.com/");
+    await runBrowserAutomation(manager, { ...identity, action: "navigate", threadId: ref.threadId, url: "https://example.com/" });
+    await runBrowserAutomation(manager, { ...identity, action: "snapshot", threadId: ref.threadId });
     const open = guest.setWindowOpenHandler.mock.calls[0][0] as (details: { url: string }) => { action: string };
     expect(open({ url: "https://other.example/page" })).toEqual({ action: "deny" });
     await Promise.resolve();
     expect(guest.url).toBe("https://other.example/page");
-    expect(await runBrowserAutomation(manager, { action: "click", threadId: ref.threadId, ref: "1" })).toMatchObject({ ok: false, error: "origin_lease_expired" });
+    expect(await runBrowserAutomation(manager, { ...identity, action: "click", threadId: ref.threadId, ref: "1" })).toMatchObject({ ok: false, error: "origin_lease_expired" });
     const loads = guest.loadURL.mock.calls.length;
     expect(open({ url: "javascript:alert(1)" })).toEqual({ action: "deny" });
     expect(open({ url: "file:///tmp/private.html" })).toEqual({ action: "deny" });
@@ -105,20 +108,22 @@ describe("browser guest lifecycle and Agent admission", () => {
     expect(hide).toHaveBeenCalledTimes(1);
   });
 
-  it("mounts a fresh public guest from the Agent URL before waiting for visibility", async () => {
+  it("mounts a fresh public guest through renderer empty-slot cleanup without losing control", async () => {
     const guest = new Guest();
     let attached = false;
     const onState = vi.fn((_viewId, _threadId, state) => {
       if (attached) return;
       expect(state.url).toBe("https://example.com/");
       attached = true;
+      manager.setActive(null);
+      manager.setActive(ref);
       attach(manager, guest);
     });
     const manager = managerWithState(onState, vi.fn(() => manager.setActive(ref)));
-    const result = await runBrowserAutomation(manager, { action: "navigate", threadId: ref.threadId, url: "example.com" });
+    const result = await runBrowserAutomation(manager, { ...identity, action: "navigate", threadId: ref.threadId, url: "example.com" });
     expect(result).toMatchObject({ ok: true, url: "https://example.com/" });
     expect(guest.loadURL).toHaveBeenCalledTimes(1);
-    expect(await runBrowserAutomation(manager, { action: "snapshot", threadId: ref.threadId })).toMatchObject({ ok: true, snapshot: "[1] button Test" });
+    expect(await runBrowserAutomation(manager, { ...identity, action: "snapshot", threadId: ref.threadId })).toMatchObject({ ok: true, snapshot: "[1] button Test" });
   });
 
   it("waits for loading and does not replay a redirect or admit its destination", async () => {
@@ -137,7 +142,7 @@ describe("browser guest lifecycle and Agent admission", () => {
       attach(manager, guest);
     }), vi.fn(() => manager.setActive(ref)));
     let finished = false;
-    const action = runBrowserAutomation(manager, { action: "navigate", threadId: ref.threadId, url: "https://example.com/" });
+    const action = runBrowserAutomation(manager, { ...identity, action: "navigate", threadId: ref.threadId, url: "https://example.com/" });
     void action.then(() => { finished = true; });
     await Promise.resolve();
     await Promise.resolve();
@@ -160,11 +165,11 @@ describe("browser guest lifecycle and Agent admission", () => {
     }), vi.fn(() => manager.setActive(ref)));
     attach(manager, local, true);
     for (const action of ["snapshot", "extract", "wait", "click", "type"] as const) {
-      expect((await runBrowserAutomation(manager, { action, threadId: ref.threadId, ref: "1", text: "test" })).ok).toBe(false);
+      expect((await runBrowserAutomation(manager, { ...identity, action, threadId: ref.threadId, ref: "1", text: "test" })).ok).toBe(false);
     }
     expect(local.executeJavaScript).not.toHaveBeenCalled();
     switching = true;
-    expect(await runBrowserAutomation(manager, { action: "navigate", threadId: ref.threadId, url: "https://example.com/" })).toMatchObject({ ok: true, url: "https://example.com/" });
+    expect(await runBrowserAutomation(manager, { ...identity, action: "navigate", threadId: ref.threadId, url: "https://example.com/" })).toMatchObject({ ok: true, url: "https://example.com/" });
     expect(local.loadURL).not.toHaveBeenCalled();
     expect(manager.viewForAction(ref.threadId, "observe")?.loadsLocalFiles).toBe(false);
   });
@@ -174,16 +179,17 @@ describe("browser guest lifecycle and Agent admission", () => {
     guest.url = "https://one.example/";
     const manager = managerWithState();
     attach(manager, guest);
-    await manager.navigate(ref, guest.url);
+    await runBrowserAutomation(manager, { ...identity, action: "navigate", threadId: ref.threadId, url: guest.url });
+    await runBrowserAutomation(manager, { ...identity, action: "snapshot", threadId: ref.threadId });
     guest.url = "https://two.example/";
     guest.emit("did-navigate");
-    expect(await runBrowserAutomation(manager, { action: "click", threadId: ref.threadId, ref: "1" })).toMatchObject({ ok: false, error: "origin_lease_expired" });
+    expect(await runBrowserAutomation(manager, { ...identity, action: "click", threadId: ref.threadId, ref: "1" })).toMatchObject({ ok: false, error: "origin_lease_expired" });
     manager.detachGuest(ref);
     expect(guest.listenerCount("did-navigate")).toBe(0);
     const restored = new Guest();
     restored.url = "https://two.example/";
     attach(manager, restored);
-    expect(await runBrowserAutomation(manager, { action: "type", threadId: ref.threadId, ref: "1", text: "test" })).toMatchObject({ ok: false, error: "origin_lease_expired" });
+    expect(await runBrowserAutomation(manager, { ...identity, action: "type", threadId: ref.threadId, ref: "1", text: "test" })).toMatchObject({ ok: false, error: "browser_control_required" });
     await manager.navigate(ref, restored.url);
     expect(manager.viewForAction(ref.threadId, "mutate")?.originAdmitted(restored.url)).toBe(true);
   });
@@ -220,4 +226,33 @@ describe("browser guest lifecycle and Agent admission", () => {
     expect(guest.loadURL).not.toHaveBeenCalled();
     controller.destroy();
   });
+  it("does not report success when loadURL fails or a later navigation replaces it", async () => {
+    const guest = new Guest();
+    const controller = new EmbeddedBrowserViewController(window, vi.fn(), { guest: guest as unknown as WebContents });
+    guest.loadURL.mockRejectedValueOnce(new Error("ERR_NAME_NOT_RESOLVED"));
+    await expect(controller.navigate("https://failed.example/")).rejects.toThrow("browser_navigation_interrupted");
+    await expect(controller.waitForNavigation()).rejects.toThrow("browser_navigation_interrupted");
+    let finish!: () => void;
+    guest.loadURL.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const first = controller.navigate("https://one.example/");
+    const rejected = expect(first).rejects.toThrow("browser_navigation_interrupted");
+    await controller.navigate("https://two.example/");
+    finish();
+    await rejected;
+    controller.destroy();
+  });
+
+  it("rejects an old read when a user navigation changes the shared page", async () => {
+    const guest = new Guest();
+    const manager = managerWithState();
+    attach(manager, guest);
+    await runBrowserAutomation(manager, { ...identity, action: "navigate", threadId: ref.threadId, url: "https://example.com/A" });
+    guest.executeJavaScript.mockImplementationOnce(async () => {
+      await manager.navigate(ref, "https://example.com/user");
+      return { url: guest.url, title: "User page", items: [] };
+    });
+    expect(await runBrowserAutomation(manager, { ...identity, action: "snapshot", threadId: ref.threadId })).toMatchObject({ ok: false, error: "browser_control_lost" });
+    expect(guest.url).toBe("https://example.com/user");
+  });
+
 });

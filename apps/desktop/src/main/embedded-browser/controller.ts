@@ -33,6 +33,9 @@ export class EmbeddedBrowserViewController {
   private shownWithBounds = false;
   private admittedOrigin = "";
   private readonly eventDisposers: Array<() => void> = [];
+  documentRevision = 0;
+  private navigationGeneration = 0;
+  private navigationFailure: Error | null = null;
   private navigationInFlight: { url: string; promise: Promise<void> } | null = null;
   private readonly onState: (state: EmbeddedBrowserState) => void;
   private readonly allowFile: boolean;
@@ -104,6 +107,7 @@ export class EmbeddedBrowserViewController {
       this.primaryPointerGesture = next.gesture;
       if (next.primaryClick) this.onPrimaryClick?.();
     });
+    listen("did-start-navigation", (_event, _url, _inPlace, isMainFrame) => { if (_event?.isMainFrame ?? isMainFrame) this.documentRevision++; });
     listen("did-start-loading", () => this.emitState());
     listen("did-stop-loading", () => this.emitState());
     listen("did-navigate", () => this.recordNavigation());
@@ -117,7 +121,10 @@ export class EmbeddedBrowserViewController {
     wc.setWindowOpenHandler(({ url }) => {
       if (this.handoffHttp(url)) return { action: "deny" };
       const navigable = resolveEmbeddedBrowserNavigation(url, this.allowFile);
-      if (navigable) void this.loadInternal(navigable);
+      if (navigable) {
+        this.navigationGeneration++;
+        void this.loadInternal(navigable).catch(() => undefined);
+      }
       else this.openExternal(url);
       return { action: "deny" };
     });
@@ -152,7 +159,7 @@ export class EmbeddedBrowserViewController {
     try {
       await this.wc.loadURL(url);
     } catch {
-      /* surfaced via did-fail-load */
+      throw new Error("browser_navigation_interrupted");
     }
   }
 
@@ -198,6 +205,8 @@ export class EmbeddedBrowserViewController {
     if (!navigable || (this.allowFile && parseNavigable(navigable))) {
       throw new Error("unsupported_scheme");
     }
+    const generation = ++this.navigationGeneration;
+    this.navigationFailure = null;
     this.admitOrigin(navigable);
     if (this.navigationInFlight?.url === navigable) {
       await this.navigationInFlight.promise;
@@ -206,15 +215,20 @@ export class EmbeddedBrowserViewController {
       this.navigationInFlight = navigation;
       try {
         await navigation.promise;
+      } catch (error) {
+        this.navigationFailure = error instanceof Error ? error : new Error("browser_navigation_interrupted");
+        throw this.navigationFailure;
       } finally {
         if (this.navigationInFlight === navigation) this.navigationInFlight = null;
       }
     }
+    if (generation !== this.navigationGeneration) throw new Error("browser_navigation_interrupted");
     return this.state();
   }
 
   async waitForNavigation(): Promise<void> {
     await this.navigationInFlight?.promise;
+    if (this.navigationFailure) throw this.navigationFailure;
   }
 
   back(): EmbeddedBrowserState {

@@ -17,7 +17,7 @@ func TestBuiltInToolNamesAreProviderSafe(t *testing.T) {
 		"subagent":         false,
 		"computer_observe": false, "computer_act": false, "computer_verify": false,
 		"browser_navigate": false, "browser_snapshot": false, "browser_click": false,
-		"browser_type": false, "browser_wait": false, "browser_extract": false,
+		"browser_type": false, "browser_wait": false, "browser_extract": false, "browser_release": false,
 	}
 
 	for _, candidate := range tool.ListTools() {

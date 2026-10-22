@@ -39,10 +39,10 @@ func TestBrowserNavigateRequiresThreadAndCallsHost(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request browserhost.ActionRequest
 		_ = json.NewDecoder(r.Body).Decode(&request)
-		if request.Action != "navigate" || request.ThreadID != "thread-1" || request.URL != "example.com" {
+		if request.Action != "navigate" || request.ThreadID != "thread-1" || request.URL != "example.com" || request.AgentID != "child-1" || request.RunID != "run-1" || request.TaskID != "task-1" || request.TurnID != "turn-1" || request.RequestID != "call-1" {
 			t.Errorf("unexpected %+v", request)
 		}
-		_ = json.NewEncoder(w).Encode(browserhost.Result{OK: true, URL: "https://example.com/", Title: "Example"})
+		_ = json.NewEncoder(w).Encode(browserhost.Result{OK: true, RequestID: request.RequestID, URL: "https://example.com/", Title: "Example"})
 	}))
 	t.Cleanup(server.Close)
 	if err := browserhost.Set(&browserhost.Registration{BaseURL: server.URL, Token: "token"}); err != nil {
@@ -61,6 +61,7 @@ func TestBrowserNavigateRequiresThreadAndCallsHost(t *testing.T) {
 		t.Fatalf("got %+v", missingThread)
 	}
 	ctx := tool.ContextWithToolThreadID(context.Background(), "thread-1")
+	ctx = tool.ContextWithToolExecutionIdentity(ctx, tool.ToolExecutionIdentity{RunID: "run-1", AgentID: "child-1", SubagentTaskID: "task-1", TurnID: "turn-1", ToolCallID: "call-1", ToolName: ToolNavigate})
 	outcome, err := runtime.ExecuteOutcome(ctx, `{"url":"example.com"}`, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -74,7 +75,7 @@ func TestBrowserClickMapsOriginLeaseFailure(t *testing.T) {
 	t.Cleanup(func() { _ = browserhost.Set(nil) })
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusConflict)
-		_ = json.NewEncoder(w).Encode(browserhost.Result{OK: false, Error: "origin_lease_expired"})
+		_ = json.NewEncoder(w).Encode(browserhost.Result{OK: false, RequestID: "call-1", Error: "origin_lease_expired"})
 	}))
 	t.Cleanup(server.Close)
 	if err := browserhost.Set(&browserhost.Registration{BaseURL: server.URL, Token: "token"}); err != nil {
@@ -85,6 +86,7 @@ func TestBrowserClickMapsOriginLeaseFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := tool.ContextWithToolThreadID(context.Background(), "thread-1")
+	ctx = tool.ContextWithToolExecutionIdentity(ctx, tool.ToolExecutionIdentity{RunID: "run-1", AgentID: "child-1", SubagentTaskID: "task-1", TurnID: "turn-1", ToolCallID: "call-1", ToolName: ToolNavigate})
 	outcome, err := registered.Runtime.(tool.OutcomeTool).ExecuteOutcome(ctx, `{"ref":"[1]"}`, nil)
 	if err != nil {
 		t.Fatal(err)

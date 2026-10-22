@@ -194,6 +194,8 @@ type AgentConfig struct {
 	// set, the root runner stays in the free thought loop and injects the
 	// research-team contract. Child configs never inherit it.
 	ResearchIntent *researchruntime.Intent
+	// BackgroundResearch is inherited by descendants without starting another workflow.
+	BackgroundResearch bool
 	// ResearchPrefetch is host-fetched user URL evidence for the current
 	// research run. It is untrusted page data, not instructions.
 	ResearchPrefetch []researchruntime.PrefetchedSource

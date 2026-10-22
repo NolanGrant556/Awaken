@@ -1,6 +1,7 @@
 package agentcore
 
 import (
+	"awaken/src/browserhost"
 	"awaken/src/context"
 	"awaken/src/hookruntime"
 	"awaken/src/llm"
@@ -204,6 +205,11 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 	} else {
 		r.runID = events.runID
 	}
+	browserAgentID := "root"
+	if r.config.SubagentOrigin != nil {
+		browserAgentID = r.config.SubagentOrigin.AgentID
+	}
+	defer browserhost.ReleaseOwner(r.threadID, r.runID, browserAgentID, r.config.SubagentTaskID, true)
 	if manager := managedenv.Default(); manager != nil {
 		if origin := r.config.SubagentOrigin; origin != nil {
 			if e := manager.Inherit(managedenv.Owner{ThreadID: r.threadID, AgentID: origin.ParentAgentID}, managedenv.Owner{ThreadID: r.threadID, AgentID: origin.AgentID, RunID: r.runID, TaskID: r.config.SubagentTaskID, Kind: "run"}); e != nil {

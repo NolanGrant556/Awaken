@@ -3732,6 +3732,7 @@ func bindResearchIntent(agent *agentcore.Agent, snapshot Run) error {
 	}
 	cfg := agent.GetConfig()
 	cfg.ResearchIntent = intent
+	cfg.BackgroundResearch = intent != nil
 	agent.Reconfigure(cfg)
 	return nil
 }

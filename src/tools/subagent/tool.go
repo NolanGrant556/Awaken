@@ -1,6 +1,7 @@
 package subagenttool
 
 import (
+	"awaken/src/browserhost"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -193,6 +194,7 @@ func (t *SubagentTool) Execute(ctx context.Context, raw string) (string, error) 
 		}
 		return encode(map[string]any{"task": modelTaskResult(snapshot)}, err)
 	case "wait":
+		browserhost.ReleaseOwner(tool.ToolThreadIDFromContext(ctx), identity.RunID, identity.AgentID, identity.SubagentTaskID, false)
 		eventDriven := false
 		if policy, ok := controller.(interface{ EventDrivenWaits() bool }); ok {
 			eventDriven = policy.EventDrivenWaits()

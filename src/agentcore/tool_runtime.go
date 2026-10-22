@@ -19,14 +19,15 @@ import (
 const maxPatchPreviewChars = 50000
 
 type ToolRuntime struct {
-	sink              EventSink
-	permissionContext tool.PermissionContext
-	autoPolicy        AutoToolPolicy
-	serverConnected   func(serverName string) bool
-	auditSink         tool.AuditSink
-	runID             string
-	toolSnapshot      *tool.RunToolAvailabilitySnapshot
-	environment       *tool.ExecutionEnvironmentSnapshot
+	backgroundResearch bool
+	sink               EventSink
+	permissionContext  tool.PermissionContext
+	autoPolicy         AutoToolPolicy
+	serverConnected    func(serverName string) bool
+	auditSink          tool.AuditSink
+	runID              string
+	toolSnapshot       *tool.RunToolAvailabilitySnapshot
+	environment        *tool.ExecutionEnvironmentSnapshot
 	// profile is the unified ExecutionProfile applied to every tool call
 	// this runtime executes. It is populated from ToolRuntimeConfig.Profile
 	// and defaults to profile.DefaultProfile() (WorkspaceWrite) when unset.
@@ -69,6 +70,7 @@ type ToolRuntime struct {
 }
 
 type ToolRuntimeConfig struct {
+	BackgroundResearch           bool
 	PermissionContext            tool.PermissionContext
 	AutoToolPolicy               AutoToolPolicy
 	ServerConnected              func(serverName string) bool
@@ -204,6 +206,7 @@ func NewToolRuntimeWithConfig(sink EventSink, config ToolRuntimeConfig) *ToolRun
 		router = router.WithComputerExecutor(config.ComputerExecutor)
 	}
 	return &ToolRuntime{
+		backgroundResearch:     config.BackgroundResearch,
 		sink:                   normalizeEventSink(sink),
 		permissionContext:      config.PermissionContext.Normalize(),
 		autoPolicy:             policy,
@@ -352,6 +355,12 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 			WorkspaceRoot:     rt.permissionContext.WorkspaceRoot,
 			ObservationSource: "runtime",
 		},
+	}
+	if rt.backgroundResearch && strings.HasPrefix(call.Function.Name, "browser_") {
+		return finalizeToolResult(synthesizeUnsupportedToolResult(result,
+			"research_background_only",
+			"深度调研及其子任务只能在后台取材，不能打开或操作右侧浏览器。请使用 WebSearch/WebFetch；需要用户交互的来源应报告为未核实。",
+			[]string{"use_WebSearch_WebFetch", "report_unavailable_source"}, nil))
 	}
 	if call.Function.Name == askuser.ToolName && identity.AgentID != "" && identity.AgentID != "root" {
 		return finalizeToolResult(synthesizeUnsupportedToolResult(

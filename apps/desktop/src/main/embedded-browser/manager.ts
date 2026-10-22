@@ -1,3 +1,4 @@
+import { BrowserControlGate, type BrowserControl } from "./control.js";
 import type { BrowserWindow, WebContents } from "electron";
 import {
   browserActionAllowed,
@@ -61,6 +62,7 @@ function optimisticState(url: string): EmbeddedBrowserState {
 }
 
 export class EmbeddedBrowserViewManager {
+  readonly agentControl = new BrowserControlGate();
   private readonly views = new Map<string, ViewRecord>();
   private readonly savedPages = new Map<string, {
     ref: EmbeddedBrowserTabRef;
@@ -79,7 +81,8 @@ export class EmbeddedBrowserViewManager {
     return live?.hasPage ? live : this.savedPages.get(key)?.state ?? live ?? EMPTY_EMBEDDED_BROWSER_STATE;
   }
 
-  async navigate(ref: EmbeddedBrowserTabRef, url: string): Promise<EmbeddedBrowserState> {
+  async navigate(ref: EmbeddedBrowserTabRef, url: string, agentNavigation = false): Promise<EmbeddedBrowserState> {
+    if (!agentNavigation) this.agentControl.invalidate();
     const parsed = normalizeBrowserAddressInput(url);
     if (!parsed.ok) {
       throw new Error("unsupported_scheme");
@@ -100,7 +103,12 @@ export class EmbeddedBrowserViewManager {
     const current = this.views.get(key);
     if (current) {
       this.pendingNav.delete(key);
-      return current.controller.navigate(parsed.url);
+      try {
+        return await current.controller.navigate(parsed.url);
+      } catch (error) {
+        if (agentNavigation) throw error;
+        return current.controller.state();
+      }
     }
 
     const state = optimisticState(parsed.url);
@@ -145,6 +153,7 @@ export class EmbeddedBrowserViewManager {
           onPrimaryClick: () => {
             const record = this.shownRecordForThread(ref.threadId);
             if (record?.controller.ownsGuest(guest)) {
+              this.agentControl.invalidate();
               this.options.onInteraction?.({ ...ref, type: "primary-click" });
             }
           },
@@ -172,7 +181,7 @@ export class EmbeddedBrowserViewManager {
     const pending = this.pendingNav.get(key);
     if (pending && pending.allowFile === allowFile) {
       this.pendingNav.delete(key);
-      void controller.navigate(pending.url);
+      void controller.navigate(pending.url).catch(() => undefined);
     } else {
       const admittedOrigin = this.savedPages.get(key)?.admittedOrigin;
       if (admittedOrigin) controller.admitOrigin(admittedOrigin);
@@ -193,18 +202,22 @@ export class EmbeddedBrowserViewManager {
   }
 
   back(ref: EmbeddedBrowserTabRef): EmbeddedBrowserState {
+    this.agentControl.invalidate();
     return this.views.get(viewKey(ref))?.controller.back() ?? EMPTY_EMBEDDED_BROWSER_STATE;
   }
 
   forward(ref: EmbeddedBrowserTabRef): EmbeddedBrowserState {
+    this.agentControl.invalidate();
     return this.views.get(viewKey(ref))?.controller.forward() ?? EMPTY_EMBEDDED_BROWSER_STATE;
   }
 
   reload(ref: EmbeddedBrowserTabRef): EmbeddedBrowserState {
+    this.agentControl.invalidate();
     return this.views.get(viewKey(ref))?.controller.reload() ?? EMPTY_EMBEDDED_BROWSER_STATE;
   }
 
   stop(ref: EmbeddedBrowserTabRef): EmbeddedBrowserState {
+    this.agentControl.invalidate();
     return this.views.get(viewKey(ref))?.controller.stop() ?? EMPTY_EMBEDDED_BROWSER_STATE;
   }
 
@@ -219,12 +232,16 @@ export class EmbeddedBrowserViewManager {
   }
 
   setActive(ref: EmbeddedBrowserTabRef | null): void {
+    // Renderer effects may clear/reselect an empty slot while mounting the
+    // first guest. Only leaving an attached page revokes established control.
+    if (this.activeKey && this.views.has(this.activeKey) && this.activeKey !== (ref ? viewKey(ref) : null)) this.agentControl.invalidate();
     this.pendingActive = ref;
     this.activeKey = ref ? viewKey(ref) : null;
     this.hideAllExcept(this.activeKey);
   }
 
   close(ref: EmbeddedBrowserTabRef): void {
+    this.agentControl.invalidate();
     const key = viewKey(ref);
     const record = this.views.get(key);
     if (record) {
@@ -240,6 +257,7 @@ export class EmbeddedBrowserViewManager {
   }
 
   hideAll(): void {
+    this.agentControl.invalidate();
     this.activeKey = null;
     this.pendingActive = null;
     this.pendingNav.clear();
@@ -249,6 +267,7 @@ export class EmbeddedBrowserViewManager {
   }
 
   closeThread(threadId: string): void {
+    this.agentControl.invalidate();
     for (const [key, record] of this.views) {
       if (record.ref.threadId !== threadId) continue;
       record.controller.destroy();
@@ -269,6 +288,7 @@ export class EmbeddedBrowserViewManager {
   }
 
   dispose(): void {
+    this.agentControl.invalidate();
     for (const record of this.views.values()) record.controller.destroy();
     this.views.clear();
     this.pendingNav.clear();
@@ -284,16 +304,18 @@ export class EmbeddedBrowserViewManager {
     return shown.controller;
   }
 
-  async navigateForAgent(threadId: string, url: string): Promise<EmbeddedBrowserState> {
-    const controller = await this.ensureVisibleForAgent(threadId, url);
+  async navigateForAgent(threadId: string, url: string, control?: BrowserControl): Promise<EmbeddedBrowserState> {
+    const assertCurrent = control?.assertCurrent ?? (() => {});
+    const controller = await this.ensureVisibleForAgent(threadId, url, assertCurrent, (controller) => { if (control) control.controller = controller; });
     await controller.waitForNavigation();
+    assertCurrent();
     if (this.viewForAction(threadId, "observe") !== controller) {
       throw new Error("browser_view_not_visible");
     }
     return controller.state();
   }
 
-  async ensureVisibleForAgent(threadId: string, url: string): Promise<EmbeddedBrowserViewController> {
+  async ensureVisibleForAgent(threadId: string, url: string, assertCurrent = () => {}, bind = (_controller: EmbeddedBrowserViewController) => {}): Promise<EmbeddedBrowserViewController> {
     if (!parseNavigable(url)) throw new Error("unsupported_scheme");
     const existing = this.shownRecordForThread(threadId) ?? this.anyRecordForThread(threadId);
     const hint = existing?.ref.viewId ?? (this.pendingActive?.threadId === threadId ? this.pendingActive.viewId : "");
@@ -301,14 +323,19 @@ export class EmbeddedBrowserViewManager {
     const deadline = Date.now() + VIEWPORT_RESTORE_WAIT_MS;
     let requestedKey: string | null = null;
     while (Date.now() < deadline) {
+      assertCurrent();
       const ref = this.pendingActive;
       if (ref?.threadId === threadId && requestedKey !== viewKey(ref)) {
         requestedKey = viewKey(ref);
         // Publish the URL before waiting: an empty renderer tab has no guest yet.
-        await this.navigate(ref, url);
+        const current = this.views.get(viewKey(ref));
+        if (current) bind(current.controller);
+        await this.navigate(ref, url, true);
+        assertCurrent();
       }
       const shown = this.shownRecordForThread(threadId);
       if (shown && viewKey(shown.ref) === requestedKey && !shown.controller.loadsLocalFiles) {
+        bind(shown.controller);
         return shown.controller;
       }
       await new Promise((resolve) => setTimeout(resolve, 16));

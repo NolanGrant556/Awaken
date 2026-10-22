@@ -20,17 +20,23 @@ type Registration struct {
 }
 
 type ActionRequest struct {
-	Action   string  `json:"action"`
-	ThreadID string  `json:"threadId"`
-	URL      string  `json:"url,omitempty"`
-	Ref      string  `json:"ref,omitempty"`
-	Text     string  `json:"text,omitempty"`
-	Seconds  float64 `json:"seconds,omitempty"`
-	Start    int     `json:"start,omitempty"`
+	Action    string  `json:"action"`
+	ThreadID  string  `json:"threadId"`
+	RunID     string  `json:"runId"`
+	AgentID   string  `json:"agentId"`
+	TaskID    string  `json:"taskId,omitempty"`
+	TurnID    string  `json:"turnId"`
+	RequestID string  `json:"requestId"`
+	URL       string  `json:"url,omitempty"`
+	Ref       string  `json:"ref,omitempty"`
+	Text      string  `json:"text,omitempty"`
+	Seconds   float64 `json:"seconds,omitempty"`
+	Start     int     `json:"start,omitempty"`
 }
 
 type Result struct {
 	OK        bool   `json:"ok"`
+	RequestID string `json:"requestId,omitempty"`
 	Error     string `json:"error,omitempty"`
 	URL       string `json:"url,omitempty"`
 	Title     string `json:"title,omitempty"`
@@ -42,7 +48,7 @@ type Result struct {
 var (
 	mu      sync.RWMutex
 	current *Registration
-	client  = &http.Client{Timeout: 45 * time.Second}
+	client  = &http.Client{Timeout: 150 * time.Second}
 )
 
 func Set(reg *Registration) error {
@@ -108,8 +114,26 @@ func Call(ctx context.Context, request ActionRequest) (Result, error) {
 	if err := json.Unmarshal(payload, &result); err != nil {
 		return Result{OK: false, Error: "browser_host_invalid_response"}, nil
 	}
+	if request.RequestID != "" && result.RequestID != request.RequestID {
+		return Result{Error: "browser_receipt_mismatch"}, nil
+	}
 	if result.Error == "" && !result.OK && response.StatusCode >= 400 {
 		result.Error = fmt.Sprintf("browser_host_http_%d", response.StatusCode)
 	}
 	return result, nil
+}
+
+// ReleaseOwner also works after cancellation. A completed assignment cannot
+// reacquire the page through a late request still arriving at Desktop.
+func ReleaseOwner(threadID, runID, agentID, taskID string, ended bool) {
+	if !Ready() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	action := "release"
+	if ended {
+		action = "end_owner"
+	}
+	_, _ = Call(ctx, ActionRequest{Action: action, ThreadID: threadID, RunID: runID, AgentID: agentID, TaskID: taskID})
 }

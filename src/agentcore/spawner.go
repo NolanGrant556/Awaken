@@ -139,6 +139,7 @@ func CreateSubagent(parent AgentConfig, spawn SpawnConfig) (AgentConfig, error) 
 		SubagentOrigin:         childOrigin,
 		SubagentController:     parent.SubagentController,
 		ResearchIntent:         nil,
+		BackgroundResearch:     parent.BackgroundResearch || parent.ResearchIntent != nil,
 	}
 	child.ToolExposure.ExtraHidden = append([]string(nil), parent.ToolExposure.ExtraHidden...)
 	child.ToolExposure.ExtraVisible = append([]string(nil), parent.ToolExposure.ExtraVisible...)

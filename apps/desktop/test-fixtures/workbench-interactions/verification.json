@@ -1,0 +1,186 @@
+{
+  "date": "2026-10-22",
+  "platform": "macOS",
+  "theme": "dark",
+  "viewport": {
+    "width": 1440,
+    "height": 901,
+    "scale": 2
+  },
+  "entry": "npm run open:desktop",
+  "window": "Awaken Desktop",
+  "base_commit": "16acf95203cb5129dfbf9e33c37a07466d95037c",
+  "scope": "Scheduled built-in mentions, background research browser behavior, collapsible user question, Markdown selection comments",
+  "fixture_setup": {
+    "project_id": "project_1792655641860429000_3",
+    "description": "A new temporary folder containing only sample.md was registered through the local Core project API. All following UI operations used the real Desktop window. User documents and credentials were not modified."
+  },
+  "checks": [
+    {
+      "id": "scheduled-mention",
+      "status": "passed_with_scope",
+      "steps": [
+        "Open 定时任务 > 创建任务, choose project and Agent, type @",
+        "Choose 钉钉 and confirm a branded structured token appears",
+        "Cancel without creating a scheduled task"
+      ],
+      "screenshots": [
+        "scheduled-mention.jpg"
+      ],
+      "observed": "The connected DingTalk entry appears in the same 内置 section. Feishu UI reports installed but currently unauthorized, so it is correctly hidden.",
+      "automation": "Both ready entries, Feishu disconnect/reconnect, exact Skill identity and saved payload are covered by ScheduledTasksView.behavior.test.tsx."
+    },
+    {
+      "id": "research-browser",
+      "status": "passed_with_scope",
+      "thread_id": "thread_1792656731439410000_2",
+      "run_id": "run_1792656731439406000_1",
+      "observed": {
+        "subagents_completed": 2,
+        "websearch_calls": 1,
+        "websearch_successes": 1,
+        "webfetch_calls_including_prefetch": 6,
+        "webfetch_successes": 5,
+        "webfetch_failures": 1,
+        "browser_navigate_calls": 0,
+        "new_browser_tabs": 0,
+        "artifact_publish_success": true,
+        "terminal_status": "finished"
+      },
+      "limits": [
+        "The author website returned web_fetch_network_failed and was excluded; the official httpbin homepage succeeded instead.",
+        "This is a macOS development Desktop acceptance. Windows/Linux and packaged release were not exercised.",
+        "Repeated live foreground navigation was not requested by this research; same-batch tab reuse is covered by reducer and real-hook composition tests."
+      ],
+      "previous_attempt": {
+        "status": "partial",
+        "thread_id": "thread_1792655430770763000_2",
+        "run_id": "run_1792655430770760000_1",
+        "observed": {
+          "subagents_completed": 2,
+          "webfetch_calls_including_prefetch": 4,
+          "browser_navigate_calls": 0,
+          "new_browser_tabs": 0
+        },
+        "limits": [
+          "The two public JSONPlaceholder requests were rejected with web_fetch_blocked_target; successful public JSON fetching was not established in this run.",
+          "The root provider later hit a stream idle timeout.",
+          "JSON success, Unicode, receipt/digest, byte limits and binary rejection passed isolated Go tests.",
+          "Same-batch browser request deduplication passed reducer and real-hook composition tests; concurrent live browser navigation was not separately exercised."
+        ]
+      },
+      "provider_model": "deepseek-flash",
+      "screenshots": [
+        "research-network-running.jpg",
+        "research-network-completed.jpg",
+        "research-redirect-blocked.jpg"
+      ],
+      "journal_evidence": {
+        "root_html_receipt_seq": 12,
+        "root_json_receipt_seq": 16,
+        "websearch_receipt_seq": 24,
+        "child_html_receipt_seq": 64,
+        "child_json_receipt_seq": 74,
+        "homepage_receipt_seq": 117,
+        "publish_receipt_seq": 208,
+        "terminal_seq": 217
+      },
+      "sources": [
+        "https://example.com/",
+        "https://httpbin.org/json",
+        "https://httpbin.org/"
+      ],
+      "json_values": {
+        "slideshow.title": "Sample Slide Show",
+        "slideshow.author": "Yours Truly",
+        "slides_count": 2
+      },
+      "root_cause": "WebFetch previously forced direct networking, rejecting the local proxy synthetic DNS range 198.18.0.0/15 before connecting. It now selects the host network route per request and redirect; synthetic DNS is allowed only through an explicitly host-selected proxy, never as a literal target or on a direct route.",
+      "proxy_trust_boundary": "For synthetic DNS only, the host-configured proxy resolves and forwards the original hostname. Awaken does not claim to validate the proxy-side final IP. Ordinary public DNS is pinned even through the proxy, and private DNS/literal targets/redirects are rejected.",
+      "additional_live_transport_checks": {
+        "bonpoint_json": "HTTP 200, application/json; 4416 decoded bytes",
+        "jsonplaceholder_json": "HTTP 200, application/json; 83 decoded bytes",
+        "note": "A follow-up temporary diagnostic exercised the production WebFetch transport and decoder after earlier transient EOF failures. These are transport checks, not additional Desktop runs."
+      },
+      "published_report": "research-network-smoke.md",
+      "redirect_safety_check": {
+        "run_id": "run_1792657049349511000_3",
+        "url": "https://httpbin.org/redirect-to?url=http://127.0.0.1/",
+        "tool_call_seq": 235,
+        "tool_result_seq": 237,
+        "error_code": "web_fetch_blocked_target",
+        "terminal_seq": 245,
+        "terminal_status": "finished",
+        "tool_calls": {
+          "WebFetch": 1
+        },
+        "new_browser_tabs": 0
+      }
+    },
+    {
+      "id": "question-collapse",
+      "status": "passed",
+      "thread_id": "thread_1792655430770763000_2",
+      "run_id": "run_1792655857950906000_5",
+      "provider_model": "deepseek-flash",
+      "steps": [
+        "Model prints eight numbered explanatory lines and calls ask_user",
+        "Choose 其他 and enter 选择段落，保留这段回答",
+        "Collapse the card: the explanation is readable and the question remains pending",
+        "Reopen: the same free-text answer remains",
+        "Submit: model returns 验收完成 and run terminal is finished"
+      ],
+      "screenshots": [
+        "question-expanded.jpg",
+        "question-collapsed.jpg",
+        "question-restored.jpg",
+        "question-completed.jpg"
+      ],
+      "journal_evidence": {
+        "answer_receipt_seq": 125,
+        "answer_is_error": false,
+        "terminal_seq": 133,
+        "terminal_status": "finished"
+      },
+      "limits": [
+        "An earlier Kimi attempt returned account access 403; no credential or plan was changed.",
+        "Multi-question page/selection preservation and reset for a new question are covered by DOM behavior tests."
+      ]
+    },
+    {
+      "id": "markdown-comment",
+      "status": "passed_with_scope",
+      "steps": [
+        "Open sample.md in the project file tree and expand the panel",
+        "Select the paragraph containing a link",
+        "Click 评论, enter a comment, submit it to the Composer draft",
+        "Remove only that test comment afterward"
+      ],
+      "screenshots": [
+        "markdown-selection.jpg",
+        "markdown-comment.jpg"
+      ],
+      "source_unchanged": true,
+      "automation": "A regression first failed because rerender replaced the selected link. After the fix, stable DOM selection and mouseup-before-click with a cleared range both pass.",
+      "limits": [
+        "No multi-hour endurance test was run.",
+        "Windows and Linux Desktop were not exercised."
+      ]
+    }
+  ],
+  "automated": {
+    "desktop_focused_tests": 82,
+    "desktop_focused_files": 8,
+    "desktop_typecheck": "passed",
+    "design_system_build_and_types": "passed",
+    "go": [
+      "go test -race ./src/tools/web_fetch ./src/networkroute ./src/researchruntime ./src/tools/browser -count=1",
+      "go test ./src/agentcore ./src/tools -run 'Research|Definition|Contract' -count=1"
+    ],
+    "diff_check": "passed",
+    "docs_check": {
+      "working_tree": "7 existing failures caused by ignored docs/.DS_Store and docs/.obsidian files",
+      "tracked_snapshot": "passed: 16 sections, 39 features, 78 documents; links, anchors and fences valid; local ignored files preserved"
+    }
+  }
+}

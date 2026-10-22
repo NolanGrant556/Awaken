@@ -272,3 +272,33 @@ func TestParseFetchURLStripsFragment(t *testing.T) {
 		t.Fatalf("fragment leaked: %s", target.URL.String())
 	}
 }
+
+func TestWebFetchJSONBackgroundReceipt(t *testing.T) {
+	for _, contentType := range []string{"application/json; charset=utf-8", "application/ld+json", "application/vnd.api+json"} {
+		t.Run(contentType, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", contentType)
+				io.WriteString(w, `{"products":[{"id":10402140848641,"title":"儿童服装","body_html":"\u003cp\u003ecotton\u003c/p\u003e"}]}`)
+			}))
+			defer server.Close()
+			fetch := &Tool{AllowTestHTTP: true}
+			outcome, err := fetch.ExecuteOutcome(context.Background(), `{"url":"`+server.URL+`/products.json?limit=30"}`, nil)
+			if err != nil || outcome.IsError() {
+				t.Fatalf("err=%v outcome=%+v", err, outcome)
+			}
+			if !strings.Contains(outcome.Content, "UNTRUSTED_WEB_CONTENT") || !strings.Contains(outcome.Content, "10402140848641") || !strings.Contains(outcome.Content, "儿童服装") {
+				t.Fatalf("content=%s", outcome.Content)
+			}
+			if outcome.Details["content_sha256"] == "" || outcome.Details["final_url"] != server.URL+"/products.json?limit=30" {
+				t.Fatalf("receipt=%+v", outcome.Details)
+			}
+			limited, err := fetch.ExecuteOutcome(context.Background(), `{"url":"`+server.URL+`","max_bytes":40}`, nil)
+			if err != nil || limited.IsError() || !limited.Truncated || len(limited.Details["text"].(string)) > 40 {
+				t.Fatalf("bounded JSON=%+v err=%v", limited, err)
+			}
+		})
+	}
+	if acceptedContentType("image/example+json") || acceptedContentType("application/octet-stream") {
+		t.Fatal("non-JSON binary content was admitted")
+	}
+}

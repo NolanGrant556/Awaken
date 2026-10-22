@@ -323,18 +323,7 @@ export function useFileWorkspaceSession(options: Options) {
     if (inspectorCollapsedBeforeResponsiveRef.current !== null) {
       inspectorCollapsedBeforeResponsiveRef.current = false;
     }
-    if (viewId && tabsState.tabs.some((tab) => tab.id === viewId)) {
-      dispatchTabs({ type: "activate", id: viewId });
-      return;
-    }
-    const existing = tabsState.tabs.find(
-      (tab) => tab.kind === "file" && tab.mode === "browser",
-    );
-    if (existing) {
-      dispatchTabs({ type: "activate", id: existing.id });
-      return;
-    }
-    dispatchTabs({ type: "add-file", projectId: fileWorkspaceProjectId, mode: "browser" });
+    dispatchTabs({ type: "show-browser", projectId: fileWorkspaceProjectId, viewId });
   }
 
   function handleOpenDeliverablePreview(

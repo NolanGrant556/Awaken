@@ -35,6 +35,7 @@ func ConductorPrompt(intent Intent, prefetch []PrefetchedSource) string {
 - 不要自己把整场检索做完。第一波至少派两路独立调研，角度不要重叠（例如官方/监管、厂商或实现、第三方评测或反对意见）。题目更大就再加路，不要为凑人数空派。
 - 先处理用户点名的来源和下面的宿主预取。预取失败等于没打开。
 - 公开网页用 WebSearch 发现、WebFetch 打开；工作区用 Read / Grep / Glob。不要用 Bash curl 打内网或回环地址代替 WebFetch。
+- 主编和分 Agent 的资料抓取都在后台使用 WebFetch，包括 products.json 等 JSON 接口。派任务时传达这条规则；不要为了读取资料反复用 browser_navigate 打开用户的前台面板。只有用户要求展示网页或确实需要页面交互时才用 browser_*，并由主编协调，避免多个分 Agent 同时争用同一可见页面。
 - 并行派出后用 wait(any) 先审先到的结果；有缺口立刻续派或另派，不必等全员结束。
 
 审核与反思（每一波结果回来都要做）：

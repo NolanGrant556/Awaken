@@ -140,6 +140,40 @@ describe("MarkdownPreview", () => {
     }));
   });
 
+  it("keeps selected link nodes stable across background rerenders and handles a real mouseup before comment click", async () => {
+    const props = {
+      preview: { ...preview, content: "# Title\n\nRead [the source](https://example.com) before deciding.\n" },
+      frameProps,
+      onCreateComment: vi.fn(),
+    };
+    await act(async () => root.render(<MarkdownPreview {...props} />));
+    const link = container.querySelector("a")!;
+    const range = document.createRange();
+    range.selectNodeContents(link.firstChild!);
+    Object.defineProperty(range, "getBoundingClientRect", { value: () => ({ bottom: 24, left: 12 }) });
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+    await act(async () => {
+      link.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      await Promise.resolve();
+    });
+    await act(async () => root.render(<MarkdownPreview {...props} fileComments={[]} />));
+    expect(container.querySelector("a")).toBe(link);
+    expect(window.getSelection()?.toString()).toBe("the source");
+    const comment = container.querySelector<HTMLButtonElement>(".project-file-markdown-selection-actions button:last-child")!;
+    // A stale/cleared DOM range must not remove the action between mouseup and click.
+    window.getSelection()?.removeAllRanges();
+    await act(async () => {
+      comment.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+      comment.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(comment.isConnected).toBe(true);
+    await act(async () => comment.click());
+    await settleUntil(() => container.querySelector(".project-file-line-comment-editor textarea") !== null);
+    expect(container.querySelector(".project-file-line-comment-editor textarea")?.getAttribute("aria-label")).toBe("第 3 行 评论内容");
+  });
+
   it("switches a rendered selection to source and opens the existing line comment editor", async () => {
     const onCreateComment = vi.fn();
     await act(async () => {

@@ -113,7 +113,18 @@ function positionedMarkdownElement(tagName: string) {
   };
 }
 
+function MarkdownLink({ children, node, ...props }: any) {
+  return <a
+    {...props}
+    data-source-start-line={node?.position?.start?.line}
+    data-source-end-line={node?.position?.end?.line}
+    target="_blank"
+    rel="noreferrer noopener"
+  >{children}</a>;
+}
+
 const positionedMarkdownComponents = {
+  a: MarkdownLink,
   p: positionedMarkdownElement("p"),
   h1: positionedMarkdownElement("h1"),
   h2: positionedMarkdownElement("h2"),
@@ -264,20 +275,7 @@ export default function MarkdownPreview({
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
           rehypePlugins={[[rehypeSanitize, sanitizeSchema]]}
-          components={{
-            ...positionedMarkdownComponents,
-            a: ({ children, node, ...props }: any) => (
-              <a
-                {...props}
-                data-source-start-line={node?.position?.start?.line}
-                data-source-end-line={node?.position?.end?.line}
-                target="_blank"
-                rel="noreferrer noopener"
-              >
-                {children}
-              </a>
-            ),
-          }}
+          components={positionedMarkdownComponents}
         >
           {content}
         </ReactMarkdown>
@@ -286,6 +284,10 @@ export default function MarkdownPreview({
             className="project-file-markdown-selection-actions"
             style={{ top: selection.top, left: selection.left }}
             onMouseDown={(event) => event.preventDefault()}
+            // Use the settled source-line selection. Re-reading a cleared DOM
+            // range here can unmount the button between mouseup and click.
+            onMouseUp={(event) => event.stopPropagation()}
+            onKeyUp={(event) => event.stopPropagation()}
           >
             <button type="button" onClick={() => onAddTextSelection?.(selection)}>添加到对话</button>
             <button

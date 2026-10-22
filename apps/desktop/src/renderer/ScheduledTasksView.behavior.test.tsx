@@ -4,6 +4,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
+  CliConnectorStateEvent,
+  CliConnectorView,
   RuntimeModelProfileSummary,
   RuntimePlugin,
   RuntimeProject,
@@ -76,6 +78,9 @@ function createRuntimeClientMock(overrides: Partial<RuntimeClient> = {}): Runtim
     listProjects: vi.fn(async () => [project]),
     listModelProfiles: vi.fn(async () => [readyProfile]),
     listPlugins: vi.fn(async () => []),
+    listSkills: vi.fn(async () => []),
+    listCliConnectors: vi.fn(async () => []),
+    subscribeCliConnectorState: vi.fn(() => () => {}),
     getSystemTimezone: vi.fn(async () => "Asia/Shanghai"),
     subscribeScheduledTaskEvents: vi.fn(() => () => {}),
     subscribeComposerCatalogEvents: vi.fn(() => () => {}),
@@ -454,10 +459,8 @@ describe("ScheduledTasksView", () => {
       rootDir: "/home/.awaken/skills/fresh-user-review",
       skillFilePath: "/home/.awaken/skills/fresh-user-review/SKILL.md",
     };
-    const listSkills = vi
-      .fn<() => Promise<RuntimeSkill[]>>()
-      .mockResolvedValueOnce([pluginOnlySkill])
-      .mockResolvedValue([pluginOnlySkill, freshUserSkill]);
+    let catalogSkills = [pluginOnlySkill];
+    const listSkills = vi.fn<RuntimeClient["listSkills"]>(async () => catalogSkills);
     await renderView(
       createRuntimeClientMock({
         listSkills,
@@ -479,10 +482,11 @@ describe("ScheduledTasksView", () => {
 
     expect(document.body.textContent).not.toContain("插件 Fresh Review");
     expect(document.body.textContent).not.toContain("普通 Fresh Review");
+    catalogSkills = [pluginOnlySkill, freshUserSkill];
     await act(async () => catalogHandler?.({ revision: 2, kind: "skills" }));
     await settle();
 
-    expect(listSkills).toHaveBeenCalledTimes(2);
+    expect(listSkills.mock.calls.filter(([roots]) => roots !== undefined)).toHaveLength(2);
     expect(buttonByText("普通 Fresh Review")).toBeTruthy();
     expect(document.body.textContent).not.toContain("插件 Fresh Review");
   });
@@ -586,6 +590,44 @@ describe("ScheduledTasksView", () => {
         },
       }),
     );
+  });
+
+  it("shares connected DingTalk/Feishu identities, refreshes authorization and saves the entry Skill", async () => {
+    let onConnection!: (event: CliConnectorStateEvent) => void;
+    const ready = (providerId: CliConnectorView["providerId"]): CliConnectorView => ({
+      providerId, displayName: providerId,
+      readiness: { providerId, activation: "enabled", install: "installed", executable: "available", authentication: "authorized", configuration: "ready", overall: "ready", updatedAt: "2026-10-22" },
+    });
+    const skills: RuntimeSkill[] = ["dws", "lark-shared"].map(name => ({
+      id: name, name, description: "", state: "loaded", sourceOrigin: "agents", context: "inline",
+      rootDir: `/global/${name}`, skillFilePath: `/global/${name}/SKILL.md`,
+    }));
+    const createScheduledTask = vi.fn(async () => cronTask());
+    await renderView(createRuntimeClientMock({
+      createScheduledTask,
+      listCliConnectors: vi.fn(async () => [ready("dingtalk-workspace"), ready("lark-cli")]),
+      listSkills: vi.fn(async () => skills),
+      subscribeCliConnectorState: vi.fn(callback => { onConnection = callback; return () => {}; }),
+    }));
+    await click(buttonByText("创建任务"));
+    await setFieldValue(document.querySelector<HTMLInputElement>('input[aria-label="任务名称"]'), "办公测试");
+    await click(buttonByAriaLabel("运行项目"));
+    await click(document.querySelector<HTMLButtonElement>('button[role="option"]'));
+    await click(buttonByText("Agent"));
+    const input = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Agent prompt"]');
+    await setFieldValue(input, "@");
+    expect(buttonByText("钉钉")).toBeDefined(); expect(buttonByText("飞书")).toBeDefined();
+    const disconnected = ready("lark-cli"); disconnected.readiness.authentication = "required";
+    await act(async () => onConnection({ connector: disconnected }));
+    expect(buttonByText("飞书")).toBeUndefined(); expect(input!.value).toBe("@");
+    await act(async () => onConnection({ connector: ready("lark-cli") }));
+    expect(buttonByText("飞书")).toBeDefined();
+    await click(buttonByText("飞书"));
+    expect(document.querySelector('[data-composer-token-id="builtin-connector:lark-cli"]')).toBeTruthy();
+    await click(buttonByText("保存任务"));
+    expect(createScheduledTask).toHaveBeenCalledWith(expect.objectContaining({ action: expect.objectContaining({
+      composerTokens: [expect.objectContaining({ id: "builtin-connector:lark-cli", type: "skill", label: "飞书", payload: expect.objectContaining({ skillId: "lark-shared", sourceOrigin: "agents", skillFilePath: "/global/lark-shared/SKILL.md" }) })],
+    }) }));
   });
 
   it("offers and persists the Computer Use capability in a scheduled Agent task", async () => {

@@ -48,6 +48,7 @@ import {
   replaceComposerActionTriggerWithToken,
 } from "./composerStructuredDraft";
 import type { RuntimeClient } from "./runtime/client";
+import { builtinConnectorTokenBrand, useBuiltinConnectorComposer } from "./builtinConnectorComposer";
 import {
   buildScheduledTaskTemplateCategories,
   buildTemplateDraft,
@@ -221,6 +222,7 @@ export function ScheduledTasksView({
   const [slashError, setSlashError] = useState<string | null>(null);
   const [slashActiveActionId, setSlashActiveActionId] = useState<string | undefined>();
   const [composerCatalogRevision, setComposerCatalogRevision] = useState(0);
+  const builtinConnectors = useBuiltinConnectorComposer(runtimeClient, desktopReady, composerCatalogRevision);
   const [composerInputSelection, setComposerInputSelection] =
     useState<ComposerBarInputSelection>();
   const [composerFocusRequest, setComposerFocusRequest] = useState(0);
@@ -370,8 +372,17 @@ export function ScheduledTasksView({
     slashTrigger?.marker === "@" ? mentionProviders : slashProviders;
   const slashPaletteOpen = Boolean(editor?.open && slashTrigger && desktopReady);
   const filteredSlashActions = useMemo(
-    () => composerPaletteActions(slashActions, slashTrigger?.query ?? ""),
-    [slashActions, slashTrigger?.query],
+    () => composerPaletteActions(
+      slashTrigger?.marker === "@" && editorProject
+        ? [
+            ...slashActions.filter((action) => action.sectionLabel === "内置"),
+            ...builtinConnectors.actions,
+            ...slashActions.filter((action) => action.sectionLabel !== "内置"),
+          ]
+        : slashActions,
+      slashTrigger?.query ?? "",
+    ),
+    [slashActions, slashTrigger?.query, slashTrigger?.marker, editorProject, builtinConnectors.actions],
   );
   const composerTokens = useMemo(
     () =>
@@ -380,8 +391,9 @@ export function ScheduledTasksView({
         type: token.type,
         label: token.label,
         leadingText: token.leadingText,
+        brandIcon: builtinConnectorTokenBrand(token),
         title:
-          typeof token.payload?.skillFilePath === "string"
+          builtinConnectorTokenBrand(token) ? token.label : typeof token.payload?.skillFilePath === "string"
             ? token.payload.skillFilePath
             : typeof token.payload?.pluginName === "string"
               ? token.payload.pluginName
@@ -928,7 +940,7 @@ export function ScheduledTasksView({
             actions: composerSlashActions,
             activeActionId: slashActiveActionId,
             loading: slashLoading,
-            error: slashError,
+            error: slashError ?? (slashTrigger?.marker === "@" ? builtinConnectors.error : null),
             emptyLabel: composerSlashEmptyLabel,
             onSelectAction: handleSlashActionSelect,
             onActiveActionChange: setSlashActiveActionId,

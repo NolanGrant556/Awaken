@@ -19,6 +19,7 @@ export type InspectorTabsCommand = (
   | { type: "open-artifact"; selection: ArtifactPreviewSelection }
   | { type: "open-file"; tab: ProjectFileWorkspaceTab }
   | { type: "add-file"; projectId?: string; mode: ProjectFileWorkspaceMode }
+  | { type: "show-browser"; projectId?: string; viewId?: string }
   | { type: "activate" | "close"; id: string }
   | { type: "set-mode"; mode: ProjectFileWorkspaceMode }
   | { type: "clear-file" }
@@ -58,6 +59,16 @@ export function inspectorTabsReducer(previous: InspectorTabsState, action: Inspe
     case "project": return retainTabs(state, tab => tab.kind !== "file" || tab.projectId === action.projectId);
     case "open-subagent": return open({ kind: "subagent", id: subagentTabId(action.taskId), taskId: action.taskId });
     case "open-artifact": return open({ kind: "artifact", id: artifactPreviewTabId(action.selection), selection: action.selection });
+    case "show-browser": {
+      // Host requests may arrive in the same React batch. Resolve against the
+      // reducer's latest state, not the render that received the first request.
+      const browsers = state.tabs.filter(tab => tab.kind === "file" && tab.mode === "browser");
+      const existing = browsers.find(tab => tab.id === action.viewId)
+        ?? browsers.find(tab => tab.id === state.activeId) ?? browsers[0];
+      if (existing) return selectInspectorTab(state, existing.id);
+      const next = open({ kind: "file", id: `project-file-slot:${state.nextOrdinal}`, projectId: action.projectId, mode: "browser" });
+      return { ...next, nextOrdinal: state.nextOrdinal + 1 };
+    }
     case "add-file": {
       const next = open({ kind: "file", id: `project-file-slot:${state.nextOrdinal}`, projectId: action.projectId, mode: action.mode });
       return { ...next, nextOrdinal: state.nextOrdinal + 1 };

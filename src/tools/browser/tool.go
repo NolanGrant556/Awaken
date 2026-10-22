@@ -214,7 +214,7 @@ func formatResult(result browserhost.Result) string {
 func init() {
 	tool.MustRegisterToolWithMode(&browserTool{
 		name: ToolNavigate, action: "navigate", displayName: "Browser Navigate", interact: true,
-		description: "Open one http(s) page in the current conversation's Awaken browser tab. Do not use WebFetch or Bash/curl to drive the visible page.",
+		description: "Open a visible browser tab only when the user asks to view a website or you need live page interaction. This changes the user's foreground panel. For background research, citations or JSON/API data use WebSearch and WebFetch instead. Do not use Bash/curl to drive the visible page.",
 		purpose:     "Navigate the Desktop embedded browser to a public http(s) URL and admit that origin.",
 		parameters:  []tool.ToolParameter{{Name: "url", Description: "http(s) URL or host to open.", Type: "string", Required: true}},
 		inputSchema: tool.ToolParametersSchema{Type: "object", Properties: map[string]tool.ToolParam{"url": {Type: "string", Description: "http(s) URL or host."}}, Required: []string{"url"}, AdditionalProperties: tool.BoolPtr(false)},

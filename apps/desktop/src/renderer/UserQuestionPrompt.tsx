@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { AwakenButton as Button, AwakenIcon } from "@awaken/design-system";
 import type { UserQuestionItem } from "./runtime/reducer";
 type UserQuestionPromptProps = {
@@ -71,6 +71,8 @@ export function UserQuestionPrompt({
     {},
   );
   const [activeQuestionIndex, setActiveQuestionIndex] = useState(0);
+  const [collapsed, setCollapsed] = useState(false);
+  const bodyId = useId();
   const otherInputRefs = useRef<Record<number, HTMLInputElement | null>>({});
   const questionBodyRef = useRef<HTMLDivElement | null>(null);
   const questions = question.questions;
@@ -78,6 +80,7 @@ export function UserQuestionPrompt({
   useEffect(() => {
     setAnswers({});
     setActiveQuestionIndex(0);
+    setCollapsed(false);
   }, [question.id, question.withdrawn]);
 
   useEffect(() => {
@@ -239,7 +242,7 @@ export function UserQuestionPrompt({
 
   return (
     <div
-      className="user-question-card"
+      className={`user-question-card${collapsed ? " user-question-card--collapsed" : ""}`}
       onKeyDown={(event) => {
         if (event.key !== "Escape" || event.defaultPrevented || event.nativeEvent.isComposing || disabled || question.withdrawn) return;
         event.preventDefault();
@@ -251,9 +254,10 @@ export function UserQuestionPrompt({
       <div className="user-question-card__topbar">
         <div className="user-question-card__heading">
           <div className="user-question-card__header">{question.withdrawn ? "正在停止，问题已撤回" : "需要回答"}</div>
+          {collapsed ? <div className="user-question-card__summary">{activeQuestion.question}</div> : null}
         </div>
         <div className="user-question-card__topbar-actions">
-          {hasMultipleQuestions ? (
+          {hasMultipleQuestions && !collapsed ? (
             <div className="user-question-card__pager" aria-label="问题切换">
               <button
                 type="button"
@@ -283,6 +287,17 @@ export function UserQuestionPrompt({
           <button
             type="button"
             className="user-question-card__close"
+            aria-label={collapsed ? "展开提问面板" : "收起提问面板"}
+            title={collapsed ? "展开提问面板" : "收起提问面板，查看输出"}
+            aria-expanded={!collapsed}
+            aria-controls={bodyId}
+            onClick={() => setCollapsed((current) => !current)}
+          >
+            <AwakenIcon concept={collapsed ? "collapse-up" : "dropdown"} size={20} />
+          </button>
+          <button
+            type="button"
+            className="user-question-card__close"
             aria-label="取消提问"
             title="取消提问"
             onClick={onCancel}
@@ -294,6 +309,8 @@ export function UserQuestionPrompt({
       </div>
       <div
         className="user-question-card__body"
+        id={bodyId}
+        hidden={collapsed}
         ref={questionBodyRef}
         role="region"
         aria-label="问题与选项"
@@ -396,7 +413,7 @@ export function UserQuestionPrompt({
           </div>
         </div>
       </div>
-      <div className="user-question-card__actions">
+      <div className="user-question-card__actions" hidden={collapsed}>
         {hasMultipleQuestions ? (
           <span className="user-question-card__answer-status">
             已回答 {answeredCount} / {questionCount}

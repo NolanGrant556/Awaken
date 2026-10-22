@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/netip"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -144,6 +145,22 @@ func isLocalOrPrivateHost(host string) bool {
 	if address := net.ParseIP(trimmed); address != nil {
 		return isForbiddenRemoteIP(address)
 	}
+	// Proxies may accept shortened, octal or hexadecimal IPv4 spellings that
+	// net.ParseIP rejects. Do not let these become proxy-resolved hostnames.
+	allNumeric := true
+	for _, label := range strings.Split(trimmed, ".") {
+		base := 10
+		if strings.HasPrefix(label, "0x") {
+			base, label = 16, strings.TrimPrefix(label, "0x")
+		}
+		if _, err := strconv.ParseUint(label, base, 32); err != nil {
+			allNumeric = false
+			break
+		}
+	}
+	if allNumeric {
+		return true
+	}
 	return false
 }
 
@@ -168,6 +185,10 @@ func isForbiddenRemoteIP(address net.IP) bool {
 }
 
 func (t *Tool) resolvePublicIPs(ctx context.Context, host string, allowLoopback bool) ([]net.IP, error) {
+	return t.resolveTargetIPs(ctx, host, allowLoopback, false)
+}
+
+func (t *Tool) resolveTargetIPs(ctx context.Context, host string, allowLoopback, allowProxySynthetic bool) ([]net.IP, error) {
 	if address := net.ParseIP(host); address != nil {
 		if allowLoopback && address.IsLoopback() {
 			return []net.IP{address}, nil
@@ -196,6 +217,12 @@ func (t *Tool) resolvePublicIPs(ctx context.Context, host string, allowLoopback 
 			allowed = append(allowed, address)
 			continue
 		}
+		// Only a hostname routed through a host-configured proxy can use its
+		// synthetic DNS mapping. Literal benchmark IPs remain forbidden above.
+		if allowProxySynthetic && isProxySyntheticIP(address) {
+			allowed = append(allowed, address)
+			continue
+		}
 		if isForbiddenRemoteIP(address) {
 			return nil, fmt.Errorf("%w: resolved address is not a public unicast target", errBlockedTarget)
 		}
@@ -205,6 +232,13 @@ func (t *Tool) resolvePublicIPs(ctx context.Context, host string, allowLoopback 
 		return nil, fmt.Errorf("%w: resolved address is not a public unicast target", errBlockedTarget)
 	}
 	return allowed, nil
+}
+
+var proxySyntheticPrefix = netip.MustParsePrefix("198.18.0.0/15")
+
+func isProxySyntheticIP(address net.IP) bool {
+	parsed, ok := netip.AddrFromSlice(address)
+	return ok && proxySyntheticPrefix.Contains(parsed.Unmap())
 }
 
 func (t *Tool) hostResolver() func(context.Context, string) ([]net.IP, error) {

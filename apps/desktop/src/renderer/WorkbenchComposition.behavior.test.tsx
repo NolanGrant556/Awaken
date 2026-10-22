@@ -73,6 +73,16 @@ describe("Desktop composition boundaries", () => {
     return () => files;
   }
 
+  it("opens only one browser tab for multiple host requests in the same render batch", async () => {
+    const current = await chrome();
+    await act(async () => {
+      const show = current().handleShowBrowserTab;
+      show(); show(); show();
+    });
+    expect(host.querySelectorAll('[role="tab"]')).toHaveLength(1);
+    expect(current().fileWorkspaceMode).toBe("browser");
+  });
+
   it.each(["files", "browser"] as const)("preserves the structured draft through %s collapse and reopening", async (mode) => {
     let files!: ReturnType<typeof useFileWorkspaceSession>;
     let draft!: ReturnType<typeof useThreadComposerDraft>;

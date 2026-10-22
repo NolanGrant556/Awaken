@@ -58,6 +58,25 @@
   pointer-events: none;
 }
 
+.user-question-card--collapsed {
+  grid-template-rows: auto;
+  gap: 0;
+  padding: 10px 16px;
+}
+
+.user-question-card [hidden] {
+  display: none;
+}
+
+.user-question-card__summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--aw-text-secondary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
 .user-question-card__topbar {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

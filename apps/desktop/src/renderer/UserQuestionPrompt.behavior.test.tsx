@@ -25,3 +25,37 @@ it("Escape from an answer input cancels once, while composition and inner menus 
  await act(async()=>host.firstElementChild!.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true,cancelable:true})));
  expect(cancel).toHaveBeenCalledTimes(1);
 });
+
+
+it("collapses without resolving the question, preserves free text and page, and opens a new question", async () => {
+  const host = document.createElement("div"); document.body.append(host);
+  const root = createRoot(host); dispose = () => { act(() => root.unmount()); host.remove(); };
+  const cancel = vi.fn(), submit = vi.fn();
+  const question = { id: "collapse-q", questions: [
+    { question: "First", options: [{ label: "A" }], multiSelect: true },
+    { question: "Second", options: [{ label: "B" }] },
+  ] };
+  const render = (id = question.id) => root.render(<UserQuestionPrompt question={{ ...question, id }} onCancel={cancel} onSubmit={submit} />);
+  await act(async () => render());
+  await act(async () => host.querySelector<HTMLButtonElement>(".user-question-card__option")!.click());
+  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="下一题"]')!.click());
+  await act(async () => host.querySelector<HTMLElement>('[role="button"]')!.click());
+  const input = host.querySelector("input")!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "保留草稿");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="收起提问面板"]')!.click());
+  expect(host.querySelector<HTMLElement>(".user-question-card__body")!.hidden).toBe(true);
+  expect(host.querySelector(".user-question-card__summary")!.textContent).toBe("Second");
+  expect(cancel).not.toHaveBeenCalled(); expect(submit).not.toHaveBeenCalled();
+  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="展开提问面板"]')!.click());
+  expect(host.querySelector("input")!.value).toBe("保留草稿");
+  expect(host.querySelector(".user-question-card__counter")!.textContent).toBe("2 of 2");
+  await act(async () => (Array.from(host.querySelectorAll("button")).find(b => b.textContent === "提交回答")!).click());
+  expect(submit).toHaveBeenCalledWith("First: A\nSecond: 保留草稿");
+  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="收起提问面板"]')!.click());
+  await act(async () => render("next-q"));
+  expect(host.querySelector<HTMLElement>(".user-question-card__body")!.hidden).toBe(false);
+  expect(host.querySelector("input")).toBeNull();
+});

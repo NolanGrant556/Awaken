@@ -5,6 +5,23 @@ const file = (name: string): ProjectFileWorkspaceTab => ({ id: name, projectId: 
 const artifact = (id: string) => ({ threadId: "t", runId: "r", artifactId: id, title: id });
 const apply = (state: InspectorTabsState, command: InspectorTabsCommand, threadId = "t") => inspectorTabsReducer(state, { ...command, threadId });
 describe("inspector tabs", () => {
+  it("coalesces repeated host browser requests while retaining explicit user-created tabs", () => {
+    let state = createInspectorTabs("t");
+    for (let index = 0; index < 8; index++) {
+      state = apply(state, { type: "show-browser", projectId: "p" });
+    }
+    expect(state.tabs).toHaveLength(1);
+    const first = state.activeId!;
+    state = apply(state, { type: "add-file", mode: "browser", projectId: "p" });
+    const second = state.activeId!;
+    state = apply(state, { type: "show-browser", viewId: first });
+    expect(state.activeId).toBe(first);
+    expect(state.tabs).toHaveLength(2);
+    state = apply(state, { type: "close", id: first });
+    state = apply(state, { type: "show-browser", viewId: first });
+    expect(state.activeId).toBe(second);
+    expect(state.tabs).toHaveLength(1);
+  });
   it("reuses the same file when navigating from a child and passes a fresh line request", () => {
     let state = apply(createInspectorTabs(), { type: "open-file", tab: file("a") });
     const id = state.activeId;

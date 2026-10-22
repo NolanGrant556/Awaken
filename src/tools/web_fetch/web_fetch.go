@@ -51,7 +51,7 @@ type redirectHop struct {
 func (t *Tool) Name() string { return ToolName }
 
 func (t *Tool) Description() string {
-	return "Open one public HTTPS page and return bounded UTF-8 text. Use WebSearch to discover URLs. Do not use Bash, curl, or Grep to fetch web pages. Private, loopback, credentialed, and non-default-port URLs are rejected."
+	return "Read one public HTTPS page or JSON endpoint in the background without opening a browser tab. Returns bounded UTF-8 text. Use this for research, citations and product/API data; use WebSearch to discover URLs. Do not use Bash, curl, or Grep to fetch web pages. Private, loopback, credentialed, and non-default-port URLs are rejected."
 }
 
 func (t *Tool) Parameters() []tool.ToolParameter {
@@ -92,7 +92,7 @@ func (t *Tool) Definition() tool.ToolDefinition {
 		FailureModes: []tool.ToolFailureMode{
 			{Code: "web_fetch_invalid_input", Cause: "URL or max_bytes is invalid", Retryable: false},
 			{Code: "web_fetch_blocked_target", Cause: "SSRF, private, metadata, userinfo, or credential query rejected", Retryable: false},
-			{Code: "web_fetch_unsupported_type", Cause: "Response is not HTML, Markdown, or UTF-8 plain text", Retryable: false},
+			{Code: "web_fetch_unsupported_type", Cause: "Response is not HTML, Markdown, JSON, or UTF-8 plain text", Retryable: false},
 			{Code: "web_fetch_network_failed", Cause: "Transport, DNS, or timeout failed", Retryable: true},
 			{Code: "web_fetch_http_status", Cause: "Upstream returned a non-success HTTP status", Retryable: true},
 			{Code: "web_fetch_cancelled", Cause: "Caller cancelled the request", Retryable: true},
@@ -161,7 +161,7 @@ func (t *Tool) ExecuteOutcome(ctx context.Context, input string, _ tool.ToolObse
 	if err != nil {
 		return tool.FailedOutcome("WebFetch request could not be constructed.", "web_fetch_invalid_input", tool.ErrorCategoryValidation, false).WithTiming(started, time.Now().UTC()), nil
 	}
-	req.Header.Set("Accept", "text/html, text/plain, text/markdown, text/x-markdown")
+	req.Header.Set("Accept", "text/html, text/plain, text/markdown, text/x-markdown, application/json, application/*+json")
 	req.Header.Set("Accept-Encoding", "gzip")
 	req.Header.Set("User-Agent", "Awaken-WebFetch/1.0")
 
@@ -180,12 +180,8 @@ func (t *Tool) ExecuteOutcome(ctx context.Context, input string, _ tool.ToolObse
 		if parseErr != nil {
 			return fmt.Errorf("%w: %v", errBlockedTarget, parseErr)
 		}
-		if _, resolveErr := t.resolvePublicIPs(next.Context(), redirectTarget.Host, t.AllowTestHTTP && redirectTarget.Loopback); resolveErr != nil {
-			if errors.Is(resolveErr, errBlockedTarget) {
-				return resolveErr
-			}
-			return fmt.Errorf("redirect target resolution failed: %w", resolveErr)
-		}
+		// The transport validates DNS against the route selected for this hop.
+		// Validating here as a direct connection would reject proxy synthetic DNS.
 		status := 0
 		if len(via) > 0 && via[len(via)-1].Response != nil {
 			status = via[len(via)-1].Response.StatusCode
@@ -203,7 +199,7 @@ func (t *Tool) ExecuteOutcome(ctx context.Context, input string, _ tool.ToolObse
 			return outcome.WithTiming(started, time.Now().UTC()), nil
 		}
 		if errors.Is(err, errBlockedTarget) {
-			return tool.FailedOutcome("WebFetch blocked an unsafe redirect target.", "web_fetch_blocked_target", tool.ErrorCategoryPolicy, false).WithTiming(started, time.Now().UTC()), nil
+			return tool.FailedOutcome("WebFetch blocked an unsafe target address (initial request or redirect).", "web_fetch_blocked_target", tool.ErrorCategoryPolicy, false).WithTiming(started, time.Now().UTC()), nil
 		}
 		return tool.FailedOutcome("WebFetch network request failed.", "web_fetch_network_failed", tool.ErrorCategoryRuntime, true).WithTiming(started, time.Now().UTC()), nil
 	}
@@ -216,7 +212,7 @@ func (t *Tool) ExecuteOutcome(ctx context.Context, input string, _ tool.ToolObse
 	decoded, truncated, err := decodeResponseBody(resp, int64(hardMaxBytes))
 	if err != nil {
 		if errors.Is(err, errUnsupportedType) {
-			return tool.FailedOutcome("WebFetch only accepts HTML, Markdown, or UTF-8 plain text.", "web_fetch_unsupported_type", tool.ErrorCategoryValidation, false).WithTiming(started, time.Now().UTC()), nil
+			return tool.FailedOutcome("WebFetch only accepts HTML, Markdown, JSON, or UTF-8 plain text.", "web_fetch_unsupported_type", tool.ErrorCategoryValidation, false).WithTiming(started, time.Now().UTC()), nil
 		}
 		return tool.FailedOutcome("WebFetch response could not be read.", "web_fetch_network_failed", tool.ErrorCategoryRuntime, true).WithTiming(started, time.Now().UTC()), nil
 	}
@@ -265,13 +261,7 @@ var errUnsupportedType = errors.New("unsupported type")
 func (t *Tool) httpClient(loopback bool) *http.Client {
 	transport := t.Transport
 	if transport == nil {
-		transport = &http.Transport{
-			Proxy:               nil,
-			DisableCompression:  true,
-			ForceAttemptHTTP2:   true,
-			TLSHandshakeTimeout: 10 * time.Second,
-			DialContext:         t.pinnedDialer(t.AllowTestHTTP && loopback),
-		}
+		transport = t.routedTransport(t.AllowTestHTTP && loopback)
 	}
 	return &http.Client{Transport: transport, Timeout: totalTimeout}
 }
@@ -336,10 +326,10 @@ func decodeResponseBody(resp *http.Response, maxBytes int64) ([]byte, bool, erro
 
 func acceptedContentType(contentType string) bool {
 	switch contentType {
-	case "text/html", "application/xhtml+xml", "text/plain", "text/markdown", "text/x-markdown":
+	case "text/html", "application/xhtml+xml", "text/plain", "text/markdown", "text/x-markdown", "application/json":
 		return true
 	default:
-		return false
+		return strings.HasPrefix(contentType, "application/") && strings.HasSuffix(contentType, "+json")
 	}
 }
 

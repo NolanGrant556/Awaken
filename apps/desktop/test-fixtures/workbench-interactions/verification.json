@@ -22,13 +22,29 @@
       "steps": [
         "Open 定时任务 > 创建任务, choose project and Agent, type @",
         "Choose 钉钉 and confirm a branded structured token appears",
-        "Cancel without creating a scheduled task"
+        "Cancel without creating a scheduled task",
+        "After the user authorizes Feishu, open a new Agent task draft in the existing isolated project",
+        "Type @ and confirm 飞书 in 内置; click 飞书 and verify the branded token",
+        "Cancel the draft; the existing scheduled task list remains unchanged"
       ],
       "screenshots": [
-        "scheduled-mention.jpg"
+        "scheduled-mention.jpg",
+        "scheduled-feishu-mention.jpg",
+        "scheduled-feishu-token.jpg"
       ],
-      "observed": "The connected DingTalk entry appears in the same 内置 section. Feishu UI reports installed but currently unauthorized, so it is correctly hidden.",
-      "automation": "Both ready entries, Feishu disconnect/reconnect, exact Skill identity and saved payload are covered by ScheduledTasksView.behavior.test.tsx."
+      "observed": "DingTalk and, after the user completed authorization, Feishu both appear in the 内置 section. Clicking Feishu inserts its branded structured token. The existing Desktop process was used without restarting or reloading; the temporary task draft was cancelled without saving.",
+      "automation": "Both ready entries, Feishu disconnect/reconnect, exact Skill identity and saved payload are covered by ScheduledTasksView.behavior.test.tsx.",
+      "previous_observation": "The connected DingTalk entry appears in the same 内置 section. Feishu UI reports installed but currently unauthorized, so it is correctly hidden.",
+      "feishu_live_verification": {
+        "base_commit": "e4c408166caeda534ed162ed3947c85ec147ac36",
+        "menu_visible": true,
+        "branded_token_inserted": true,
+        "app_restarted": false,
+        "page_reloaded": false,
+        "task_saved": false,
+        "task_executed": false,
+        "scope": "Post-authorization menu discovery and token insertion in real macOS Desktop. Authorization completed before opening the editor; disconnect/reconnect while the editor is already open remains covered by automated tests."
+      }
     },
     {
       "id": "research-browser",

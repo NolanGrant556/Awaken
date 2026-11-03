@@ -391,6 +391,7 @@ func (h runHandlers) handleGetThreadTranscript(w http.ResponseWriter, r *http.Re
 			// It assigns a distinct stable semantic seq to START/CONTENT/END and
 			// other multi-frame records. Live transport resume uses stream_cursor.
 			frames = agui.ProjectSemanticRecords(run.SemanticRecords)
+			hydrateSteeringImagePreviews(frames)
 		} else {
 			frames = make([]agui.Event, 0, len(run.Events))
 			for _, event := range run.Events {
@@ -627,6 +628,28 @@ func (h runHandlers) handleRunEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (h runHandlers) handleSteering(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 96<<20)
+	var request awruntime.SteeringRequest
+	if err := decodeJSON(r, &request); err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_INPUT", "插话请求无效或超限")
+		return
+	}
+	receipt, err := h.runService.SubmitSteering(r.Context(), r.PathValue("run_id"), request)
+	switch {
+	case err == nil:
+		writeJSON(w, http.StatusAccepted, receipt)
+	case errors.Is(err, awruntime.ErrInvalidInput):
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
+	case errors.Is(err, awruntime.ErrRunNotFound):
+		writeErrorJSON(w, http.StatusNotFound, "RUN_NOT_FOUND", err.Error())
+	case errors.Is(err, awruntime.ErrSteeringUnavailable):
+		writeErrorJSON(w, http.StatusConflict, "STEERING_UNAVAILABLE", err.Error())
+	default:
+		writeErrorJSON(w, http.StatusInternalServerError, "STEERING_FAILED", "无法保存插话")
+	}
+}
+
 func (h runHandlers) handleCancelRun(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("run_id")
 	run, err := h.runService.CancelRun(runID)
@@ -850,10 +873,25 @@ func writeRuntimeEvent(stream *SSEStream, event awruntime.Event) error {
 	return nil
 }
 
+func hydrateSteeringImagePreviews(frames []agui.Event) {
+	for _, frame := range frames {
+		if frame.Type != agui.EventAwakenSteering || frame.Status != "pending" {
+			continue
+		}
+		for i := range frame.SteeringAttachments {
+			attachment := &frame.SteeringAttachments[i]
+			if attachment.Kind == "image" {
+				attachment.DataBase64 = awruntime.ReadSteeringImagePreview(frame.ThreadID, attachment.ID, attachment.MimeType)
+			}
+		}
+	}
+}
+
 func mapRuntimeEvent(event awruntime.Event) []agui.Event {
 	switch event.Kind {
 	case awruntime.EventKindSemantic:
 		mapped := agui.ProjectSemanticRecord(event.SemanticRecord)
+		hydrateSteeringImagePreviews(mapped)
 		for i := range mapped {
 			cursor := frameSeq(event.Seq, i)
 			mapped[i].StreamCursor = cursor

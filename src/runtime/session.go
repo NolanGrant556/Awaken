@@ -117,6 +117,7 @@ func (s *Session) appendEventLocked(event Event, terminal bool) {
 }
 
 type Session struct {
+	steering             steeringQueue
 	ephemeralResultStart int
 	stopContext          context.Context
 	childComputers       map[string]*computer.Runtime
@@ -358,6 +359,8 @@ func (s *Session) RequestCancel() Run {
 }
 
 func (s *Session) RequestCancelWithSource(source runcontrol.Source) Run {
+	s.steering.mu.Lock()
+	defer s.steering.mu.Unlock()
 	now := time.Now().UTC()
 	s.mu.Lock()
 	if isTerminalStatus(s.run.Status) {

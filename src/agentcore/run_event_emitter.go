@@ -18,6 +18,8 @@ type runEventEmitter struct {
 	transportAttempt      int
 	attemptID             string
 	inboxMessageIDs       func() []string
+	steeringInputs        func() []SteeringInput
+	steeringCommitted     func()
 	contextRevision       func() uint64
 	contextCommitted      func()
 	sink                  EventSink

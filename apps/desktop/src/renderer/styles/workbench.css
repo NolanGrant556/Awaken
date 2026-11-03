@@ -729,11 +729,11 @@
   z-index: 3;
 }
 
-.execution-turn-header .execution-prompt-block {
+:is(.execution-turn-header, .run-steering-message) .execution-prompt-block {
   padding: 0;
 }
 
-.execution-turn-header .execution-prompt-bubble {
+:is(.execution-turn-header, .run-steering-message) .execution-prompt-bubble {
   --execution-prompt-collapsed-fade-size: calc(0.8 * var(--aw-line-height-base));
   --execution-prompt-collapsed-content-height: calc(
     3 * var(--aw-line-height-base) + var(--execution-prompt-collapsed-fade-size)
@@ -749,7 +749,7 @@
   box-shadow: var(--aw-shadow-raised);
 }
 
-.execution-turn-header
+:is(.execution-turn-header, .run-steering-message)
   .execution-prompt-block-limited:not(.execution-prompt-block-expanded)
   .execution-prompt-bubble {
   padding: 10px 16px 0;
@@ -761,7 +761,8 @@
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
-  padding: 0 16px;
+  --aw-turn-body-inline-padding: 16px;
+  padding: 0 var(--aw-turn-body-inline-padding);
 }
 
 .execution-turn-body > * {
@@ -949,4 +950,16 @@
 .desktop-startup-status.is-leaving { opacity: 0; }
 @media (prefers-reduced-motion: reduce) {
   .desktop-startup-status { transition: none; }
+}
+
+.execution-turn-body > .run-steering-message {
+  width: calc(100% + 2 * var(--aw-turn-body-inline-padding));
+  max-width: none;
+  margin-inline: calc(-1 * var(--aw-turn-body-inline-padding));
+}
+
+.run-steering-status {
+  display: block;
+  text-align: end;
+  color: var(--aw-text-secondary);
 }

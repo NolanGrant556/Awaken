@@ -84,6 +84,7 @@ export type AguiEventType =
   | "AWAKEN_COMPUTER_HANDOFF_ENDED"
   | "AWAKEN_COMPUTER_POINTER_HINT"
   | "AWAKEN_PROVIDER_RECONNECT"
+  | "AWAKEN_STEERING"
   | "AWAKEN_UNKNOWN_EVENT";
 
 export type AguiMemoryReceipt = {
@@ -526,6 +527,7 @@ export type AguiEvent = {
   artifactContractVersion?: number;
   artifactProducer?: string;
   outcome?: AguiRunOutcome;
+  steeringAttachments?: import("./runtime.js").RunInputAttachmentWire[];
   rawType?: string;
   rawEvent?: Record<string, unknown>;
   computerReviewId?: string;

@@ -512,6 +512,9 @@ const bridge: AwakenBridge = {
     }>,
   revealArtifact: (request: ArtifactOpenRequest) =>
     ipcRenderer.invoke("awaken:reveal-artifact", request) as Promise<ArtifactOpenResult>,
+  submitSteering: (request) => ipcRenderer.invoke("awaken:submit-steering", request),
+  getSteeringEnabled: () => ipcRenderer.invoke("awaken:get-steering-enabled"),
+  setSteeringEnabled: (enabled) => ipcRenderer.invoke("awaken:set-steering-enabled", enabled),
   startRun: (request: StartRunRequest) =>
     ipcRenderer.invoke("awaken:start-run", request) as Promise<DesktopOperationResult<RuntimeRun>>,
   cancelRun: (runId: string) =>

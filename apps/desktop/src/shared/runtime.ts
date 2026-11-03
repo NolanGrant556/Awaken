@@ -2072,6 +2072,14 @@ export type StartRunRequestWire = {
   model_profile?: ModelProfileRunConfigWire;
 };
 
+export type SteeringRequest = {
+  threadId: string;
+  runId: string;
+  requestId: string;
+  text: string;
+  attachments: RunInputAttachment[];
+};
+
 export type StartRunRequest = {
   input: string;
   attachments?: RunInputAttachment[];
@@ -2674,6 +2682,9 @@ export type AwakenBridge = OfficeEnvironmentBridge & {
   revealPath: (target: string) => Promise<{ ok: boolean; message?: string }>;
   revealArtifact: (request: ArtifactOpenRequest) => Promise<ArtifactOpenResult>;
   startRun: (request: StartRunRequest) => Promise<DesktopOperationResult<RuntimeRun>>;
+  submitSteering?: (request: SteeringRequest) => Promise<DesktopRequestResult<void>>;
+  getSteeringEnabled?: () => Promise<boolean>;
+  setSteeringEnabled?: (enabled: boolean) => Promise<void>;
   cancelRun: (runId: string) => Promise<DesktopRequestResult<RuntimeRun>>;
   cancelSubagent: (runId: string, taskId: string, reason?: string) => Promise<DesktopRequestResult<void>>;
   answerUserQuestion: (runId: string, questionId: string, answer: string) => Promise<DesktopRequestResult<void>>;

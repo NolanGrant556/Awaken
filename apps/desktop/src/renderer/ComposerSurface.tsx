@@ -29,6 +29,8 @@ type Props = {
     "composerBarState" | "composerFocusRequest" | "composerFocusOffset"
   >;
   editing: boolean;
+  steering?: boolean;
+  onStop?: () => void;
   onSubmit: () => Promise<void>;
   metaItems: ComponentProps<typeof ComposerBar>["metaItems"];
   projectPicker?: ComponentProps<typeof ComposerBar>["projectPicker"];
@@ -40,6 +42,8 @@ export function ComposerSurface({
   input,
   lifecycle,
   editing,
+  steering,
+  onStop,
   onSubmit,
   metaItems,
   projectPicker,
@@ -56,12 +60,13 @@ export function ComposerSurface({
       }}
       onAddContext={input.handleAddContext}
       placeholder={
-        variant === "center"
+        steering ? "发送到当前运行…" : variant === "center"
           ? "描述任务，或 / 选择 Skill、@ 选择内置功能或插件"
           : "输入后续任务…"
       }
       disabled={composerBarState.disabled || editing}
       isReady={composerBarState.isReady}
+      onStop={steering ? onStop : undefined}
       submitMode={composerBarState.submitMode}
       submitDisabled={composerBarState.submitDisabled || editing}
       variant={variant}

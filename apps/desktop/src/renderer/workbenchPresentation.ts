@@ -631,10 +631,12 @@ export function projectNarrativeTurnBodySegments({
     ];
   }
 
-  const executionProcessItems = items.slice(0, terminalBoundaryIndex);
+  const beforeAnswer = items.slice(0, terminalBoundaryIndex);
+  const steeringItems = beforeAnswer.filter((item) => item.kind === "steering");
+  const executionProcessItems = beforeAnswer.filter((item) => item.kind !== "steering");
   const answerAndAfterItems = items.slice(terminalBoundaryIndex);
   const elapsedMs = narrativeTurnElapsedMs(items);
-  const segments: NarrativeTurnBodySegment[] = [
+  const segments: NarrativeTurnBodySegment[] = executionProcessItems.length ? [
     {
       kind: "executionProcess",
       id: `execution-process:${turnId}`,
@@ -643,7 +645,10 @@ export function projectNarrativeTurnBodySegments({
       items: executionProcessItems,
       open: executionProcessOpen,
     },
-  ];
+  ] : [];
+  if (steeringItems.length) {
+    segments.push({ kind: "items", id: `steering:${turnId}`, items: steeringItems });
+  }
 
   if (answerAndAfterItems.length > 0) {
     segments.push({

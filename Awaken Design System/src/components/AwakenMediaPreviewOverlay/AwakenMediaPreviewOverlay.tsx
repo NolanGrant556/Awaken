@@ -75,16 +75,15 @@ export function AwakenMediaPreviewOverlay({
     scrollLeft: number;
     scrollTop: number;
   } | undefined>(undefined);
-  const [fit, setFit] = useState(true);
-  const [scale, setScale] = useState(1);
+  const [scale, setScale] = useState<number>();
+  const fit = scale === undefined;
   const [naturalSize, setNaturalSize] = useState<{ width: number; height: number }>();
   const [dragging, setDragging] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
   const [autoplayRejected, setAutoplayRejected] = useState(false);
 
   useEffect(() => {
-    setFit(true);
-    setScale(1);
+    setScale(undefined);
     setNaturalSize(undefined);
     setDragging(false);
     setLoadFailed(false);
@@ -133,15 +132,27 @@ export function AwakenMediaPreviewOverlay({
     };
   }, [onClose, onNext, onPrevious]);
 
-  const setOriginalSize = () => {
-    setFit(false);
-    setScale(1);
-  };
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (item.kind !== "image" || !canvas || !naturalSize) return;
 
-  const adjustScale = (delta: number) => {
-    setFit(false);
-    setScale((current) => Math.min(8, Math.max(0.1, Number((current + delta).toFixed(2)))));
-  };
+    const handleWheel = (event: WheelEvent) => {
+      // Chromium delivers trackpad pinch as Ctrl+wheel. A vertical two-finger
+      // scroll also zooms here. Horizontal scrolling can still pan the image.
+      if (!event.deltaY || (!event.ctrlKey && Math.abs(event.deltaX) > Math.abs(event.deltaY))) return;
+      event.preventDefault();
+      const fitScale = Math.min(1, canvas.clientWidth / naturalSize.width, canvas.clientHeight / naturalSize.height);
+      if (fitScale <= 0) return;
+      const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? canvas.clientHeight : 1;
+      const multiplier = Math.exp(-event.deltaY * unit * 0.004);
+      setScale((current) => {
+        const next = (current ?? fitScale) * multiplier;
+        return Math.min(8, Math.max(Math.min(0.1, fitScale), next));
+      });
+    };
+    canvas.addEventListener("wheel", handleWheel, { passive: false });
+    return () => canvas.removeEventListener("wheel", handleWheel);
+  }, [item.kind, naturalSize]);
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (fit || item.kind !== "image" || !canvasRef.current) return;
@@ -193,8 +204,8 @@ export function AwakenMediaPreviewOverlay({
     }
   };
 
-  const imageStageStyle =
-    !fit && naturalSize
+  const imageSizeStyle =
+    scale !== undefined && naturalSize
       ? {
           width: `${naturalSize.width * scale}px`,
           height: `${naturalSize.height * scale}px`,
@@ -269,9 +280,10 @@ export function AwakenMediaPreviewOverlay({
               ) : !item.src || loadFailed ? (
                 <span className="aw-media-preview-error" role="status">正在重新载入图片预览…</span>
               ) : (
-                <span className="aw-media-preview-image-stage" style={imageStageStyle}>
+                <span className="aw-media-preview-image-stage">
                   <img
                     src={item.src}
+                    style={imageSizeStyle}
                     alt={item.alt || item.title}
                     draggable={false}
                     onLoad={(event: SyntheticEvent<HTMLImageElement>) => {
@@ -340,80 +352,50 @@ export function AwakenMediaPreviewOverlay({
           )}
         </div>
 
-        <footer className="aw-media-preview-toolbar">
-          <div className="aw-media-preview-toolbar-group aw-media-preview-zoom-controls">
-            {item.kind === "image" ? (
-              <>
-                <button type="button" aria-label="缩小图片" onClick={() => adjustScale(-0.25)}>
-                  <AwakenIcon concept="collapse" size={16} />
-                </button>
-                <span className="aw-media-preview-scale">
-                  {fit ? "适应" : `${Math.round(scale * 100)}%`}
-                </span>
-                <button type="button" aria-label="放大图片" onClick={() => adjustScale(0.25)}>
-                  <AwakenIcon concept="add" size={16} />
-                </button>
+        {item.kind === "video" || onOpenExternal || onReveal ? (
+          <footer className="aw-media-preview-toolbar">
+            {item.kind === "video" ? (
+              <div className="aw-media-preview-toolbar-group aw-media-preview-zoom-controls">
                 <button
                   type="button"
                   className="aw-media-preview-compact-button"
-                  aria-label="适应窗口"
-                  title="适应窗口"
+                  aria-label="全屏"
+                  title="全屏"
                   onClick={() => {
-                    setFit(true);
-                    setScale(1);
+                    void fullscreenRef.current?.requestFullscreen?.();
                   }}
                 >
-                  <AwakenIcon concept="rotate-ccw" size={16} />
+                  <AwakenIcon concept="expand-full" size={16} />
                 </button>
+              </div>
+            ) : null}
+            <div className="aw-media-preview-toolbar-group aw-media-preview-toolbar-system">
+              {onOpenExternal ? (
                 <button
                   type="button"
-                  className="aw-media-preview-compact-button"
-                  aria-label="原始尺寸"
-                  title="原始尺寸"
-                  onClick={setOriginalSize}
+                  aria-label={localOpenLabel}
+                  title={localOpenLabel}
+                  disabled={openingExternal}
+                  onClick={onOpenExternal}
                 >
-                  1:1
+                  <AwakenIcon concept="external-open" size={16} />
+                  打开
                 </button>
-              </>
-            ) : null}
-            <button
-              type="button"
-              className="aw-media-preview-compact-button"
-              aria-label="全屏"
-              title="全屏"
-              onClick={() => {
-                void fullscreenRef.current?.requestFullscreen?.();
-              }}
-            >
-              <AwakenIcon concept="expand-full" size={16} />
-            </button>
-          </div>
-          <div className="aw-media-preview-toolbar-group aw-media-preview-toolbar-system">
-            {onOpenExternal ? (
-              <button
-                type="button"
-                aria-label={localOpenLabel}
-                title={localOpenLabel}
-                disabled={openingExternal}
-                onClick={onOpenExternal}
-              >
-                <AwakenIcon concept="external-open" size={16} />
-                打开
-              </button>
-            ) : null}
-            {onReveal ? (
-              <button
-                type="button"
-                aria-label={revealLabel}
-                title={revealLabel}
-                onClick={onReveal}
-              >
-                <AwakenIcon concept="folder-expanded" size={16} />
-                显示位置
-              </button>
-            ) : null}
-          </div>
-        </footer>
+              ) : null}
+              {onReveal ? (
+                <button
+                  type="button"
+                  aria-label={revealLabel}
+                  title={revealLabel}
+                  onClick={onReveal}
+                >
+                  <AwakenIcon concept="folder-expanded" size={16} />
+                  显示位置
+                </button>
+              ) : null}
+            </div>
+          </footer>
+        ) : null}
       </div>
     </div>
   );

@@ -61,6 +61,31 @@ describe("AwakenMediaPreviewOverlay focus ownership", () => {
     pending.forEach((callback) => callback(0));
   }
 
+  it("zooms from the fitted image using scroll and pinch wheel events", () => {
+    act(() => root.render(<PreviewHarness />));
+    const canvas = host.querySelector(".aw-media-preview-image-canvas")!;
+    const stage = host.querySelector<HTMLElement>(".aw-media-preview-image-stage")!;
+    const image = stage.querySelector("img")!;
+    Object.defineProperties(canvas, { clientWidth: { value: 400 }, clientHeight: { value: 300 } });
+    Object.defineProperties(image, { naturalWidth: { value: 800 }, naturalHeight: { value: 600 } });
+    act(() => image.dispatchEvent(new Event("load")));
+    const scroll = new WheelEvent("wheel", { deltaY: -100, cancelable: true });
+    act(() => canvas.dispatchEvent(scroll));
+    const enlarged = parseFloat(image.style.width);
+    expect(scroll.defaultPrevented).toBe(true);
+    expect(enlarged).toBeGreaterThan(400);
+    const pinch = new WheelEvent("wheel", { deltaY: 100, ctrlKey: true, cancelable: true });
+    act(() => canvas.dispatchEvent(pinch));
+    expect(pinch.defaultPrevented).toBe(true);
+    expect(parseFloat(image.style.width)).toBeCloseTo(400);
+    act(() => canvas.dispatchEvent(new WheelEvent("wheel", { deltaY: 40, cancelable: true })));
+    const reduced = parseFloat(image.style.width);
+    expect(reduced).toBeLessThan(400);
+    act(() => canvas.dispatchEvent(new WheelEvent("wheel", { deltaY: 40, cancelable: true })));
+    expect(parseFloat(image.style.width)).toBeLessThan(reduced);
+    expect(stage.style.width).toBe("");
+  });
+
   it("keeps programmatic focus on the dialog when ArrowRight changes the image", () => {
     act(() => root.render(<PreviewHarness />));
     act(() => flushAnimationFrames());

@@ -40,6 +40,7 @@ var (
 type Runner struct {
 	progressNudge           *progressNudge
 	pendingInbox            []string
+	pendingSteering         []SteeringInput
 	inboxErr                error
 	incorporateMessages     func([]string)
 	config                  AgentConfig
@@ -169,6 +170,12 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 	r.progressNudge = newProgressNudge(r.config)
 	events := newRunEventEmitter(r.threadID, sink)
 	events.attemptID = r.config.AttemptID
+	var steering SteeringSource
+	if r.config.SubagentOrigin == nil && r.config.ResearchIntent == nil {
+		steering, _ = sink.(SteeringSource)
+	}
+	events.steeringInputs = func() []SteeringInput { return r.pendingSteering }
+	events.steeringCommitted = func() { r.pendingSteering = nil }
 	events.inboxMessageIDs = func() []string { return append([]string(nil), r.pendingInbox...) }
 	events.contextRevision = func() uint64 { return r.config.ContextRevision + 1 }
 	events.contextCommitted = func() {
@@ -357,6 +364,9 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 		default:
 		}
 
+		if err := r.admitSteering(ctx, steering); err != nil {
+			return "", err
+		}
 		r.injectSubagentTerminalNotifications(nil)
 		r.injectSubagentQueuedMessages()
 		if r.inboxErr != nil {
@@ -513,6 +523,12 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 					transition = TransitionBeforeFinishHook
 					continue
 				}
+				if steering != nil && steering.SealSteering(i+1 < maxThoughts+beforeFinishBlocks) {
+					events.turnFinished(ctx, "", TransitionSteeringContinuation)
+					events.resetTurn()
+					transition = TransitionSteeringContinuation
+					continue
+				}
 				finalAnswer = continuedOutput.String() + finalAnswer
 				finalState, snapshotErr := r.persistCurrentContextSnapshot(ctx, events)
 				if snapshotErr != nil {
@@ -559,6 +575,12 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 			events.turnFinished(ctx, "", TransitionBeforeFinishHook)
 			events.resetTurn()
 			transition = TransitionBeforeFinishHook
+			continue
+		}
+		if steering != nil && steering.SealSteering(i+1 < maxThoughts+beforeFinishBlocks) {
+			events.turnFinished(ctx, "", TransitionSteeringContinuation)
+			events.resetTurn()
+			transition = TransitionSteeringContinuation
 			continue
 		}
 		events.finishTextIfOpen()

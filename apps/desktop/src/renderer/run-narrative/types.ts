@@ -132,6 +132,15 @@ export type SubagentNarrativeTask = {
 
 export type RunNarrativeItem =
   | {
+      kind: "steering";
+      id: string;
+      runId?: string;
+      text: string;
+      attachments: RunInputAttachment[];
+      status: "pending" | "applied" | "unapplied";
+      reason?: string;
+    }
+  | {
       kind: "prompt";
       id: string;
       runId?: string;

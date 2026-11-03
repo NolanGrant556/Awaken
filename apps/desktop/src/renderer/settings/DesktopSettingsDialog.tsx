@@ -8,6 +8,7 @@ import {
   type AwakenProviderConnectionStatus,
   AwakenSettings,
   AwakenSettingsNavItems,
+  AwakenSettingsSwitch,
   AwakenSettingsProviderCard,
   AwakenSettingsProviderModal,
 } from "@awaken/design-system";
@@ -62,6 +63,7 @@ type SettingsDialogSection =
   | "memory"
   | "instructions"
   | "appearance"
+  | "conversation"
   | "pets"
   | "computer"
   | "hooks"
@@ -116,6 +118,7 @@ const SETTINGS_SECTION_TITLES: Record<SettingsDialogSection, string> = {
   computer: "计算机操作",
   hooks: "钩子",
   acp: "外部 Agent / ACP",
+  conversation: "对话",
   "archived-chats": "已归档的聊天",
 };
 
@@ -222,6 +225,9 @@ type DesktopSettingsDialogProps = {
   /** 归档/取消归档/删除完成后刷新 active 侧栏列表。 */
   onThreadsChanged: () => void;
   currentProjectId?: string;
+  steeringEnabled?: boolean;
+  steeringSaving?: boolean;
+  onSteeringEnabledChange?: (enabled: boolean) => void;
   initialSection?: SettingsDialogSection;
   initialModelSection?: ModelSettingsSection;
 };
@@ -649,6 +655,9 @@ export function DesktopSettingsDialog({
   onProfilesChanged,
   onThreadsChanged,
   currentProjectId,
+  steeringEnabled,
+  steeringSaving,
+  onSteeringEnabledChange,
   initialSection = "models",
   initialModelSection = "coding_plan",
 }: DesktopSettingsDialogProps) {
@@ -1532,6 +1541,16 @@ export function DesktopSettingsDialog({
           themeSaving={themeSaving}
           message={themeMessage}
           onThemePreferenceChange={onThemePreferenceChange}
+        />
+      ) : activeSettingsSection === "conversation" ? (
+        <AwakenSettingsSwitch
+          variant="card"
+          label="运行中插话"
+          description="在当前运行中发送补充消息、图片或文件。"
+          checked={steeringEnabled ?? true}
+          disabled={steeringEnabled === undefined}
+          busy={steeringSaving}
+          onCheckedChange={onSteeringEnabledChange}
         />
       ) : activeSettingsSection === "pets" ? (
         <PetsSettingsPanel runtimeClient={runtimeClient} />

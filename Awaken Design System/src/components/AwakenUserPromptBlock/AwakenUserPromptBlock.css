@@ -430,3 +430,14 @@
 }
 
 /* AwakenUserPromptBlock currently uses shared Awaken Design System tokens and component classes. */
+
+button.execution-prompt-bubble-attachment-image {
+  padding: 0;
+  cursor: zoom-in;
+}
+
+.execution-prompt-image-preview {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+}

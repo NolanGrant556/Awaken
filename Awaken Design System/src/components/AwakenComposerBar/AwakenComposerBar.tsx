@@ -247,6 +247,7 @@ export type AwakenComposerBarProps = {
   onChange: (value: string) => void;
   onSubmit?: () => void;
   submitOnEnter?: boolean;
+  onStop?: () => void;
   onInputKeyDown?: (
     event: ReactKeyboardEvent<HTMLTextAreaElement | ComposerInlineInputElement>,
   ) => void;
@@ -529,6 +530,7 @@ export function AwakenComposerBar({
   onChange,
   onSubmit,
   submitOnEnter = true,
+  onStop,
   onInputKeyDown,
   onStructuredInputChange,
   inputAriaLabel = "输入任务",
@@ -1688,6 +1690,9 @@ export function AwakenComposerBar({
             </div>
             {modelMetaItem ? renderModelMetaItem(modelMetaItem) : null}
             <div className="composer-bar-submit">
+              {onStop && (
+                <AwakenSendButton ready onClick={onStop} mode="stop" />
+              )}
               <AwakenSendButton
                 ready={isReady || submitMode === "stop"}
                 onClick={handleSubmit}

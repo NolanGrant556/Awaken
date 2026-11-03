@@ -65,6 +65,23 @@ func (e *runEventEmitter) modelRequest(ctx stdcontext.Context, snapshot ContextU
 	}
 	records[1].Payload["logical_call_id"] = e.logicalModelCallID
 	records[1].Payload["transport_attempt_index"] = e.transportAttempt
+	if e.steeringInputs != nil {
+		inputs := e.steeringInputs()
+		if len(inputs) > 0 {
+			ids := make([]string, 0, len(inputs))
+			applied := make([]SemanticRecord, 0, len(inputs))
+			for _, input := range inputs {
+				ids = append(ids, input.ID)
+				applied = append(applied, e.withAgentIdentity(NewSemanticRecord(
+					SemanticKindUserMessage, e.threadID, e.runID, e.turnID(), "", e.sessionID,
+					map[string]any{"role": "user", "content": input.Text, "steering_id": input.ID,
+						"attachments": semanticUserMessageAttachments(input.Attachments)},
+				)))
+			}
+			records[1].Payload["steering_message_ids"] = ids
+			records = append(applied, records...)
+		}
+	}
 	persistCtx, cancel := durablePersistenceContext(ctx)
 	defer cancel()
 	if err := PersistDurableBatch(persistCtx, e.recorder, e.sink, records, event); err != nil {
@@ -74,6 +91,9 @@ func (e *runEventEmitter) modelRequest(ctx stdcontext.Context, snapshot ContextU
 	// side effect starts.
 	if err := e.recorder.Flush(persistCtx); err != nil {
 		return e.notePersistenceFailure("model_request_flush", err)
+	}
+	if e.steeringCommitted != nil {
+		e.steeringCommitted()
 	}
 	return nil
 }

@@ -206,6 +206,7 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 		mux.HandleFunc("GET /v1/runs/{run_id}", handlers.handleGetRun)
 		mux.HandleFunc("GET /v1/runs/{run_id}/events", handlers.handleRunEvents)
 		mux.HandleFunc("POST /v1/runs/{run_id}/cancel", handlers.handleCancelRun)
+		mux.HandleFunc("POST /v1/runs/{run_id}/steering", handlers.handleSteering)
 		mux.HandleFunc("GET /v1/runs/{run_id}/subagents", handlers.handleListSubagents)
 		mux.HandleFunc("GET /v1/runs/{run_id}/subagents/{task_id}", handlers.handleGetSubagent)
 		mux.HandleFunc("POST /v1/runs/{run_id}/subagents/{task_id}/cancel", handlers.handleCancelSubagent)

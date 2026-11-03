@@ -25,6 +25,7 @@ import type {
 } from "../shared/runtime";
 import { resolveEmbeddedBrowserTabRef } from "../shared/embedded-browser";
 import { MACOS_WINDOW_CHROME_GEOMETRY } from "../shared/window-chrome";
+import { toRunInputAttachment } from "./composerAttachments";
 import { ComposerSurface } from "./ComposerSurface";
 import { ComputerHandoffIndicator } from "./ComputerHandoffIndicator";
 import { ComputerReviewGate } from "./ComputerReviewGate";
@@ -383,6 +384,42 @@ export function App() {
     runtimeState.phase === "running" ||
     runtimeState.phase === "reconnecting" ||
     runtimeState.phase === "cancelling";
+  const [steeringEnabled, setSteeringEnabled] = useState<boolean>();
+  const [steeringSaving, setSteeringSaving] = useState(false);
+  const steeringRequest = useRef<{
+    runId: string;
+    draft: typeof composerDraft;
+    id: string;
+  } | undefined>(undefined);
+  const steeringSubmitting = useRef(false);
+  useEffect(() => {
+    let active = true;
+    void runtimeClient.getSteeringEnabled?.().then((enabled) => {
+      if (active) setSteeringEnabled(enabled);
+    }).catch(() => {
+      if (active) setNotice("无法读取运行中插话设置");
+    });
+    return () => { active = false; };
+  }, [runtimeClient]);
+  const canSteer = Boolean(
+    steeringEnabled && runtimeClient.submitSteering &&
+    runtimeState.phase === "running" && runtimeState.runId && runtimeState.activeThreadId &&
+    !runtimeState.userQuestions.length && !runtimeState.externalInteractions.length &&
+    !runtimeState.computerReviews.length
+  );
+  async function changeSteeringEnabled(enabled: boolean) {
+    if (!runtimeClient.setSteeringEnabled || steeringSaving) return;
+    setSteeringSaving(true);
+    try {
+      await runtimeClient.setSteeringEnabled(enabled);
+      setSteeringEnabled(enabled);
+    } catch {
+      setNotice("无法保存运行中插话设置");
+    } finally {
+      setSteeringSaving(false);
+    }
+  }
+
   // The task surface follows the newest durable plan across runs in the
   // active thread. Pause, continuation and replay update this one ComposerDock
   // projection; plans never move into the narrative execution process.
@@ -669,7 +706,7 @@ export function App() {
   const composerLifecycle = useComposerLifecycle({
     composerValue,
     desktopReady,
-    isBusy,
+    isBusy: isBusy && !canSteer,
     isWorkspaceValid,
     hasAttachments:
       composerAttachments.length > 0 ||
@@ -1374,6 +1411,39 @@ export function App() {
     if (editingPrompt) {
       return;
     }
+    if (canSteer && runtimeClient.submitSteering && runtimeState.runId && runtimeState.activeThreadId) {
+      if (steeringSubmitting.current || (!composerValue.trim() && !composerAttachments.length)) return;
+      if (composerTokens.length || composerComments.length) {
+        setNotice("插话支持正文、图片和文件附件。请移除标记或文件评论后发送。");
+        return;
+      }
+      const runId = runtimeState.runId;
+      const previous = steeringRequest.current;
+      const sameInput = previous?.runId === runId &&
+        previous.draft.value === composerDraft.value &&
+        previous.draft.attachments.length === composerDraft.attachments.length &&
+        previous.draft.attachments.every((attachment, index) => attachment.id === composerDraft.attachments[index]?.id);
+      const id = sameInput ? previous.id : window.crypto.randomUUID();
+      steeringRequest.current = { runId, draft: composerDraft, id };
+      const restore = composerDraftController.clearForSubmission(composerDraftKey);
+      steeringSubmitting.current = true;
+      try {
+        await runtimeClient.submitSteering({
+          runId,
+          threadId: runtimeState.activeThreadId,
+          requestId: id,
+          text: composerValue,
+          attachments: composerAttachments.map(toRunInputAttachment),
+        });
+        steeringRequest.current = undefined;
+      } catch (error) {
+        restore(composerDraft);
+        setNotice(error instanceof Error ? error.message : "插话发送失败");
+      } finally {
+        steeringSubmitting.current = false;
+      }
+      return;
+    }
     if (isBusy) {
       await handleCancel();
       requestComposerFocus();
@@ -1994,7 +2064,7 @@ export function App() {
                                 }
                                 onShowFull={handleShowExpandedFileComposerFull}
                                 onStop={() => {
-                                  void handleComposerSubmit();
+                                  void handleCancel();
                                 }}
                               >
                                 <ComposerSurface
@@ -2003,6 +2073,8 @@ export function App() {
                                   input={composerInput}
                                   lifecycle={composerLifecycle}
                                   editing={Boolean(editingPrompt)}
+                                  steering={canSteer}
+                                  onStop={() => void handleCancel()}
                                   onSubmit={handleComposerSubmit}
                                   metaItems={dockComposerMetaItems}
                                 />
@@ -2155,6 +2227,9 @@ export function App() {
         open={modelSettingsOpen}
         runtimeClient={runtimeClient}
         currentProjectId={activeThreadProjectId ?? selectedProjectId}
+        steeringEnabled={steeringEnabled}
+        steeringSaving={steeringSaving}
+        onSteeringEnabledChange={changeSteeringEnabled}
         theme={appearanceTheme}
         themePreference={appearanceThemePreference}
         themeSaving={appearanceSaving}

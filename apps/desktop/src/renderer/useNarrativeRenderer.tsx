@@ -6,11 +6,13 @@ import {
   AwakenReconnectStatus as ReconnectStatus,
   AwakenSubagentGroup as SubagentGroup,
   AwakenToolTraceLine as ToolTraceLine,
+  AwakenUserPromptBlock as UserPromptBlock,
   type AwakenMediaMetadata,
   type PlatformKind,
   type ToolTraceAction,
   type ToolTraceDetailCard,
 } from "@awaken/design-system";
+import { promptAttachmentViews } from "./composerAttachments";
 import { Fragment, useCallback, useMemo, useRef } from "react";
 import type { AwakenTheme } from "../shared/runtime";
 import type { ToolDisplayState } from "../shared/toolStatus";
@@ -519,6 +521,17 @@ export function useNarrativeRenderer(options: Options) {
     animateToolEntry = true,
     disclosureKey = key,
   ) {
+    if (item.kind === "steering") {
+      const status = { pending: "等待应用", applied: "已应用", unapplied: "未应用" }[item.status];
+      return (
+        <div key={key} className="run-steering-message">
+          <UserPromptBlock text={item.text} attachments={promptAttachmentViews(item.attachments)} />
+          <small className="run-steering-status" role="status">
+            {status}{item.reason ? ` · ${item.reason}` : ""}
+          </small>
+        </div>
+      );
+    }
     if (item.kind === "planning" || item.kind === "thinking") {
       const thoughtTrace = (
         <StoredThoughtTrace

@@ -212,6 +212,12 @@ func projectSemanticRecord(record agentcore.SemanticRecord) []Event {
 		memoryEvent.Type = memoryMutationEventType(memoryEvent.Memories)
 		return []Event{memoryEvent}
 	case agentcore.SemanticKindUserMessage:
+		if id := stringFromAny(payload["steering_id"]); id != "" {
+			base.Type = EventAwakenSteering
+			base.MessageID = id
+			base.Status = "applied"
+			return []Event{base}
+		}
 		// User prompts are restored via run metadata; no AG-UI frame required.
 		return nil
 	case agentcore.SemanticKindReasoningSummary:
@@ -404,6 +410,16 @@ func projectSemanticRecord(record agentcore.SemanticRecord) []Event {
 		notice := base
 		eventType := agentcore.AwakenEventType(stringFromAny(payload["event_type"]))
 		switch eventType {
+		case "steering_accepted", "steering_unapplied":
+			notice.Type = EventAwakenSteering
+			notice.MessageID = stringFromAny(payload["steering_id"])
+			notice.Status = "pending"
+			if eventType == "steering_unapplied" {
+				notice.Status = "unapplied"
+			}
+			if encoded, err := json.Marshal(payload["attachments"]); err == nil {
+				_ = json.Unmarshal(encoded, &notice.SteeringAttachments)
+			}
 		case "AgentPhaseChanged":
 			notice.Type = EventAwakenAgentPhase
 			notice.AgentPhase = stringFromAny(payload["phase"])

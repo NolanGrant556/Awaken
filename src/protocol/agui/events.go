@@ -95,6 +95,7 @@ const (
 	// stream. It is never written to SemanticJournal and must not appear
 	// in durable replay. Contract: docs/09_AGUI与A2UI协议/本地接口与事件协议/实现方案.md.
 	EventAwakenProviderReconnect EventType = "AWAKEN_PROVIDER_RECONNECT"
+	EventAwakenSteering          EventType = "AWAKEN_STEERING"
 	EventAwakenUnknown           EventType = "AWAKEN_UNKNOWN_EVENT"
 )
 
@@ -270,6 +271,15 @@ type RawModelUsage struct {
 	PromptCacheMissTokens    *int   `json:"promptCacheMissTokens,omitempty"`
 	CacheReadInputTokens     *int   `json:"cacheReadInputTokens,omitempty"`
 	CacheCreationInputTokens *int   `json:"cacheCreationInputTokens,omitempty"`
+}
+
+type SteeringAttachment struct {
+	DataBase64  string `json:"data_base64,omitempty"`
+	ID          string `json:"id"`
+	Kind        string `json:"kind"`
+	MimeType    string `json:"mime_type"`
+	DisplayName string `json:"display_name,omitempty"`
+	ByteSize    int    `json:"byte_size,omitempty"`
 }
 
 type Event struct {
@@ -528,6 +538,7 @@ type Event struct {
 	ResearchPartialCount  int                  `json:"researchPartialCount,omitempty"`
 	ResearchRejectedCount int                  `json:"researchRejectedCount,omitempty"`
 	Outcome               *RunOutcome          `json:"outcome,omitempty"`
+	SteeringAttachments   []SteeringAttachment `json:"steeringAttachments,omitempty"`
 	RawType               string               `json:"rawType,omitempty"`
 	RawEvent              any                  `json:"rawEvent,omitempty"`
 	// Computer Use review/handoff fields, surfaced on AWAKEN_COMPUTER_* events.

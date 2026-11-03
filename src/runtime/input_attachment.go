@@ -4,6 +4,8 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -384,4 +386,34 @@ func threadLabelForInput(input string, attachments []RunInputAttachment) string 
 
 func isInputRequiredError(err error) bool {
 	return errors.Is(err, ErrInvalidInput)
+}
+
+// ReadSteeringImagePreview loads the managed image for a canonical steering
+// frame. The caller supplies identities from the journal, never a client path.
+func ReadSteeringImagePreview(threadID, attachmentID, mimeType string) string {
+	extension := imageFileExtension(mimeType)
+	if threadID == "" || extension == "" || !strings.HasPrefix(attachmentID, "steering_") {
+		return ""
+	}
+	path := filepath.Join(runInputAttachmentRootDir(), safeTranscriptFileName(threadID),
+		"attachments", safeTranscriptFileName(attachmentID)+"."+extension)
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Size() > maxRunInputAttachmentBytes {
+		return ""
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+	opened, err := file.Stat()
+	if err != nil || !os.SameFile(info, opened) {
+		return ""
+	}
+	data, err := io.ReadAll(io.LimitReader(file, maxRunInputAttachmentBytes+1))
+	if err != nil || len(data) > maxRunInputAttachmentBytes ||
+		!strings.EqualFold(http.DetectContentType(data), strings.TrimSpace(mimeType)) {
+		return ""
+	}
+	return base64.StdEncoding.EncodeToString(data)
 }

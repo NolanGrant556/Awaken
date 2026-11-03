@@ -1,4 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync, renameSync, writeFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { app } from "electron";
 import {
   ipcMain,
   type WebContents
@@ -28,6 +31,8 @@ import {
   type RuntimeThreadWire,
   type SetThreadArchivedResult,
   type StartRunRequest,
+  type SteeringRequest,
+  toRunInputAttachmentWire,
   type ThreadBatchDeleteResult,
   type ThreadDeleteResult,
   type ThreadModelPreferenceRequest
@@ -62,6 +67,40 @@ type Dependencies = {
 };
 
 export function registerRunsIpc(dependencies: Dependencies) {
+  const steeringPreferencePath = join(app.getPath("userData"), "steering-enabled.json");
+  const getSteeringEnabled = (): boolean => {
+    try {
+      return JSON.parse(readFileSync(steeringPreferencePath, "utf8")) !== false;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return true;
+      throw error;
+    }
+  };
+  ipcMain.handle("awaken:get-steering-enabled", getSteeringEnabled);
+  ipcMain.handle("awaken:set-steering-enabled", (_event, enabled: unknown) => {
+    if (typeof enabled !== "boolean") throw new Error("无效的插话设置");
+    const temporaryPath = `${steeringPreferencePath}.${randomUUID()}.tmp`;
+    try {
+      writeFileSync(temporaryPath, JSON.stringify(enabled), { mode: 0o600, flag: "wx" });
+      renameSync(temporaryPath, steeringPreferencePath);
+    } finally {
+      rmSync(temporaryPath, { force: true });
+    }
+  });
+  registerRuntimeRequest("awaken:submit-steering", async (_event, request: SteeringRequest) => {
+    if (!getSteeringEnabled()) throw new Error("运行中插话已关闭");
+    await dependencies.requestRuntime(`/v1/runs/${encodeURIComponent(request.runId)}/steering`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        thread_id: request.threadId,
+        request_id: request.requestId,
+        text: request.text,
+        attachments: request.attachments.map(toRunInputAttachmentWire),
+      }),
+    });
+  });
+
   const startRun = async (request: StartRunRequest) => {
     await dependencies.cancelActiveDreams();
     const body = normalizeStartRunRequest(request);

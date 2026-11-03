@@ -6,6 +6,7 @@ export const AwakenSettingsNavItems: AwakenSettingsNavProps["items"] = [
   { id: "memory", label: "记忆", concept: "settings-memory" },
   { id: "instructions", label: "全局规则", concept: "context-file" },
   { id: "appearance", label: "外观", concept: "settings-appearance" },
+  { id: "conversation", label: "对话", concept: "settings-model" },
   { id: "pets", label: "宠物", concept: "settings-pets" },
   { id: "office", label: "环境管理", concept: "settings-environment" },
   { id: "computer", label: "计算机操作", concept: "computer-use" },

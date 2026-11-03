@@ -1340,6 +1340,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	ctx, cancel := runcontrol.WithCancel(context.Background())
 	session := NewSessionWithFileComments(runID, threadID, trimmed, persistedAttachments, req.ComposerTokens, canonicalFileComments, cancel)
 	session.stopContext = ctx
+	session.steering.desktop = req.Client.EntryPoint == "desktop"
 	session.SetPluginRuntimeLease(pluginGeneration, pluginLeaseRelease)
 	hookSnapshot.AsyncSink = s.asyncHookCompletions
 	hookSnapshot.AsyncLifecycle = session
@@ -3136,7 +3137,14 @@ func (s *RunService) executeWithMediaArtifactReferences(session *Session, execut
 		}
 	}
 
+	session.steering.mu.Lock()
+	session.steering.enabled = session.steering.desktop && agent != nil && agent.GetConfig().ResearchIntent == nil
+	if agent != nil {
+		session.steering.vision = agent.GetConfig().ModelConfig.Capabilities.SupportsVision
+	}
+	session.steering.mu.Unlock()
 	result, err := executor.Run(ctx, input, sessionEventSink{session: session})
+	(sessionEventSink{session: session}).SealSteering(false)
 	// Also cover executors that return before emitting the Agent terminal barrier.
 	session.CloseRootComputer()
 	var cleanupErr error

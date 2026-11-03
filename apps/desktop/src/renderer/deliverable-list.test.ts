@@ -204,8 +204,8 @@ describe("final deliverable list", () => {
 
     expect(html).toContain('role="dialog"');
     expect(html).toContain(">2<!-- --> / <!-- -->15</span>");
-    expect(html).toContain("适应窗口");
-    expect(html).toContain("原始尺寸");
+    expect(html).not.toContain("适应窗口");
+    expect(html).not.toContain("原始尺寸");
     expect(html).toContain("使用本地应用打开");
     expect(html).toContain("在文件资源管理器中显示");
   });

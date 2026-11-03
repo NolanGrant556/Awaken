@@ -462,6 +462,9 @@ export type RuntimeClient = OfficeEnvironmentBridge & {
   revealPath: (target: string) => Promise<{ ok: boolean; message?: string }>;
   revealArtifact: (request: ArtifactOpenRequest) => Promise<ArtifactOpenResult>;
   startRun: (request: StartRunRequest) => Promise<RuntimeRun>;
+  submitSteering?: (request: import("../../shared/runtime").SteeringRequest) => Promise<void>;
+  getSteeringEnabled?: () => Promise<boolean>;
+  setSteeringEnabled?: (enabled: boolean) => Promise<void>;
   cancelRun: (runId: string) => Promise<RuntimeRun>;
   cancelSubagent: (runId: string, taskId: string, reason?: string) => Promise<void>;
   answerUserQuestion: (runId: string, questionId: string, answer: string) => Promise<void>;
@@ -738,6 +741,11 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     revealPath: (target) => bridge.revealPath(target),
     revealArtifact: (request) => bridge.revealArtifact(request),
     startRun: (request) => unwrapDesktopOperation(bridge.startRun(request)),
+    submitSteering: bridge.submitSteering
+      ? (request) => unwrapRuntimeRequest(bridge.submitSteering!(request))
+      : undefined,
+    getSteeringEnabled: bridge.getSteeringEnabled,
+    setSteeringEnabled: bridge.setSteeringEnabled,
     cancelRun: (...args) => unwrapRuntimeRequest(bridge.cancelRun(...args)),
     cancelSubagent: (runId, taskId, reason) => unwrapRuntimeRequest(bridge.cancelSubagent(runId, taskId, reason)),
     answerUserQuestion: (...args) => unwrapRuntimeRequest(bridge.answerUserQuestion(...args)),

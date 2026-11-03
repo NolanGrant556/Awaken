@@ -1,4 +1,6 @@
 import "./AwakenUserPromptBlock.css";
+import { createPortal } from "react-dom";
+import { AwakenMediaPreviewOverlay } from "../AwakenMediaPreviewOverlay";
 import { composerTokenIconConcept } from "../../composerTokenIcon";
 import { AwakenIcon } from "../AwakenIcon";
 import {
@@ -247,6 +249,8 @@ export function AwakenUserPromptBlock({
   timestampLabel,
   timestampDateTime,
 }: AwakenUserPromptBlockProps) {
+  const [previewId, setPreviewId] = useState<string>();
+  const preview = attachments.find((attachment) => attachment.id === previewId && attachment.src);
   const [uncontrolledExpanded, setUncontrolledExpanded] = useState(false);
   const [hasVisualOverflow, setHasVisualOverflow] = useState(false);
   const blockRef = useRef<HTMLElement | null>(null);
@@ -446,9 +450,20 @@ export function AwakenUserPromptBlock({
       .filter(Boolean)
       .join("\n");
 
+    const canPreview = kind === "image" && Boolean(attachment.src);
+    const Attachment = canPreview ? "button" : "div";
     return (
-      <div
+      <Attachment
         key={attachment.id}
+        {...(canPreview ? {
+          type: "button" as const,
+          "aria-label": `预览图片：${label}`,
+          onKeyDown: (event: KeyboardEvent) => event.stopPropagation(),
+          onClick: (event: MouseEvent) => {
+            event.stopPropagation();
+            setPreviewId(attachment.id);
+          },
+        } : {})}
         className={`execution-prompt-bubble-attachment execution-prompt-bubble-attachment-${kind}`}
         title={title || undefined}
       >
@@ -471,7 +486,7 @@ export function AwakenUserPromptBlock({
             ) : null}
           </div>
         )}
-      </div>
+      </Attachment>
     );
   }
 
@@ -704,6 +719,17 @@ export function AwakenUserPromptBlock({
           />
         </div>
       ) : null}
+      {preview && createPortal(
+        <div className="execution-prompt-image-preview">
+          <AwakenMediaPreviewOverlay
+            item={{ id: preview.id, kind: "image", title: preview.label ?? preview.alt, src: preview.src, alt: preview.alt }}
+            position={0}
+            count={1}
+            onClose={() => setPreviewId(undefined)}
+          />
+        </div>,
+        document.body,
+      )}
     </article>
   );
 }

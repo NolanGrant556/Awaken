@@ -2,7 +2,7 @@ import { runtimeDownloadProgress } from "../../shared/office-environment";
 import { stopMessage, terminalMessage } from "../runtime/stop-display";
 import { compactEventDetails } from "../runtime/compact-event";
 import type { AguiEvent } from "../../shared/agui";
-import type { FileLineComment, RunInputAttachment } from "../../shared/runtime";
+import { normalizeRunInputAttachment, type FileLineComment, type RunInputAttachment } from "../../shared/runtime";
 import {
   toolDisplayStateFromStatus,
   type ToolDisplayState,
@@ -147,11 +147,37 @@ export function projectAguiEventToNarrative(
   }
 
   const seen = key ? markSeen(state, key) : state;
-  const base = eventResumesAfterProviderReconnect(event)
+  let base = eventResumesAfterProviderReconnect(event)
     ? clearProviderReconnectItems(seen)
     : seen;
 
+  if (event.type === "RUN_FINISHED" || event.type === "RUN_ERROR" ||
+      (event.type === "RUN_STATUS_CHANGED" && ["finished", "cancelled", "error"].includes(event.status ?? ""))) {
+    base = {
+      ...base,
+      committedItems: base.committedItems.map((item) =>
+        item.kind === "steering" && item.runId === event.runId && item.status === "pending"
+          ? { ...item, status: "unapplied" }
+          : item
+      ),
+    };
+  }
   switch (event.type) {
+    case "AWAKEN_STEERING": {
+      if (!event.messageId) return base;
+      const id = `steering:${event.messageId}`;
+      const existing = base.committedItems.find((item) => item.id === id);
+      const status = event.status === "applied" || event.status === "unapplied" ? event.status : "pending";
+      if (existing?.kind === "steering") {
+        return { ...base, committedItems: upsertCommitted(base.committedItems, {
+          ...existing, status, reason: status === "unapplied" ? event.message : undefined,
+        }) };
+      }
+      return { ...base, committedItems: upsertCommitted(base.committedItems, {
+        kind: "steering", id, runId: event.runId, text: event.message ?? "",
+        attachments: (event.steeringAttachments ?? []).map(normalizeRunInputAttachment), status,
+      }) };
+    }
     case "RUN_STARTED":
       return commitActive(base, "done");
     case "AWAKEN_TURN_STARTED":
@@ -466,6 +492,7 @@ export function projectAguiEventToNarrative(
 
 const continuationPlanningLabels: Record<string, string> = {
   tool_result_continuation: "正在分析工具结果",
+  steering_continuation: "正在处理插话",
   reactive_compact_retry: "上下文压缩中",
   max_output_continuation: "正在继续生成",
   xml_fallback_continuation: "正在继续处理工具结果",
@@ -1530,6 +1557,7 @@ function applyStatus(
       return status === "done" || status === "error"
         ? { ...item, status }
         : item;
+    case "steering":
     case "scheduledNotice":
     case "hint":
     case "providerReconnect":

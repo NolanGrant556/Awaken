@@ -63,6 +63,7 @@ export const AWAKEN_ICON_CONCEPTS = {
 
   // 设置页导航
   "settings-model": "chip",
+  "settings-conversation": "chat-bubble",
   "settings-memory": "brain",
   "settings-appearance": "color-mode",
   "settings-pets": "paw",

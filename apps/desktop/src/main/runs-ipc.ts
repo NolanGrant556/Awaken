@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   ipcMain,
   type WebContents
@@ -60,7 +61,36 @@ type Dependencies = {
   readonly toRendererSupervisorStatus: (info: SupervisorStatusInfo) => { status: SupervisorStatusInfo["status"]; };
 };
 
-export function registerRunsIpc(dependencies: Dependencies): void {
+export function registerRunsIpc(dependencies: Dependencies) {
+  const startRun = async (request: StartRunRequest) => {
+    await dependencies.cancelActiveDreams();
+    const body = normalizeStartRunRequest(request);
+    const selectedProfile = await dependencies.modelProfileStore.resolveRunBundle(
+      request.modelProfileId,
+      request.reasoningEffort,
+    );
+    if (!selectedProfile) {
+      throw new Error("请先在设置 > 模型中配置可用模型。");
+    }
+    body.model_profile = normalizeModelProfileRunConfig(selectedProfile);
+    // Renderer selection hints terminate at Main. Core receives only the
+    // fully resolved, credential-bearing model_profile assembled here.
+    body.model_profile_id = undefined;
+    body.reasoning_effort = undefined;
+    await dependencies.prepareNetworkRoute("model-run");
+    const run = await dependencies.requestRuntime<RuntimeRunWire>("/v1/runs", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+
+    const normalizedRun = normalizeRuntimeRun(run);
+    dependencies.ensureComputerRunMonitor(normalizedRun.runId);
+    return normalizedRun;
+  };
+
   registerRuntimeRequest("awaken:subscribe-thread-activity", async (event, payload: { threadId: string; subscriptionId: string; afterCursor?: number }) => {
     if (!dependencies.subscribeToThreadActivity) throw new Error("任务活动连接不可用");
     await dependencies.subscribeToThreadActivity(event.sender, payload.threadId, payload.subscriptionId, payload.afterCursor);
@@ -392,36 +422,9 @@ export function registerRunsIpc(dependencies: Dependencies): void {
       ),
   );
 
-  ipcMain.handle("awaken:start-run", async (_event, request: StartRunRequest) => {
-    return runDesktopOperation(async () => {
-      await dependencies.cancelActiveDreams();
-      const body = normalizeStartRunRequest(request);
-      const selectedProfile = await dependencies.modelProfileStore.resolveRunBundle(
-        request.modelProfileId,
-        request.reasoningEffort,
-      );
-      if (!selectedProfile) {
-        throw new Error("请先在设置 > 模型中配置可用模型。");
-      }
-      body.model_profile = normalizeModelProfileRunConfig(selectedProfile);
-      // Renderer selection hints terminate at Main. Core receives only the
-      // fully resolved, credential-bearing model_profile assembled here.
-      body.model_profile_id = undefined;
-      body.reasoning_effort = undefined;
-      await dependencies.prepareNetworkRoute("model-run");
-      const run = await dependencies.requestRuntime<RuntimeRunWire>("/v1/runs", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(body),
-      });
-
-      const normalizedRun = normalizeRuntimeRun(run);
-      dependencies.ensureComputerRunMonitor(normalizedRun.runId);
-      return normalizedRun;
-    });
-  });
+  ipcMain.handle("awaken:start-run", async (_event, request: StartRunRequest) =>
+    runDesktopOperation(() => startRun(request)),
+  );
 
   registerRuntimeRequest("awaken:cancel-run", async (_event, runId: string) => {
     const run = await dependencies.requestRuntime(`/v1/runs/${runId}/cancel`, {
@@ -547,4 +550,21 @@ export function registerRunsIpc(dependencies: Dependencies): void {
   ipcMain.handle("awaken:runtime-supervisor-status", async () => {
     return dependencies.toRendererSupervisorStatus(dependencies.supervisor.getStatus() ?? { status: "stopped" });
   });
+
+  return async (threadId: string, prompt: string) => {
+    const { thread: threadWire } = await dependencies.requestRuntime<RuntimeThreadTranscriptWire>(
+      `/v1/threads/${encodeURIComponent(threadId)}/transcript`, { method: "GET" },
+    );
+    const thread = normalizeRuntimeThread(threadWire);
+    if (thread.archived || thread.activeRunId) throw new Error("会话不可发送，请稍后重试");
+    const profileId = thread.selectedModelProfileId;
+    await startRun({
+      threadId,
+      input: prompt,
+      workspace: { ...thread.workspace, projectId: thread.projectId },
+      modelProfileId: profileId,
+      reasoningEffort: profileId ? thread.reasoningEffortByProfile?.[profileId] : undefined,
+      client: { sessionId: randomUUID(), requestId: randomUUID(), entrypoint: "desktop" },
+    });
+  };
 }

@@ -88,6 +88,7 @@ export type PetWindowManagerDependencies = {
   petStore: PetStore;
   focusMainWindow: () => void;
   activateThread: (threadId: string) => void;
+  sendFollowUp?: (threadId: string, prompt: string) => Promise<void>;
   getRuntimeBaseUrl: () => string | null;
 };
 
@@ -119,6 +120,7 @@ export class PetWindowManager {
   private window: BrowserWindow | null = null;
   private petStore: PetStore;
   private focusMainWindow: () => void;
+  private sendFollowUp?: PetWindowManagerDependencies["sendFollowUp"];
   private activateThread: (threadId: string) => void;
   private getRuntimeBaseUrl: () => string | null;
   private latestSnapshot: PetActivitySnapshot = { sessions: [], emittedAtMs: 0 };
@@ -142,6 +144,7 @@ export class PetWindowManager {
     this.petStore = deps.petStore;
     this.focusMainWindow = deps.focusMainWindow;
     this.activateThread = deps.activateThread;
+    this.sendFollowUp = deps.sendFollowUp;
     this.getRuntimeBaseUrl = deps.getRuntimeBaseUrl;
   }
 
@@ -541,8 +544,21 @@ export class PetWindowManager {
 
     ipcMain.handle(
       PET_IPC_CHANNELS.petPerformNotificationAction,
-      async (_event, request: PetNotificationActionRequest) => {
+      async (event, request: PetNotificationActionRequest) => {
+        if (event.sender !== this.window?.webContents || !request) throw new Error("无效的宠物操作");
+        if (request.type === "follow-up") {
+          const prompt = typeof request.prompt === "string" ? request.prompt.trim() : "";
+          const session = this.latestSnapshot.sessions.find((item) => item.threadId === request.threadId);
+          if (!session || !prompt || prompt.length > 16000 || !this.sendFollowUp) {
+            throw new Error("无法发送跟进消息");
+          }
+          await this.sendFollowUp(request.threadId, prompt);
+          return;
+        }
         if (request.type === "stop-run") {
+          if (!request.runId || !this.latestSnapshot.sessions.some(
+            (item) => item.runId === request.runId && item.status === "running",
+          )) throw new Error("该任务已不在运行");
           await this.cancelRun(request.runId);
           return;
         }
@@ -557,7 +573,7 @@ export class PetWindowManager {
       async (_event, input: { notificationId: string; turnKey: string | null }) => {
         const key = input.turnKey
           ? `${input.notificationId}:${input.turnKey}`
-          : input.notificationId;
+          : `${input.notificationId}:current`;
         await this.petStore.recordDismissedNotificationKeys([key]);
       },
     );

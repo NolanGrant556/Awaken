@@ -14,7 +14,6 @@ import {
   buildNotifications,
   notificationKeyForSession,
   type PetNotification,
-  type PetNotificationAction,
 } from "../pets/pet-notifications";
 import {
   resolveOverlayAnimationState,
@@ -70,6 +69,13 @@ export function PetOverlayApp() {
   const [mascotWidth, setMascotWidth] = useState(PET_MASCOT_DEFAULT_WIDTH_PX);
   const [dragDirection, setDragDirection] = useState<PetDragDirection>("right");
   const [bubbleExpanded, setBubbleExpanded] = useState(false);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [queued, setQueued] = useState<Record<string, string>>({});
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [sending, setSending] = useState<Set<string>>(new Set());
+  const inFlight = useRef(new Set<string>());
   const [dismissedKeys, setDismissedKeys] = useState<Set<string>>(new Set());
   const [locallyHiddenKeys, setLocallyHiddenKeys] = useState<Set<string>>(new Set());
   const [firstAwakeUntil, setFirstAwakeUntil] = useState<number | null>(null);
@@ -77,7 +83,6 @@ export function PetOverlayApp() {
   const dragStartRef = useRef<{ x: number; y: number; moved: boolean } | null>(null);
   const resizeStartRef = useRef<{ x: number; initialWidth: number } | null>(null);
   const hitAreaRef = useRef<HTMLDivElement | null>(null);
-  const activeNotificationKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -113,10 +118,8 @@ export function PetOverlayApp() {
     });
     const unsubscribeMainFocus = bridge.onMainWindowFocused(() => {
       setBubbleExpanded(false);
-      const key = activeNotificationKeyRef.current;
-      if (key) {
-        setLocallyHiddenKeys((prev) => new Set([...prev, key]));
-      }
+      setSelected(null);
+      setEditing(null);
     });
 
     return () => {
@@ -138,9 +141,9 @@ export function PetOverlayApp() {
 
   useEffect(() => {
     const bridge = window.awakenPetOverlay;
-    const isInteractive = hover || dragging || resizeMode || bubbleExpanded;
+    const isInteractive = hover || dragging || resizeMode || bubbleExpanded || editing !== null;
     bridge.setPointerInteractive(isInteractive);
-  }, [hover, dragging, resizeMode, bubbleExpanded]);
+  }, [hover, dragging, resizeMode, bubbleExpanded, editing]);
 
   useEffect(() => {
     const element = hitAreaRef.current;
@@ -162,16 +165,19 @@ export function PetOverlayApp() {
   }, [bootstrap?.petId]);
 
   const visibleDismissedKeys = new Set([...dismissedKeys, ...locallyHiddenKeys]);
-  const notifications = buildNotifications(snapshot, visibleDismissedKeys, notificationClockMs);
+  const retainedThreadIds = new Set([
+    ...(editing ? [editing] : []),
+    ...Object.keys(queued),
+  ]);
+  const notifications = buildNotifications(snapshot, visibleDismissedKeys, notificationClockMs, retainedThreadIds);
   const activeNotification = notifications[0] ?? null;
   const businessState: PetAnimationState = activeNotification?.status ?? "idle";
 
   useEffect(() => {
-    activeNotificationKeyRef.current = activeNotification?.key ?? null;
     if (!activeNotification) {
       setBubbleExpanded(false);
     }
-  }, [activeNotification?.key, activeNotification]);
+  }, [activeNotification]);
 
   useEffect(() => {
     const nextExpiry = notifications.reduce<number | null>(
@@ -181,7 +187,7 @@ export function PetOverlayApp() {
           : earliest,
       null,
     );
-    if (nextExpiry === null) return undefined;
+    if (nextExpiry === null || !Number.isFinite(nextExpiry)) return undefined;
     const timer = window.setTimeout(
       () => setNotificationClockMs(Date.now()),
       Math.max(0, nextExpiry - Date.now() + 1),
@@ -287,16 +293,6 @@ export function PetOverlayApp() {
     window.awakenPetOverlay.finishResize(nextWidth);
   }, []);
 
-  async function handleNotificationActivate(notification: PetNotification) {
-    setBubbleExpanded(false);
-    setLocallyHiddenKeys((prev) => new Set([...prev, notification.key]));
-    await window.awakenPetOverlay.activateNotification(notification.id);
-  }
-
-  async function handleNotificationAction(action: PetNotificationAction) {
-    await window.awakenPetOverlay.performNotificationAction(action.request);
-  }
-
   async function handleDismissNotification(notification: PetNotification, event: React.MouseEvent) {
     event.stopPropagation();
     setDismissedKeys((prev) => new Set([...prev, notification.key]));
@@ -307,9 +303,27 @@ export function PetOverlayApp() {
     });
   }
 
-  const notificationBody =
-    activeNotification?.subtitle ??
-    (activeNotification ? (FALLBACK_NOTIFICATION_BODY[activeNotification.status] ?? "") : "");
+  useEffect(() => {
+    for (const [threadId, prompt] of Object.entries(queued)) {
+      const session = snapshot.sessions.find((item) => item.threadId === threadId);
+      if (!session || session.status === "running" || session.status === "waiting" ||
+          inFlight.current.has(threadId)) continue;
+      inFlight.current.add(threadId);
+      setSending((prev) => new Set([...prev, threadId]));
+      void window.awakenPetOverlay.performNotificationAction({ type: "follow-up", threadId, prompt })
+        .then(() => setDrafts((prev) => ({ ...prev, [threadId]: "" })))
+        .catch(() => setErrors((prev) => ({ ...prev, [threadId]: "发送失败，请按回车重试" })))
+        .finally(() => {
+          setQueued((prev) => {
+            const next = { ...prev };
+            delete next[threadId];
+            return next;
+          });
+          setSending((prev) => new Set([...prev].filter((id) => id !== threadId)));
+          inFlight.current.delete(threadId);
+        });
+    }
+  }, [queued, snapshot]);
 
   if (!bootstrap || !bootstrap.petId || !bootstrap.spritesheetUrl) {
     return null;
@@ -323,78 +337,112 @@ export function PetOverlayApp() {
         onPointerEnter={() => setHover(true)}
         onPointerLeave={() => setHover(false)}
       >
-        {activeNotification ? (
+        {activeNotification && (
           <div
-            className={`pet-work-bubble${
-              bubbleExpanded ? " pet-work-bubble-expanded" : ""
-            } pet-work-bubble-level-${activeNotification.level}`}
-            role="status"
-            aria-live="polite"
+            className={`pet-bubble-list${!bubbleExpanded && notifications.length > 1 ? " pet-bubble-stack" : ""}`}
+            style={{ maxHeight: Math.min(248, 363 - Math.ceil(mascotWidth * 208 / 192)) }}
           >
-            <button
-              type="button"
-              className="pet-bubble-icon pet-bubble-close"
-              aria-label="Close pet message"
-              onClick={(event) => void handleDismissNotification(activeNotification, event)}
-            >
-              x
-            </button>
-            <button
-              type="button"
-              className="pet-bubble-icon pet-bubble-expand"
-              aria-label={bubbleExpanded ? "Collapse pet message" : "Expand pet message"}
-              aria-expanded={bubbleExpanded}
-              onClick={(event) => {
-                event.stopPropagation();
-                setBubbleExpanded((value) => !value);
-              }}
-            >
-              {bubbleExpanded ? "\u2303" : "\u2304"}
-            </button>
-            <div
-              className="pet-work-bubble-content"
-              onClick={() => void handleNotificationActivate(activeNotification)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  void handleNotificationActivate(activeNotification);
-                }
-              }}
-              role="button"
-              tabIndex={0}
-            >
-              <div className="pet-work-bubble-title">{activeNotification.title}</div>
-              <div className="pet-work-bubble-body">{notificationBody}</div>
-              {bubbleExpanded && activeNotification.actions.length > 0 ? (
-                <div className="pet-work-bubble-actions">
-                  {activeNotification.actions.map((action) => (
+            {(bubbleExpanded ? notifications : [activeNotification]).map((item) => {
+              const id = item.threadId ?? item.id;
+              const showActions = selected === id;
+              const stop = item.actions[0];
+              return (
+                <div key={item.id} className="pet-work-bubble">
+                  <div className="pet-bubble-row">
                     <button
-                      key={action.id}
                       type="button"
-                      className="pet-work-bubble-action"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        void handleNotificationAction(action);
+                      className="pet-work-bubble-content"
+                      aria-expanded={bubbleExpanded || showActions}
+                      onClick={() => {
+                        if (!bubbleExpanded && notifications.length > 1) {
+                          setBubbleExpanded(true);
+                          return;
+                        }
+                        setSelected(showActions ? null : id);
+                        if (editing !== id || showActions) setEditing(null);
                       }}
                     >
-                      {action.label}
+                      <span className="pet-work-bubble-title">
+                        {item.status === "review" && <svg className="pet-bubble-done" viewBox="0 0 16 16" role="img" aria-label="已完成">
+                          <circle cx="8" cy="8" r="8" fill="#079b46" />
+                          <path d="m4.75 8 2.15 2.15 4.35-4.3" fill="none" stroke="white"
+                            strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>}
+                        {item.title}
+                      </span>
+                      <span className="pet-work-bubble-body">
+                        {queued[id] ? (sending.has(id) ? "正在发送…" : "跟进消息将在本轮结束后发送") :
+                          item.subtitle ?? FALLBACK_NOTIFICATION_BODY[item.status]}
+                      </span>
                     </button>
-                  ))}
+                    {showActions && (
+                      <>
+                        {item.threadId && (
+                          <button type="button" className="pet-round-action" aria-label="输入跟进消息"
+                            aria-pressed={editing === id}
+                            onClick={() => setEditing(editing === id ? null : id)}>
+                            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor"
+                              strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M20 5v5a4 4 0 0 1-4 4H4m5-5-5 5 5 5" />
+                            </svg>
+                          </button>
+                        )}
+                        {stop && (
+                          <button type="button" className="pet-round-action" aria-label="终止当前运行"
+                            onClick={() => {
+                              setErrors((prev) => ({ ...prev, [id]: "" }));
+                              void window.awakenPetOverlay.performNotificationAction(stop.request)
+                                .catch(() => setErrors((prev) => ({ ...prev, [id]: "终止失败，请重试" })));
+                            }}>
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                              <rect x="5" y="5" width="14" height="14" rx="2.5" fill="currentColor" />
+                            </svg>
+                          </button>
+                        )}
+                        <button type="button" className="pet-bubble-dismiss" aria-label="关闭气泡"
+                          onClick={(event) => void handleDismissNotification(item, event)}>×</button>
+                      </>
+                    )}
+                  </div>
+                  {editing === id && (
+                    <input
+                      autoFocus
+                      aria-label="继续跟进"
+                      placeholder="继续跟进"
+                      maxLength={16000}
+                      className="pet-bubble-input"
+                      value={drafts[id] ?? ""}
+                      readOnly={Boolean(queued[id])}
+                      onChange={(event) => setDrafts({ ...drafts, [id]: event.target.value })}
+                      onKeyDown={(event) => {
+                        if (event.key !== "Enter" || event.nativeEvent.isComposing || event.keyCode === 229) return;
+                        event.preventDefault();
+                        const prompt = drafts[id]?.trim();
+                        if (!item.threadId || !prompt || queued[id]) return;
+                        setErrors((prev) => ({ ...prev, [id]: "" }));
+                        setQueued((prev) => ({ ...prev, [id]: prompt }));
+                      }}
+                    />
+                  )}
+                  {showActions && item.status === "waiting" && (
+                    <button type="button" className="pet-bubble-collapse" onClick={() => {
+                      setLocallyHiddenKeys((prev) => new Set([...prev, item.key]));
+                      void window.awakenPetOverlay.activateNotification(item.id);
+                    }}>在会话中回答</button>
+                  )}
+                  {errors[id] && <div className="pet-bubble-error" role="alert">{errors[id]}</div>}
                 </div>
-              ) : null}
-            </div>
-            <button
-              type="button"
-              className="pet-bubble-reply"
-              onClick={(event) => {
-                event.stopPropagation();
-                void handleNotificationActivate(activeNotification);
-              }}
-            >
-              {"\u56de\u590d"}
-            </button>
+              );
+            })}
+            {bubbleExpanded && notifications.length > 1 && (
+              <button type="button" className="pet-bubble-collapse" onClick={() => {
+                setBubbleExpanded(false);
+                setSelected(null);
+                setEditing(null);
+              }}>收起</button>
+            )}
           </div>
-        ) : null}
+        )}
 
         <div className="pet-mascot-wrapper">
           <div

@@ -85,6 +85,7 @@ export function buildNotifications(
   snapshot: PetActivitySnapshot,
   dismissedKeys: Set<DismissedNotificationKey>,
   nowMs: number = Date.now(),
+  retainedThreadIds: ReadonlySet<string> = new Set(),
 ): PetNotification[] {
   const notifications: PetNotification[] = [];
 
@@ -94,7 +95,9 @@ export function buildNotifications(
     if (dismissedKeys.has(key)) continue;
 
     const ttl = ttlForStatus(session.status);
-    const expiredAtMs = session.updatedAtMs + ttl;
+    const expiredAtMs = session.threadId && retainedThreadIds.has(session.threadId)
+      ? Infinity
+      : session.updatedAtMs + ttl;
     if (nowMs > expiredAtMs) continue;
 
     notifications.push({

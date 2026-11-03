@@ -2368,7 +2368,9 @@ app.whenReady().then(async () => {
       conflicts: builtinPetReport.conflicts,
     });
   }
+  let sendPetFollowUp: ReturnType<typeof registerRunsIpc>;
   petWindowManager = new PetWindowManager({
+    sendFollowUp: (threadId, prompt) => sendPetFollowUp(threadId, prompt),
     petStore,
     focusMainWindow: () => {
       focusOrCreateMainWindow();
@@ -2575,7 +2577,7 @@ app.whenReady().then(async () => {
       }
     }
   });
-  registerRunsIpc({
+  sendPetFollowUp = registerRunsIpc({
     requestRuntimeOK,
     requestRuntime,
     modelProfileStore,

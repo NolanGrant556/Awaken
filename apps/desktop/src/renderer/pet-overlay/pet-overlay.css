@@ -68,152 +68,134 @@ body,
   pointer-events: auto;
 }
 
-.pet-work-bubble {
+.pet-bubble-list {
   position: relative;
-  width: 286px;
-  min-height: 64px;
-  padding: 9px 30px 18px 30px;
-  border: 1px solid rgba(17, 24, 39, 0.11);
-  border-radius: 16px;
-  color: var(--aw-text-primary, #1c1917);
-  background: rgba(255, 255, 255, 0.94);
-  box-shadow: none;
-  backdrop-filter: blur(10px);
-  pointer-events: auto;
+  width: 100%;
+  display: grid;
+  gap: 8px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  padding: 4px 4px 8px;
 }
 
-.pet-work-bubble-expanded {
-  min-height: 96px;
+.pet-bubble-stack {
+  padding-bottom: 21px;
 }
 
-.pet-work-bubble::after {
+.pet-bubble-stack::before {
   content: "";
   position: absolute;
-  right: 44px;
-  bottom: -6px;
-  width: 12px;
-  height: 12px;
-  border-right: 1px solid rgba(17, 24, 39, 0.1);
-  border-bottom: 1px solid rgba(17, 24, 39, 0.1);
-  background: rgba(255, 255, 255, 0.94);
-  transform: rotate(45deg);
+  inset: 15px 15px 8px;
+  border-radius: 30px;
+  background: #e6e6e8;
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  box-shadow: 0 5px 9px rgba(0, 0, 0, 0.13);
+  pointer-events: none;
 }
 
-.pet-work-bubble-level-loading {
-  border-color: rgba(59, 130, 246, 0.24);
+.pet-work-bubble {
+  position: relative;
+  min-width: 0;
+  padding: 11px 13px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 27px;
+  color: #18181b;
+  background: rgba(252, 252, 252, 0.97);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.12);
 }
 
-.pet-work-bubble-level-warning {
-  border-color: rgba(245, 158, 11, 0.28);
-}
-
-.pet-work-bubble-level-danger {
-  border-color: rgba(239, 68, 68, 0.24);
-}
-
-.pet-work-bubble-level-success {
-  border-color: rgba(34, 197, 94, 0.24);
+.pet-bubble-row {
+  display: flex;
+  gap: 7px;
+  align-items: center;
 }
 
 .pet-work-bubble-content {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  color: inherit;
+  text-align: left;
+  border: 0;
+  background: transparent;
   cursor: pointer;
-  outline: none;
 }
 
-.pet-work-bubble-content:focus-visible,
-.pet-bubble-icon:focus-visible,
-.pet-bubble-reply:focus-visible,
-.pet-work-bubble-action:focus-visible {
-  outline: 2px solid rgba(37, 99, 235, 0.5);
-  outline-offset: 2px;
-}
-
-.pet-work-bubble-title {
-  max-width: 205px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 13px;
-  line-height: 17px;
-  font-weight: 700;
-}
-
+.pet-work-bubble-title,
 .pet-work-bubble-body {
-  display: -webkit-box;
-  max-width: 216px;
-  margin-top: 2px;
   overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  font-size: 12px;
-  line-height: 16px;
-  color: var(--aw-text-secondary, #44403c);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font: 13px/18px system-ui, sans-serif;
 }
 
-.pet-work-bubble-expanded .pet-work-bubble-body {
-  max-height: 72px;
-  -webkit-line-clamp: 4;
+.pet-work-bubble-title { font-weight: 700; }
+.pet-work-bubble-body { color: #626267; }
+
+.pet-bubble-done {
+  width: 14px;
+  height: 14px;
+  margin-right: 5px;
+  vertical-align: -2px;
 }
 
-.pet-bubble-icon {
-  position: absolute;
+.pet-round-action,
+.pet-bubble-dismiss,
+.pet-bubble-collapse {
+  border: 0;
+  border-radius: 999px;
+  background: #eaeaea;
+  color: #353539;
+  cursor: pointer;
+}
+
+.pet-round-action {
   display: grid;
   place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  flex: none;
+  color: #6b6b70;
+}
+
+.pet-round-action svg {
+  width: 18px;
+  height: 18px;
+}
+
+.pet-round-action:hover,
+.pet-round-action[aria-pressed="true"] {
+  background: #d8d8da;
+  color: #353539;
+}
+
+.pet-bubble-dismiss {
+  position: absolute;
+  top: -4px;
+  left: -3px;
   width: 18px;
   height: 18px;
   padding: 0;
-  border: 1px solid rgba(17, 24, 39, 0.08);
-  border-radius: 50%;
-  color: var(--aw-text-secondary, #44403c);
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: none;
-  cursor: pointer;
-  font-size: 12px;
-  line-height: 1;
 }
 
-.pet-bubble-close {
-  top: -9px;
-  left: -9px;
+.pet-bubble-collapse { justify-self: center; padding: 3px 10px; }
+
+.pet-bubble-input {
+  width: 100%;
+  height: 31px;
+  margin-top: 9px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: #e8e8e8;
+  color: #18181b;
+  user-select: text;
 }
 
-.pet-bubble-expand {
-  top: 6px;
-  right: 7px;
-  border: none;
-  background: transparent;
-  box-shadow: none;
-  color: var(--aw-text-tertiary, #78716c);
-  font-size: 12px;
-}
-
-.pet-bubble-reply {
-  position: absolute;
-  right: 12px;
-  bottom: 8px;
-  padding: 1px 6px;
-  border: 1px solid rgba(17, 24, 39, 0.1);
-  border-radius: 7px;
-  color: var(--aw-text-primary, #1c1917);
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: none;
-  cursor: pointer;
-  font-size: 11px;
-  line-height: 15px;
-}
-
-.pet-work-bubble-actions {
-  display: flex;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.pet-work-bubble-action {
-  padding: 3px 7px;
-  border: 1px solid rgba(17, 24, 39, 0.1);
-  border-radius: 7px;
-  background: rgba(244, 244, 245, 0.9);
-  cursor: pointer;
-  font-size: 12px;
-  line-height: 16px;
+.pet-bubble-error {
+  padding-top: 5px;
+  color: #a82020;
+  font: 12px system-ui, sans-serif;
 }

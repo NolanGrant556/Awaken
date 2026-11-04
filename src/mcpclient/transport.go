@@ -268,6 +268,10 @@ func isAuthError(err error) bool {
 	if IsNeedsAuth(err) {
 		return true
 	}
+	var networkError *net.OpError
+	if errors.As(err, &networkError) {
+		return false
+	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "401") ||
 		strings.Contains(msg, "unauthorized") ||

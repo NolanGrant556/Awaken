@@ -8,7 +8,16 @@ const files = [];
 const features = [];
 const expected = ['实现方案.md', '需求文档.md'].sort();
 const docs = resolve(root, 'docs');
-const blocks = readdirSync(docs, { withFileTypes: true });
+
+function readDocumentEntries(path) {
+  return readdirSync(path, { withFileTypes: true }).filter((entry) => {
+    if (entry.isFile() && entry.name === '.DS_Store') return false;
+    if (entry.isDirectory() && entry.name === '.obsidian') return false;
+    return true;
+  });
+}
+
+const blocks = readDocumentEntries(docs);
 
 for (const block of blocks) {
   const blockPath = resolve(docs, block.name);
@@ -16,7 +25,7 @@ for (const block of blocks) {
     errors.push(`docs 根目录不能放文件：${block.name}`);
     continue;
   }
-  const children = readdirSync(blockPath, { withFileTypes: true });
+  const children = readDocumentEntries(blockPath);
   if (!children.length) errors.push(`空板块：${block.name}`);
   for (const feature of children) {
     const featurePath = resolve(blockPath, feature.name);
@@ -25,7 +34,7 @@ for (const block of blocks) {
       continue;
     }
     features.push(featurePath);
-    const entries = readdirSync(featurePath, { withFileTypes: true });
+    const entries = readDocumentEntries(featurePath);
     if (entries.some((entry) => !entry.isFile()) ||
         JSON.stringify(entries.map((entry) => entry.name).sort()) !== JSON.stringify(expected)) {
       errors.push(`功能目录必须只有需求文档.md 和实现方案.md：${relative(root, featurePath)}`);

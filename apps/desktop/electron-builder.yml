@@ -14,7 +14,7 @@ afterAllArtifactBuild: ../../scripts/release/notarize-macos-artifacts.mjs
 publish:
   provider: github
   owner: NolanGrant556
-  repo: Awaken-Releases
+  repo: Awaken
   releaseType: release
 directories:
   output: dist-electron

@@ -15,7 +15,7 @@ on:
         required: true
         type: string
       publish:
-        description: "Publish to public Awaken-Releases (separate delivery action)"
+        description: "Publish a deps-* prerelease on this repository"
         required: true
         default: false
         type: boolean
@@ -37,6 +37,9 @@ concurrency:
 jobs:
   assemble:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -75,12 +78,12 @@ jobs:
       - name: Publish immutable dependency prerelease
         if: inputs.publish
         env:
-          GH_TOKEN: ${{ secrets.AWAKEN_RELEASES_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           RESOURCE_TAG: ${{ inputs.resource_tag }}
           ASSET_DIRECTORY: ${{ runner.temp }}/managedenv-assets
         run: |
           set -euo pipefail
-          REPOSITORY=NolanGrant556/Awaken-Releases
+          REPOSITORY=NolanGrant556/Awaken
           if gh release view "$RESOURCE_TAG" --repo "$REPOSITORY" >/dev/null 2>&1; then
             echo "Resource release already exists; immutable assets cannot be replaced" >&2
             exit 1

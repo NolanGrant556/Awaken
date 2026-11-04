@@ -38,7 +38,8 @@
     "test:composer-layout": "node --test scripts/tests/composer-layout.test.mjs",
     "test:scripts": "node --test scripts/tests/*.test.mjs",
     "test:python": "python3 -B -m unittest discover -s scripts/tests -p '*_test.py'",
-    "smoke:packaged-desktop": "node scripts/smoke-packaged-desktop.mjs"
+    "smoke:packaged-desktop": "node scripts/smoke-packaged-desktop.mjs",
+    "smoke:installed-update": "node scripts/release/smoke-installed-update.mjs"
   },
   "devDependencies": {
     "@electron/asar": "^4.3.0",

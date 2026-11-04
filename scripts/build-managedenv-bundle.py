@@ -166,7 +166,7 @@ def main():
             for path in sorted(root.iterdir()):
                 bundle.add(path, arcname=path.name, recursive=True)
         digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-        asset = {"url": f"https://github.com/NolanGrant556/Awaken-Releases/releases/download/{args.release}/{name}", "sha256": digest, "format": "tar.gz", "executables": executables, "max_bytes": archive.stat().st_size}
+        asset = {"url": f"https://github.com/NolanGrant556/Awaken/releases/download/{args.release}/{name}", "sha256": digest, "format": "tar.gz", "executables": executables, "max_bytes": archive.stat().st_size}
         if resources: asset["resources"] = resources
         entry = {**provenance, "asset": asset, "probe": args.probe, "probe_args": args.probe_arg or ["--version"]}
         (output / f"{name}.json").write_text(json.dumps(entry, indent=2) + "\n")

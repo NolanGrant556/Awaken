@@ -122,9 +122,28 @@ describe("GitHub CI", () => {
     );
   });
 
-  it("still blocks the signed release workflow until the installed-app upgrade smoke exists", () => {
-    const smoke = runs(release.jobs["upgrade-smoke"]);
-    assert.match(smoke, /Refusing to publish/);
-    assert.match(smoke, /exit 1/);
+  it("runs the installed-app upgrade smoke before the signed release is published", () => {
+    const smoke = release.jobs["upgrade-smoke"];
+    assert.deepEqual(release.jobs.publish.needs, [
+      "prepare",
+      "create-draft",
+      "upload-draft-assets",
+      "upgrade-smoke",
+    ]);
+    const script = runs(smoke);
+    assert.match(script, /smoke-installed-update\.mjs/);
+    assert.match(script, /--dir assembled/);
+    assert.doesNotMatch(script, /Refusing to publish/);
+    assert.equal(release.env.RELEASES_REPO, "NolanGrant556/Awaken");
+    assert.equal(release.jobs["create-draft"].permissions.contents, "write");
+    assert.equal(release.jobs["upload-draft-assets"].permissions.contents, "write");
+    assert.equal(release.jobs.publish.permissions.contents, "write");
+    const releaseText = JSON.stringify(release);
+    assert.doesNotMatch(releaseText, /AWAKEN_RELEASES_TOKEN|Awaken-Releases/);
+    assert.match(releaseText, /github\.token/);
+    assert.equal(
+      smoke.steps.some((step) => step.uses === "actions/checkout@v4"),
+      true,
+    );
   });
 });

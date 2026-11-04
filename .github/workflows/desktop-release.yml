@@ -11,9 +11,9 @@
 # public. Published assets are never overwritten — fixes ship as a higher
 # version.
 #
-# Secrets (never echoed; keep out of logs and product resources):
-#   AWAKEN_RELEASES_TOKEN     fine-grained token, Contents: write on
-#                             NolanGrant556/Awaken-Releases only
+# The stable Release is created on this repository with the workflow
+# GITHUB_TOKEN. ci-* prereleases stay prerelease and do not carry latest*.yml.
+# Signing secrets (never echoed; keep out of logs and product resources):
 #   APPLE_API_KEY_P8_BASE64   base64 of the App Store Connect .p8 key
 #   APPLE_API_KEY_ID / APPLE_API_ISSUER
 #   AWAKEN_CODESIGN_IDENTITY  e.g. "Developer ID Application: Name (TEAMID)"
@@ -41,7 +41,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  RELEASES_REPO: NolanGrant556/Awaken-Releases
+  RELEASES_REPO: NolanGrant556/Awaken
 
 jobs:
   prepare:
@@ -141,6 +141,8 @@ jobs:
   create-draft:
     needs: prepare
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     outputs:
       release_id: ${{ steps.draft.outputs.release_id }}
       upload_url: ${{ steps.draft.outputs.upload_url }}
@@ -148,7 +150,7 @@ jobs:
       - name: Create or reuse the draft release
         id: draft
         env:
-          GH_TOKEN: ${{ secrets.AWAKEN_RELEASES_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.prepare.outputs.tag }}
           SHA: ${{ needs.prepare.outputs.sha }}
         run: |
@@ -172,6 +174,7 @@ jobs:
           else
             ID="$(gh api "repos/$RELEASES_REPO/releases" -X POST \
               -f tag_name="$TAG" -f name="Awaken $TAG" \
+              -f target_commitish="$SHA" \
               -F draft=true -F prerelease=false \
               -f body="Awaken Desktop $TAG"$'\n\n'"<!-- $MARKER -->" \
               --jq .id)"
@@ -398,6 +401,8 @@ jobs:
   upload-draft-assets:
     needs: [prepare, create-draft, assemble]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -406,7 +411,7 @@ jobs:
 
       - name: Upload the whitelist to the draft release
         env:
-          GH_TOKEN: ${{ secrets.AWAKEN_RELEASES_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           RELEASE_ID: ${{ needs.create-draft.outputs.release_id }}
         run: |
           set -euo pipefail
@@ -428,7 +433,7 @@ jobs:
 
       - name: Re-read the asset list and sample re-download for hash equality
         env:
-          GH_TOKEN: ${{ secrets.AWAKEN_RELEASES_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           RELEASE_ID: ${{ needs.create-draft.outputs.release_id }}
         run: |
           set -euo pipefail
@@ -455,23 +460,63 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-14, windows-latest]
+        include:
+          - os: macos-14
+            platform: darwin
+          - os: windows-latest
+            platform: win32
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     steps:
-      - name: Block publish until the real installed-app upgrade smoke is implemented
-        run: |
-          echo "Refusing to publish: the previous-version installed-app upgrade smoke is not implemented." >&2
-          echo "Required evidence: discover -> download -> defer -> quitAndInstall -> target-version boot on macOS and Windows." >&2
-          exit 1
+      - name: Checkout the release commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Download the assembled release
+        uses: actions/download-artifact@v4
+        with:
+          name: assembled-artifacts
+          path: assembled
+
+      - name: Upgrade an installed copy to the candidate
+        env:
+          AWAKEN_CODESIGN_IDENTITY: ${{ secrets.AWAKEN_CODESIGN_IDENTITY }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: >
+          node scripts/release/smoke-installed-update.mjs
+          --dir assembled
+          --version ${{ needs.prepare.outputs.version }}
+          --platform ${{ matrix.platform }}
+          --receipt upgrade-smoke-receipt.json
+
+      - name: Keep the upgrade receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: upgrade-smoke-${{ matrix.platform }}
+          path: upgrade-smoke-receipt.json
+          if-no-files-found: ignore
+          retention-days: 90
 
   publish:
     needs: [prepare, create-draft, upload-draft-assets, upgrade-smoke]
     runs-on: ubuntu-latest
     environment: release
+    permissions:
+      contents: write
     steps:
       - name: Promote the draft to a public stable release (single API call)
         env:
-          GH_TOKEN: ${{ secrets.AWAKEN_RELEASES_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           RELEASE_ID: ${{ needs.create-draft.outputs.release_id }}
         run: |
           set -euo pipefail

@@ -407,7 +407,7 @@ describe("release config contract", () => {
     assert.deepEqual(config.publish, {
       provider: "github",
       owner: "NolanGrant556",
-      repo: "Awaken-Releases",
+      repo: "Awaken",
       releaseType: "release",
     });
     assert.equal(config.electronUpdaterCompatibility, ">=2.16");
@@ -495,7 +495,7 @@ describe("release config contract", () => {
     assert.equal(lock.packages["node_modules/electron-updater"].version, "6.8.9");
   });
 
-  it("release workflow pins the commit output, uses immutable receipt names and blocks fake smoke", () => {
+  it("release workflow pins the commit output, uses immutable receipt names and the installed-app upgrade smoke", () => {
     const workflow = parseYaml(
       readFileSync(join(repoRoot, ".github", "workflows", "desktop-release.yml"), "utf8"),
     );
@@ -513,8 +513,9 @@ describe("release config contract", () => {
     }
     assert.equal(new Set(receiptNames).size, receiptNames.length);
     const smokeScript = workflow.jobs["upgrade-smoke"].steps.map((step) => step.run ?? "").join("\n");
-    assert.match(smokeScript, /Refusing to publish/);
-    assert.match(smokeScript, /exit 1/);
+    assert.match(smokeScript, /smoke-installed-update\.mjs/);
+    assert.match(smokeScript, /--version/);
+    assert.doesNotMatch(smokeScript, /Refusing to publish/);
     assert.doesNotMatch(smokeScript, /smoke driver placeholder/);
   });
 });

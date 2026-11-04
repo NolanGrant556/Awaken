@@ -139,6 +139,11 @@ import {
 } from "../shared/desktop-update.js";
 import { DesktopShutdownCoordinator } from "./desktop-shutdown-coordinator.js";
 import { DesktopUpdateManager } from "./desktop-update-manager.js";
+import {
+  isUpdateSmokeRequested,
+  runPackagedUpdateSmoke,
+  UPDATE_SMOKE_INSTALL_FLAG,
+} from "./desktop-update-smoke.js";
 import { EMBEDDED_BROWSER_CHANNELS } from "../shared/embedded-browser.js";
 import { EmbeddedBrowserHost } from "./embedded-browser/host.js";
 import { registerEmbeddedBrowserIpc, registerEmbeddedBrowserReloadHandler } from "./embedded-browser/ipc.js";
@@ -1419,6 +1424,8 @@ function registerDesktopUpdateIpcHandlers(): void {
 
 /** Renderer ready 后延迟首次检查；之后每 6 小时最多自动检查一次（manager 内部节流）。 */
 function scheduleDesktopUpdateChecks(): void {
+  // 安装版升级 smoke 自己驱动 check/download/install，不能再插入 20 秒后的启动检查。
+  if (isUpdateSmokeRequested(process.argv)) return;
   if (!desktopUpdateManager || updateStartupCheckTimer || updateIntervalTimer) {
     return;
   }
@@ -2648,6 +2655,36 @@ app.whenReady().then(async () => {
     }
   });
   memoryDreamSchedulerTimer = setInterval(() => void runAutomaticDreamIfEligible(), 60_000);
+
+  if (isUpdateSmokeRequested(process.argv) && desktopUpdateManager) {
+    const updateSmokeManager = desktopUpdateManager;
+    for (const stream of [process.stdout, process.stderr]) {
+      (stream as { _handle?: { setBlocking?: (blocking: boolean) => void } })._handle?.setBlocking?.(true);
+    }
+    process.stdout.write(`desktop_update_smoke_version ${app.getVersion()}\n`);
+    void (async () => {
+      let feedText = "";
+      try {
+        feedText = await fs.readFile(join(process.resourcesPath, "app-update.yml"), "utf8");
+      } catch {
+        feedText = "";
+      }
+      const result = await runPackagedUpdateSmoke({
+        feedText,
+        install: process.argv.includes(UPDATE_SMOKE_INSTALL_FLAG),
+        log: (line) => process.stdout.write(`${line}\n`),
+        controller: {
+          check: () => updateSmokeManager.check("retry"),
+          download: () => updateSmokeManager.download(),
+          restartAndInstall: () => updateSmokeManager.restartAndInstall(),
+        },
+      });
+      if (result === "failed") app.exit(1);
+    })().catch((error: unknown) => {
+      console.error("desktop_update_smoke_failed unexpected", error instanceof Error ? error.message : "unknown error");
+      app.exit(1);
+    });
+  }
 
   app.on("activate", () => {
     networkRouteManager?.notifySystemChange("app-activate");

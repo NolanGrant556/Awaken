@@ -30,7 +30,7 @@ func TestNativeArchivePreparation(t *testing.T) {
 	}
 	for name, component := range catalog.Components {
 		asset, ok := component.Assets[Target()]
-		if ok && strings.Contains(asset.URL, "/Awaken-Releases/") {
+		if ok && strings.Contains(asset.URL, "github.com/NolanGrant556/Awaken/releases/download/") {
 			asset.URL = "file://" + filepath.ToSlash(filepath.Join(assets, filepath.Base(asset.URL)))
 			component.Assets[Target()] = asset
 			catalog.Components[name] = component

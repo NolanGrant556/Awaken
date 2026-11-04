@@ -281,7 +281,7 @@
       ],
       "assets": {
         "darwin-arm64": {
-          "url": "https://github.com/NolanGrant556/Awaken-Releases/releases/download/deps-2026.09.15.1/libreoffice-26.2.2.2-darwin-arm64.tar.gz",
+          "url": "https://github.com/NolanGrant556/Awaken/releases/download/deps-2026.09.15.1/libreoffice-26.2.2.2-darwin-arm64.tar.gz",
           "sha256": "9338d12d82c024906f6f5999cf83324bf7437324326835caf7af5fea158c20cd",
           "format": "tar.gz",
           "executables": {
@@ -290,7 +290,7 @@
           "max_bytes": 288287446
         },
         "darwin-x64": {
-          "url": "https://github.com/NolanGrant556/Awaken-Releases/releases/download/deps-2026.09.15.1/libreoffice-26.2.2.2-darwin-x64.tar.gz",
+          "url": "https://github.com/NolanGrant556/Awaken/releases/download/deps-2026.09.15.1/libreoffice-26.2.2.2-darwin-x64.tar.gz",
           "sha256": "cf0f0b281d0668e960366385cc8b1e21e4ee5141216e0f205a4e7e529de2d411",
           "format": "tar.gz",
           "executables": {
@@ -299,7 +299,7 @@
           "max_bytes": 298531789
         },
         "windows-x64": {
-          "url": "https://github.com/NolanGrant556/Awaken-Releases/releases/download/deps-2026.09.15.1/libreoffice-26.2.2.2-windows-x64.tar.gz",
+          "url": "https://github.com/NolanGrant556/Awaken/releases/download/deps-2026.09.15.1/libreoffice-26.2.2.2-windows-x64.tar.gz",
           "sha256": "1fdd20631bb5e33698fb3ae2049e832fb7b9dfe485083f5ec34a586d8bf0c9e0",
           "format": "tar.gz",
           "executables": {
@@ -321,7 +321,7 @@
       ],
       "assets": {
         "darwin-arm64": {
-          "url": "https://github.com/NolanGrant556/Awaken-Releases/releases/download/deps-2026.09.15.1/poppler-26.09.0-darwin-arm64.tar.gz",
+          "url": "https://github.com/NolanGrant556/Awaken/releases/download/deps-2026.09.15.1/poppler-26.09.0-darwin-arm64.tar.gz",
           "sha256": "b30642d05a1fe1e65e3b3e0042f9326aeb3d2abb77cfde81f67151963eac552c",
           "format": "tar.gz",
           "executables": {
@@ -332,7 +332,7 @@
           "max_bytes": 57512626
         },
         "darwin-x64": {
-          "url": "https://github.com/NolanGrant556/Awaken-Releases/releases/download/deps-2026.09.15.1/poppler-26.09.0-darwin-x64.tar.gz",
+          "url": "https://github.com/NolanGrant556/Awaken/releases/download/deps-2026.09.15.1/poppler-26.09.0-darwin-x64.tar.gz",
           "sha256": "d53d4ac097e3d50240cec1b1e64aa6e9ff9eeec9e1693f715a472cfa71ac2c38",
           "format": "tar.gz",
           "executables": {
@@ -343,7 +343,7 @@
           "max_bytes": 59185943
         },
         "windows-x64": {
-          "url": "https://github.com/NolanGrant556/Awaken-Releases/releases/download/deps-2026.09.15.1/poppler-26.09.0-windows-x64.tar.gz",
+          "url": "https://github.com/NolanGrant556/Awaken/releases/download/deps-2026.09.15.1/poppler-26.09.0-windows-x64.tar.gz",
           "sha256": "4288a243f1c3d0d942341c0ed11490af373e1e1776dd060cdb5346c4c98f0943",
           "format": "tar.gz",
           "executables": {
@@ -376,7 +376,7 @@
           "max_bytes": 38989688
         },
         "darwin-arm64": {
-          "url": "https://github.com/NolanGrant556/Awaken-Releases/releases/download/deps-2026.09.15.1/git-2.55.0-darwin-arm64.tar.gz",
+          "url": "https://github.com/NolanGrant556/Awaken/releases/download/deps-2026.09.15.1/git-2.55.0-darwin-arm64.tar.gz",
           "sha256": "2c416d729269c67f2ddca8ac62a904e5cc33a1f375e82092116d191b9ac68f86",
           "format": "tar.gz",
           "executables": {
@@ -386,7 +386,7 @@
           "max_bytes": 300446578
         },
         "darwin-x64": {
-          "url": "https://github.com/NolanGrant556/Awaken-Releases/releases/download/deps-2026.09.15.1/git-2.55.0-darwin-x64.tar.gz",
+          "url": "https://github.com/NolanGrant556/Awaken/releases/download/deps-2026.09.15.1/git-2.55.0-darwin-x64.tar.gz",
           "sha256": "7fca49ebd58b34ceee2ed49a89921343c203c9c890d7a025b735e24bc09c1f43",
           "format": "tar.gz",
           "executables": {
@@ -408,7 +408,7 @@
       ],
       "assets": {
         "darwin-arm64": {
-          "url": "https://github.com/NolanGrant556/Awaken-Releases/releases/download/deps-2026.09.15.1/ffmpeg-9.0.1-darwin-arm64.tar.gz",
+          "url": "https://github.com/NolanGrant556/Awaken/releases/download/deps-2026.09.15.1/ffmpeg-9.0.1-darwin-arm64.tar.gz",
           "sha256": "f177faf1baa69fa3a4965ba14cad95df0a9a464582760d6bb632714e78774f33",
           "format": "tar.gz",
           "executables": {
@@ -418,7 +418,7 @@
           "max_bytes": 121393373
         },
         "darwin-x64": {
-          "url": "https://github.com/NolanGrant556/Awaken-Releases/releases/download/deps-2026.09.15.1/ffmpeg-9.0.1-darwin-x64.tar.gz",
+          "url": "https://github.com/NolanGrant556/Awaken/releases/download/deps-2026.09.15.1/ffmpeg-9.0.1-darwin-x64.tar.gz",
           "sha256": "6a10235edd42ee50c23e272eade7e225f310daca5a99cd501658e1ddb03af6a0",
           "format": "tar.gz",
           "executables": {
@@ -428,7 +428,7 @@
           "max_bytes": 94916167
         },
         "windows-x64": {
-          "url": "https://github.com/NolanGrant556/Awaken-Releases/releases/download/deps-2026.09.15.1/ffmpeg-9.0.1-windows-x64.tar.gz",
+          "url": "https://github.com/NolanGrant556/Awaken/releases/download/deps-2026.09.15.1/ffmpeg-9.0.1-windows-x64.tar.gz",
           "sha256": "3558a808fee9aecea238b3b80d70cee35c8ab5e0050ada5c44b9fd3f52072a9d",
           "format": "tar.gz",
           "executables": {
@@ -450,7 +450,7 @@
       ],
       "assets": {
         "darwin-arm64": {
-          "url": "https://github.com/NolanGrant556/Awaken-Releases/releases/download/deps-2026.09.15.1/tesseract-5.5.3-darwin-arm64.tar.gz",
+          "url": "https://github.com/NolanGrant556/Awaken/releases/download/deps-2026.09.15.1/tesseract-5.5.3-darwin-arm64.tar.gz",
           "sha256": "515a69fd291f52c54989030c8f6470be8cbfdd2bc6f4168166c72b166aa07af5",
           "format": "tar.gz",
           "executables": {
@@ -465,7 +465,7 @@
           }
         },
         "darwin-x64": {
-          "url": "https://github.com/NolanGrant556/Awaken-Releases/releases/download/deps-2026.09.15.1/tesseract-5.5.3-darwin-x64.tar.gz",
+          "url": "https://github.com/NolanGrant556/Awaken/releases/download/deps-2026.09.15.1/tesseract-5.5.3-darwin-x64.tar.gz",
           "sha256": "000c3ec64e2098da84faa7f64dd9872eaf3941822596d32f54c1a256525b86c6",
           "format": "tar.gz",
           "executables": {
@@ -480,7 +480,7 @@
           }
         },
         "windows-x64": {
-          "url": "https://github.com/NolanGrant556/Awaken-Releases/releases/download/deps-2026.09.15.1/tesseract-5.5.3-windows-x64.tar.gz",
+          "url": "https://github.com/NolanGrant556/Awaken/releases/download/deps-2026.09.15.1/tesseract-5.5.3-windows-x64.tar.gz",
           "sha256": "e280aa9544af91a675ffe7c00d75ddbad88e247ee0b215e5d83ed8612ea69c03",
           "format": "tar.gz",
           "executables": {

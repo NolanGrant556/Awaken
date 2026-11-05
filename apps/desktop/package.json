@@ -2,7 +2,7 @@
   "name": "@awaken/desktop",
   "license": "MIT",
   "productName": "Awaken",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "type": "module",
   "main": "dist/main/index.js",

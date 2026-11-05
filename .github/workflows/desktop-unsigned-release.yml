@@ -19,7 +19,7 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 75
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
@@ -36,10 +36,16 @@ jobs:
           set -euo pipefail
           [[ "$RUN_ID" =~ ^[0-9]+$ ]]
           gh api "repos/$GH_REPO/actions/runs/$RUN_ID" > run.json
+          gh api --paginate --slurp "repos/$GH_REPO/actions/runs/$RUN_ID/jobs?filter=all&per_page=100" > jobs.json
           node --input-type=module <<'JS'
           import fs from 'node:fs';
           const run = JSON.parse(fs.readFileSync('run.json', 'utf8'));
-          if (run.conclusion !== 'success' || run.head_branch !== 'main' || run.path !== '.github/workflows/ci.yml' || !/^[a-f0-9]{40}$/.test(run.head_sha)) throw new Error('requires successful main CI');
+          if ((run.conclusion !== 'success' && run.status !== 'in_progress') || run.head_branch !== 'main' || run.path !== '.github/workflows/ci.yml' || !/^[a-f0-9]{40}$/.test(run.head_sha)) throw new Error('requires a verified main CI build');
+          const jobs = JSON.parse(fs.readFileSync('jobs.json', 'utf8')).flatMap(page => page.jobs);
+          for (const name of ['Unit tests', 'Package macOS', 'Package Windows', 'Functional acceptance (macos-latest)', 'Functional acceptance (windows-latest)']) {
+            const job = jobs.filter(job => job.name === name).sort((a,b) => b.id-a.id)[0];
+            if (job?.conclusion !== 'success') throw new Error('build gate not passed: ' + name);
+          }
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `sha=${run.head_sha}\n`);
           JS
           sha=$(node -p "JSON.parse(require('fs').readFileSync('run.json')).head_sha")
@@ -106,6 +112,14 @@ jobs:
           const actual = JSON.parse(fs.readFileSync('uploaded-assets.json', 'utf8')).assets;
           if (actual.length !== expected.length || expected.some(file => !actual.some(asset => asset.name === file.name && asset.size === file.size && asset.state === 'uploaded' && asset.digest === `sha256:${file.sha256}`))) throw new Error('uploaded assets differ from CI files');
           JS
+          # Artifact transfer may overlap CI's separate prerelease upload.
+          # Never make this release public before the whole source run succeeds.
+          for attempt in $(seq 1 60); do
+            state=$(gh api "repos/$GH_REPO/actions/runs/$RUN_ID" --jq .status)
+            if [[ "$state" == completed ]]; then break; fi
+            sleep 30
+          done
+          [[ "$(gh api "repos/$GH_REPO/actions/runs/$RUN_ID" --jq .conclusion)" == success ]] || { echo 'source CI did not succeed; keeping draft' >&2; exit 1; }
           gh release edit "$tag" --draft=false --prerelease=false --latest
       - name: Preserve publish receipts
         if: always()
@@ -114,6 +128,7 @@ jobs:
           name: unsigned-release-evidence
           path: |
             run.json
+            jobs.json
             unsigned-assets-receipt.json
             uploaded-assets.json
           if-no-files-found: warn

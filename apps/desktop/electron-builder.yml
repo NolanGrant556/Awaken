@@ -2,8 +2,8 @@ appId: com.awaken.desktop
 productName: Awaken
 electronUpdaterCompatibility: ">=2.16"
 extraMetadata:
-  # Local and ad-hoc packages remain update-disabled. dist:release is the
-  # only script allowed to override this marker to "stable".
+  # Local packages remain update-disabled. dist:adhoc explicitly opts into
+  # "unsigned"; only dist:release overrides this marker to "stable".
   awakenUpdateChannel: disabled
 # electron-builder resolves hook paths starting with "." against process.cwd();
 # all dist scripts run electron-builder with cwd = apps/desktop, and the npm

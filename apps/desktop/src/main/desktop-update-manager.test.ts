@@ -397,6 +397,16 @@ describe("DesktopUpdateManager 重启安装", () => {
     await ctx.manager.download();
   }
 
+  it("异步安装器启动失败仍返回错误状态，不产生未处理的 rejection", async () => {
+    const ctx = createManager();
+    ctx.manager.initialize();
+    await reachDownloaded(ctx);
+    ctx.updater.quitAndInstall.mockImplementationOnce(async () => { throw new Error("installer launch rejected"); });
+    expect(await ctx.manager.restartAndInstall()).toMatchObject({
+      phase: "downloaded", errorCode: "install_launch_failed",
+    });
+  });
+
   it("非 downloaded 状态拒绝安装", async () => {
     const ctx = createManager();
     ctx.manager.initialize();

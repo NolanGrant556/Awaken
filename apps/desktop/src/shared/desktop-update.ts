@@ -147,6 +147,13 @@ export function isStableDesktopUpdateIdentity(input: {
   );
 }
 
+/** Explicit unsigned build marker; never activates an existing disabled build. */
+export function isUnsignedDesktopUpdateIdentity(
+  input: Parameters<typeof isStableDesktopUpdateIdentity>[0],
+): boolean {
+  return input.channel === "unsigned" && isStableDesktopUpdateIdentity({ ...input, channel: "stable" });
+}
+
 export type DesktopUpdateReceiptVerdict = "keep" | "discard";
 
 /**

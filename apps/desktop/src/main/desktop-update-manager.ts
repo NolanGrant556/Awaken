@@ -56,7 +56,7 @@ export type DesktopUpdaterLike = {
   removeListener(event: string, listener: UpdaterListener): unknown;
   checkForUpdates(): Promise<unknown>;
   downloadUpdate(): Promise<unknown>;
-  quitAndInstall(isSilent?: boolean, isForceRunAfter?: boolean): void;
+  quitAndInstall(isSilent?: boolean, isForceRunAfter?: boolean): void | Promise<void>;
 };
 
 export type DesktopUpdateCheckReason =
@@ -319,7 +319,7 @@ export class DesktopUpdateManager {
         target_version: this.snapshot.availableVersion,
       });
       // 清理成功后只能交给安装器；该路径不得被普通 app.exit() 截断。
-      this.updater.quitAndInstall(false, true);
+      await this.updater.quitAndInstall(false, true);
     } catch (error) {
       this.failInstall(
         classifyDesktopUpdateError("install", error),

@@ -14,7 +14,7 @@
 
 .aw-task-welcome__logo {
   display: block;
-  width: 220px;
+  width: 440px;
   max-width: 62%;
   height: auto;
   filter: var(--aw-brand-wordmark-filter, none);
@@ -35,7 +35,7 @@
 
 @media (max-width: 720px) {
   .aw-task-welcome__logo {
-    width: 200px;
+    width: 400px;
   }
 
   .aw-task-welcome__message {

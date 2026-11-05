@@ -135,10 +135,13 @@ import {
   DESKTOP_UPDATE_CHANNELS,
   disabledDesktopUpdateSnapshot,
   isStableDesktopUpdateIdentity,
+  isUnsignedDesktopUpdateIdentity,
   type DesktopRuntimeActivity,
 } from "../shared/desktop-update.js";
 import { DesktopShutdownCoordinator } from "./desktop-shutdown-coordinator.js";
 import { DesktopUpdateManager } from "./desktop-update-manager.js";
+import { UnsignedDesktopUpdater } from "./unsigned-desktop-updater.js";
+import { UnsignedUpdateInstaller } from "./unsigned-update-installer.js";
 import {
   isUpdateSmokeRequested,
   runPackagedUpdateSmoke,
@@ -2411,17 +2414,24 @@ app.whenReady().then(async () => {
     finalizeOwners: finalizeShutdownOwners,
   });
   const desktopUpdateBuildChannel = await readDesktopUpdateBuildChannel();
+  const updateIdentity = {
+    packaged: app.isPackaged, devServer: isDevServer, channel: desktopUpdateBuildChannel,
+    version: app.getVersion(), platform: process.platform, arch: process.arch,
+  };
+  const unsignedUpdates = isUnsignedDesktopUpdateIdentity(updateIdentity);
+  const unsignedCacheRoot = join(app.getPath("userData"), "unsigned-updates");
+  const unsignedInstaller = new UnsignedUpdateInstaller({
+    platform: process.platform, arch: process.arch, appPath: app.getAppPath(), cacheRoot: unsignedCacheRoot,
+    quit: () => app.quit(), openInstaller: (file) => shell.openPath(file),
+  });
   desktopUpdateManager = new DesktopUpdateManager({
-    updater: autoUpdater,
-    // 只有安装版稳定身份启用更新器；Awaken Dev、Gallery、ad-hoc 包不访问 GitHub。
-    enabled: isStableDesktopUpdateIdentity({
-      packaged: app.isPackaged,
-      devServer: isDevServer,
-      channel: desktopUpdateBuildChannel,
-      version: app.getVersion(),
-      platform: process.platform,
-      arch: process.arch,
-    }),
+    updater: unsignedUpdates ? new UnsignedDesktopUpdater({
+      currentVersion: app.getVersion(), target: `${process.platform}-${process.arch}` as "darwin-arm64" | "darwin-x64" | "win32-x64",
+      cacheRoot: unsignedCacheRoot, fetch: (url, init) => net.fetch(url, init),
+      prepare: (file, version) => unsignedInstaller.prepare(file, version),
+      install: () => unsignedInstaller.install(),
+    }) : autoUpdater,
+    enabled: unsignedUpdates || isStableDesktopUpdateIdentity(updateIdentity),
     currentVersion: app.getVersion(),
     platform: process.platform,
     arch: process.arch,

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { unsignedReleaseFiles, verifyUnsignedAssets } from "../release/verify-unsigned-assets.mjs";
+import { unsignedReleaseFiles, verifyUnsignedAssets, verifyPreparedUpdateReceipt } from "../release/verify-unsigned-assets.mjs";
 
 test("unsigned release requires both architectures and generates the runtime checksum format", async () => {
   const dir = mkdtempSync(join(tmpdir(), "awaken-unsigned-release-"));
@@ -12,6 +12,14 @@ test("unsigned release requires both architectures and generates the runtime che
     await assert.rejects(verifyUnsignedAssets(dir, "0.1.2"));
     for (const file of unsignedReleaseFiles("0.1.2")) writeFileSync(join(dir, file), file);
     const receipt = await verifyUnsignedAssets(dir, "0.1.2");
+    const prepared = { version: receipt.version, results: ["arm64", "x64"].map(arch => {
+      const file = receipt.files.find(file => file.name === `Awaken-${receipt.version}-${arch}.zip`);
+      return { arch, file: file.name, sha256: file.sha256, prepared: true };
+    }) };
+    verifyPreparedUpdateReceipt(prepared, receipt);
+    assert.throws(() => verifyPreparedUpdateReceipt({ ...prepared, version: "0.1.1" }, receipt));
+    assert.throws(() => verifyPreparedUpdateReceipt({ ...prepared, results: [prepared.results[0]] }, receipt));
+    assert.throws(() => verifyPreparedUpdateReceipt({ ...prepared, results: [{ ...prepared.results[0], sha256: "bad" }, prepared.results[1]] }, receipt));
     assert.equal(receipt.files.length, 5);
     const lines = readFileSync(join(dir, "SHA256SUMS.txt"), "utf8").trim().split("\n");
     assert.equal(lines.length, 5);

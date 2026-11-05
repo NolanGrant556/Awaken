@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
-import { createReadStream, lstatSync, writeFileSync } from "node:fs";
+import { createReadStream, lstatSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -26,10 +26,24 @@ export async function verifyUnsignedAssets(dir, version) {
   return { version, files };
 }
 
+export function verifyPreparedUpdateReceipt(receipt, assets) {
+  if (receipt?.version !== assets.version || !Array.isArray(receipt.results) || receipt.results.length !== 2) {
+    throw new Error("actual ZIP preparation receipt missing or wrong version");
+  }
+  for (const arch of ["arm64", "x64"]) {
+    const matches = receipt.results.filter(result => result.arch === arch);
+    const expected = assets.files.find(file => file.name === `Awaken-${assets.version}-${arch}.zip`);
+    if (matches.length !== 1 || matches[0].prepared !== true || matches[0].file !== expected?.name || matches[0].sha256 !== expected?.sha256) {
+      throw new Error(`actual ZIP preparation does not match uploaded ${arch} artifact`);
+    }
+  }
+}
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const [dir, version, receipt] = process.argv.slice(2);
+  const [dir, version, receipt, preparedReceipt] = process.argv.slice(2);
   if (!dir || !version || !receipt) throw new Error("usage: verify-unsigned-assets.mjs DIR VERSION RECEIPT");
   const result = await verifyUnsignedAssets(dir, version);
+  if (preparedReceipt) verifyPreparedUpdateReceipt(JSON.parse(readFileSync(preparedReceipt, "utf8")), result);
   writeFileSync(receipt, JSON.stringify(result, null, 2) + "\n");
   console.log(`无签名通道发布资产检查通过：${result.files.length} 个安装/更新文件`);
 }

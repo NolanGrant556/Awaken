@@ -64,6 +64,12 @@ jobs:
           run-id: ${{ inputs.run_id }}
           name: windows-unsigned-package
           path: release-assets
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.run_id }}
+          name: macos-package-evidence
+          path: package-evidence
       - name: Verify and publish the exact CI installers
         env:
           VERSION: ${{ steps.build.outputs.version }}
@@ -71,7 +77,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node scripts/release/verify-unsigned-assets.mjs release-assets "$VERSION" unsigned-assets-receipt.json
+          node scripts/release/verify-unsigned-assets.mjs release-assets "$VERSION" unsigned-assets-receipt.json package-evidence/unsigned-update-prepare.json
           tag="v$VERSION"
           if existing_sha=$(gh api "repos/$GH_REPO/git/ref/tags/$tag" --jq .object.sha 2>/dev/null); then
             [[ "$existing_sha" == "$BUILD_SHA" ]] || { echo 'refuse to move an existing tag' >&2; exit 1; }

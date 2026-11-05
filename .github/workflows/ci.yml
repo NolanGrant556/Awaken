@@ -207,6 +207,9 @@ jobs:
             --dir apps/desktop/dist-electron \
             --receipt smoke-evidence/audit-receipt-macos.json
 
+      - name: Preflight unsigned update ZIP installation
+        run: node scripts/release/smoke-unsigned-update-prepare.mjs apps/desktop/dist-electron smoke-evidence/unsigned-update-prepare.json
+
       - name: Smoke packaged desktop startup
         timeout-minutes: 10
         run: npm run smoke:packaged-desktop -- --dir apps/desktop/dist-electron --log smoke-evidence/packaged-desktop.log

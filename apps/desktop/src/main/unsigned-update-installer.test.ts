@@ -4,9 +4,12 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { MAC_UNSIGNED_INSTALL_SCRIPT, validateArchiveEntries } from "./unsigned-update-installer.js";
+import { MAC_UNSIGNED_INSTALL_SCRIPT, validateArchiveEntries, verifyMacArchitecture } from "./unsigned-update-installer.js";
 
 describe("unsigned installer", () => {
+  it.skipIf(process.platform !== "darwin")("verifies a real Mach-O executable with the platform lipo parser", async () => {
+    await verifyMacArchitecture(process.execPath, process.arch);
+  });
   it("rejects absolute and traversal paths before extraction", () => {
     validateArchiveEntries("Awaken.app/\nAwaken.app/Contents/Info.plist\n");
     for (const name of ["/tmp/file", "Awaken.app/../../other", "Other.app/Contents/x", "Awaken.app/..\\x", ""]) {

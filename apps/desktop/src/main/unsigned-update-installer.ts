@@ -8,6 +8,10 @@ import { sha256File } from "./unsigned-desktop-updater.js";
 
 const exec = promisify(execFile);
 
+export async function verifyMacArchitecture(binary: string, arch: string): Promise<void> {
+  await exec("/usr/bin/lipo", [binary, "-verify_arch", arch === "arm64" ? "arm64" : "x86_64"]);
+}
+
 // Arguments are passed separately, never interpolated into executable text.
 // Stage beside the installed app so both renames remain on the same volume.
 export const MAC_UNSIGNED_INSTALL_SCRIPT = `#!/bin/bash
@@ -133,7 +137,7 @@ export class UnsignedUpdateInstaller {
       if (await read("CFBundleIdentifier") !== "com.awaken.desktop" || await read("CFBundleShortVersionString") !== version) {
         throw new Error("update metadata bundle identity or version mismatch");
       }
-      await exec("/usr/bin/lipo", ["-verify_arch", this.options.arch === "arm64" ? "arm64" : "x86_64", join(stage, "Contents", "MacOS", "Awaken")]);
+      await verifyMacArchitecture(join(stage, "Contents", "MacOS", "Awaken"), this.options.arch);
       await exec("/usr/bin/codesign", ["--verify", "--deep", "--strict", stage]);
       this.prepared = { file, digest: await sha256File(file), stage, target, work };
     } catch (error) { await fs.rm(work, { recursive: true, force: true }); throw error; }

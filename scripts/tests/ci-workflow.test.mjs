@@ -93,6 +93,7 @@ describe("GitHub CI", () => {
       assert.equal(ci.jobs[name].env.CSC_IDENTITY_AUTO_DISCOVERY, "false");
     }
     assert.match(runs(ci.jobs["package-macos"]), /codesign --verify --deep --strict/);
+    assert.match(runs(ci.jobs["package-macos"]), /smoke-unsigned-update-prepare\.mjs/);
     assert.equal(ci.jobs["package-macos"]["runs-on"], "macos-latest");
     assert.equal(ci.jobs["package-windows"]["runs-on"], "windows-latest");
     assert.match(desktopPackage.scripts["dist:adhoc"], /--publish never/);

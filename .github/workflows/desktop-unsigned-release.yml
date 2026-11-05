@@ -1,0 +1,114 @@
+name: desktop-unsigned-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Successful main CI run containing the unsigned installers"
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: desktop-unsigned-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RUN_ID: ${{ inputs.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Resolve a successful CI build
+        id: build
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RUN_ID" =~ ^[0-9]+$ ]]
+          gh api "repos/$GH_REPO/actions/runs/$RUN_ID" > run.json
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          const run = JSON.parse(fs.readFileSync('run.json', 'utf8'));
+          if (run.conclusion !== 'success' || run.head_branch !== 'main' || run.path !== '.github/workflows/ci.yml' || !/^[a-f0-9]{40}$/.test(run.head_sha)) throw new Error('requires successful main CI');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `sha=${run.head_sha}\n`);
+          JS
+          sha=$(node -p "JSON.parse(require('fs').readFileSync('run.json')).head_sha")
+          gh api "repos/$GH_REPO/contents/apps/desktop/package.json?ref=$sha" --jq .content | base64 --decode > candidate-package.json
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          import { unsignedReleaseFiles } from './scripts/release/verify-unsigned-assets.mjs';
+          const { version, scripts } = JSON.parse(fs.readFileSync('candidate-package.json', 'utf8'));
+          unsignedReleaseFiles(version);
+          if (!scripts['dist:adhoc'].includes('-c.extraMetadata.awakenUpdateChannel=unsigned')) throw new Error('build does not opt into unsigned updates');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\n`);
+          JS
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.run_id }}
+          name: macos-adhoc-package
+          path: release-assets
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.run_id }}
+          name: windows-unsigned-package
+          path: release-assets
+      - name: Verify and publish the exact CI installers
+        env:
+          VERSION: ${{ steps.build.outputs.version }}
+          BUILD_SHA: ${{ steps.build.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/release/verify-unsigned-assets.mjs release-assets "$VERSION" unsigned-assets-receipt.json
+          tag="v$VERSION"
+          if existing_sha=$(gh api "repos/$GH_REPO/git/ref/tags/$tag" --jq .object.sha 2>/dev/null); then
+            [[ "$existing_sha" == "$BUILD_SHA" ]] || { echo 'refuse to move an existing tag' >&2; exit 1; }
+          fi
+          if gh release view "$tag" --json isDraft,targetCommitish > existing-release.json 2>/dev/null; then
+            node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          const release = JSON.parse(fs.readFileSync('existing-release.json', 'utf8'));
+          if (!release.isDraft || release.targetCommitish !== process.env.BUILD_SHA) throw new Error('refuse to overwrite a published or different build');
+          JS
+          else
+            printf 'Awaken %s\n\n首页字标放大一倍，并支持客户端版本更新。\n\n首次启用更新需手动安装本版本，后续更新通过左侧栏提示。\n' "$VERSION" > release-notes.md
+            gh release create "$tag" --target "$BUILD_SHA" --draft --title "Awaken $VERSION" --notes-file release-notes.md
+          fi
+          mapfile -t names < <(node -p "JSON.parse(require('fs').readFileSync('unsigned-assets-receipt.json')).files.map(f=>f.name).join('\n')")
+          files=()
+          for name in "${names[@]}"; do files+=("release-assets/$name"); done
+          gh release upload "$tag" "${files[@]}" release-assets/SHA256SUMS.txt --clobber
+          gh release view "$tag" --json assets > uploaded-assets.json
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          import { createHash } from 'node:crypto';
+          const expected = JSON.parse(fs.readFileSync('unsigned-assets-receipt.json', 'utf8')).files;
+          const checksums = fs.readFileSync('release-assets/SHA256SUMS.txt');
+          expected.push({ name: 'SHA256SUMS.txt', size: checksums.length, sha256: createHash('sha256').update(checksums).digest('hex') });
+          const actual = JSON.parse(fs.readFileSync('uploaded-assets.json', 'utf8')).assets;
+          if (actual.length !== expected.length || expected.some(file => !actual.some(asset => asset.name === file.name && asset.size === file.size && asset.state === 'uploaded' && asset.digest === `sha256:${file.sha256}`))) throw new Error('uploaded assets differ from CI files');
+          JS
+          gh release edit "$tag" --draft=false --prerelease=false --latest
+      - name: Preserve publish receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-release-evidence
+          path: |
+            run.json
+            unsigned-assets-receipt.json
+            uploaded-assets.json
+          if-no-files-found: warn
+          retention-days: 90

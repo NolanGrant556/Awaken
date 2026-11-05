@@ -78,6 +78,7 @@ describe("RunStage layout", () => {
     expect(cssRule(workbenchStyles, ".run-stage-center-composer")).toContain(
       "gap: 16px;",
     );
+    expect(cssRule(workbenchStyles, ".desktop-task-welcome")).toContain("width: 100%;");
     expect(cssRule(designSystemStyles, ".aw-task-welcome")).toContain(
       "gap: 14px;",
     );

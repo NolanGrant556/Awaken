@@ -926,7 +926,7 @@
   background: var(--aw-success-soft-bg);
 }
 
-.desktop-task-welcome { position: relative; }
+.desktop-task-welcome { position: relative; width: 100%; }
 .desktop-startup-status {
   color: var(--aw-text-primary);
   font-size: var(--aw-font-size-xs);

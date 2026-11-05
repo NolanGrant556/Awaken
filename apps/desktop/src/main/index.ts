@@ -142,6 +142,7 @@ import { DesktopShutdownCoordinator } from "./desktop-shutdown-coordinator.js";
 import { DesktopUpdateManager } from "./desktop-update-manager.js";
 import { UnsignedDesktopUpdater } from "./unsigned-desktop-updater.js";
 import { UnsignedUpdateInstaller } from "./unsigned-update-installer.js";
+import { electronUpdateFetch } from "./electron-update-fetch.js";
 import {
   isUpdateSmokeRequested,
   runPackagedUpdateSmoke,
@@ -2427,7 +2428,7 @@ app.whenReady().then(async () => {
   desktopUpdateManager = new DesktopUpdateManager({
     updater: unsignedUpdates ? new UnsignedDesktopUpdater({
       currentVersion: app.getVersion(), target: `${process.platform}-${process.arch}` as "darwin-arm64" | "darwin-x64" | "win32-x64",
-      cacheRoot: unsignedCacheRoot, fetch: (url, init) => net.fetch(url, init),
+      cacheRoot: unsignedCacheRoot, fetch: (url, init) => electronUpdateFetch(options => net.request(options), url, init),
       prepare: (file, version) => unsignedInstaller.prepare(file, version),
       install: () => unsignedInstaller.install(),
     }) : autoUpdater,

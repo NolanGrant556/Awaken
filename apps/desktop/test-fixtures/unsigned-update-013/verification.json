@@ -1,0 +1,56 @@
+{
+  "platform": "macOS arm64",
+  "release": "https://github.com/NolanGrant556/Awaken/releases/tag/v0.1.3",
+  "sourceCommit": "d6c1d4bdffdb5b24ae15b5181fef72b762e55205",
+  "ciRun": 42030078678,
+  "releaseWorkflowRun": 42035632420,
+  "baseline": {
+    "fixtureVersion": "0.1.1",
+    "fixtureKind": "isolated application copy with repaired unsigned update modules, not the released 0.1.1 client",
+    "targetVersion": "0.1.3",
+    "projectName": "升级数据保留验收",
+    "sentinelBeforeSha256": "dc66d196fe3adb7b752c946cfdafc597117b96e780f8326c96bebc9d545286e4",
+    "projectRecordBefore": [
+      {
+        "project_id": "project_1793883125395221000_1",
+        "display_name": "升级数据保留验收"
+      }
+    ]
+  },
+  "observed": [
+    "update available: 0.1.3",
+    "download progress",
+    "downloaded and restart available",
+    "Later preserves restart entry",
+    "Restart installs and starts published app",
+    "native About: 0.1.3 (0.1.3)",
+    "enlarged homepage wordmark",
+    "test project retained"
+  ],
+  "installedVersion": "0.1.3",
+  "download": {
+    "name": "Awaken-0.1.3-arm64.zip",
+    "bytes": 282673107,
+    "sha256": "4d12421afc9ed850f137347f46867e6f7b84bcdf1c86909f1ddafabc1d20eb8d"
+  },
+  "projectRecordRetained": true,
+  "sentinelSha256Unchanged": true,
+  "installerResult": "install_succeeded",
+  "screenshots": [
+    "before-update.png",
+    "version-before.png",
+    "update-available.png",
+    "downloading.png",
+    "downloaded.png",
+    "restart-confirmation.png",
+    "after-update.png",
+    "version-after.png"
+  ],
+  "scopeLimits": [
+    "Baseline is an isolated 0.1.1 copy with repaired Main/shared update modules; original released 0.1.1 cannot update.",
+    "Original 0.1.1 and 0.1.2 require manual installation of 0.1.3 once.",
+    "macOS x64 ZIP preparation passed; no x64 real-machine upgrade.",
+    "Windows build/start checks passed; no real-machine install/upgrade.",
+    "Signed stable channel not accepted by this test."
+  ]
+}
